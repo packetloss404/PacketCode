@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0d1117;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+  }
+
+  /* Allow text selection in message content */
+  .selectable {
+    user-select: text;
+  }
+
+  /* Resize handle styling */
+  [data-panel-group-direction="horizontal"] > [data-resize-handle] {
+    width: 3px;
+    background: #21262d;
+    transition: background 150ms ease;
+  }
+
+  [data-panel-group-direction="horizontal"] > [data-resize-handle]:hover,
+  [data-panel-group-direction="horizontal"] > [data-resize-handle][data-resize-handle-active] {
+    background: #00ff41;
+  }
+}
+
+/* Markdown content styling */
+.markdown-content {
+  @apply text-text-primary text-sm leading-relaxed;
+}
+
+.markdown-content p {
+  @apply mb-2;
+}
+
+.markdown-content code {
+  @apply bg-bg-elevated px-1.5 py-0.5 rounded text-accent-amber text-xs font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-bg-primary border border-bg-border rounded-md p-3 mb-3 overflow-x-auto;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent p-0 text-text-primary;
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+  @apply text-text-primary font-semibold mt-4 mb-2;
+}
+
+.markdown-content h1 { @apply text-lg; }
+.markdown-content h2 { @apply text-base; }
+.markdown-content h3 { @apply text-sm; }
+
+.markdown-content ul, .markdown-content ol {
+  @apply pl-5 mb-2;
+}
+
+.markdown-content li {
+  @apply mb-1;
+}
+
+.markdown-content a {
+  @apply text-accent-blue underline;
+}
+
+.markdown-content blockquote {
+  @apply border-l-2 border-bg-border pl-3 text-text-secondary italic;
+}
+
+.markdown-content table {
+  @apply w-full border-collapse mb-3;
+}
+
+.markdown-content th, .markdown-content td {
+  @apply border border-bg-border px-3 py-1.5 text-left text-xs;
+}
+
+.markdown-content th {
+  @apply bg-bg-elevated text-text-primary font-semibold;
+}
