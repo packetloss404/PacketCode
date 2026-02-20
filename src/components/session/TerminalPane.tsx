@@ -13,6 +13,9 @@ interface TerminalPaneProps {
   paneId: string;
   onClose?: () => void;
   showCloseButton?: boolean;
+  cliCommand?: string;
+  cliArgs?: string[];
+  initialPrompt?: string;
 }
 
 interface PtyOutput {
@@ -26,6 +29,9 @@ export function TerminalPane({
   paneId,
   onClose,
   showCloseButton = false,
+  cliCommand = "claude",
+  cliArgs,
+  initialPrompt,
 }: TerminalPaneProps) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -197,6 +203,8 @@ export function TerminalPane({
         projectPath,
         cols,
         rows,
+        command: cliCommand,
+        args: cliArgs || null,
       });
 
       sessionIdRef.current = sessionId;
@@ -237,17 +245,25 @@ export function TerminalPane({
       });
 
       unlistenersRef.current = [outputUnlisten, exitUnlisten];
+
+      // If there's an initial prompt, send it after the CLI starts
+      if (initialPrompt) {
+        setTimeout(() => {
+          invoke("write_pty", { sessionId, data: initialPrompt + "\n" }).catch(() => {});
+        }, 1200);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
-      term.write(`\x1b[31mFailed to start Claude: ${msg}\x1b[0m\r\n`);
+      const label = cliCommand.charAt(0).toUpperCase() + cliCommand.slice(1);
+      term.write(`\x1b[31mFailed to start ${label}: ${msg}\x1b[0m\r\n`);
       term.write(
-        `\x1b[90mMake sure 'claude' is installed and on your PATH.\x1b[0m\r\n`
+        `\x1b[90mMake sure '${cliCommand}' is installed and on your PATH.\x1b[0m\r\n`
       );
       useTabStore.getState().updateTabStatus(tabId, "error");
       stopDurationTimer();
     }
-  }, [projectPath, startDurationTimer, stopDurationTimer]);
+  }, [projectPath, cliCommand, cliArgs, initialPrompt, startDurationTimer, stopDurationTimer]);
 
   // Auto-start session on mount
   useEffect(() => {
@@ -257,6 +273,34 @@ export function TerminalPane({
     }, 200);
     return () => clearTimeout(timer);
   }, [startSession]);
+
+  // Listen for issue prompt events (from "Work on this issue" button)
+  useEffect(() => {
+    function handleIssuePrompt(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.prompt) return;
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+
+      // Write the prompt to the PTY session
+      const prompt = detail.prompt as string;
+      invoke("write_pty", { sessionId: sid, data: prompt + "\n" }).catch(() => {});
+
+      // Link the issue to this tab
+      if (detail.issueId) {
+        const tid = tabIdRef.current;
+        if (tid) {
+          useTabStore.getState().setTabTicket(tid, detail.issueId);
+        }
+      }
+
+      // Remove the listener after handling — only the latest pane should handle it
+      window.removeEventListener("packetcode:issue-prompt", handleIssuePrompt);
+    }
+
+    window.addEventListener("packetcode:issue-prompt", handleIssuePrompt);
+    return () => window.removeEventListener("packetcode:issue-prompt", handleIssuePrompt);
+  }, []);
 
   // Clean up listeners and timer on unmount
   useEffect(() => {
@@ -329,14 +373,14 @@ export function TerminalPane({
                   : "bg-text-muted"
             }`}
           />
-          <span className="text-text-secondary text-xs">Claude</span>
+          <span className="text-text-secondary text-xs">{cliCommand.charAt(0).toUpperCase() + cliCommand.slice(1)}</span>
         </div>
         <div className="flex items-center gap-1">
           {!alive && (
             <button
               onClick={handleRestart}
               className="p-1 text-text-muted hover:text-accent-green transition-colors"
-              title="New Claude session"
+              title={`New ${cliCommand.charAt(0).toUpperCase() + cliCommand.slice(1)} session`}
             >
               <Plus size={12} />
             </button>

@@ -58,6 +58,8 @@ pub fn create_pty_session(
     project_path: String,
     cols: u16,
     rows: u16,
+    command: String,
+    args: Option<Vec<String>>,
 ) -> Result<String, String> {
     let session_id = Uuid::new_v4().to_string();
 
@@ -72,19 +74,28 @@ pub fn create_pty_session(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    // Build the command: just launch `claude` interactively
-    let mut cmd = CommandBuilder::new("claude");
+    // Build the command: launch the specified CLI interactively
+    let mut cmd = CommandBuilder::new(&command);
     cmd.cwd(&project_path);
 
+    // Append any extra arguments (e.g. --model)
+    if let Some(extra_args) = &args {
+        for arg in extra_args {
+            cmd.arg(arg);
+        }
+    }
+
     // Clear env vars that make Claude think it's inside another session
-    cmd.env_remove("CLAUDECODE");
-    cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+    if command == "claude" {
+        cmd.env_remove("CLAUDECODE");
+        cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+    }
 
     // Spawn the child process in the PTY
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn claude in PTY: {}. Is claude installed?", e))?;
+        .map_err(|e| format!("Failed to spawn {} in PTY: {}. Is {} installed?", command, e, command))?;
 
     let pid = child.process_id();
 

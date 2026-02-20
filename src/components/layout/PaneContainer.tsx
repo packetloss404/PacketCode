@@ -2,15 +2,29 @@ import { useMemo } from "react";
 import { TerminalPane } from "@/components/session/TerminalPane";
 import { SessionTabBar } from "@/components/layout/SessionTabBar";
 import { useLayoutStore } from "@/stores/layoutStore";
+import type { PaneConfig } from "@/types/layout";
+
+interface PaneContainerProps {
+  cliCommand?: string;
+  paneSource?: "claude" | "codex";
+}
 
 /**
  * Flexible grid layout for terminal panes.
  * Sessions auto-arrange: 1 = full, 2 = side-by-side, 3 = row,
  * 4+ = wrapping grid. Closing a pane makes others expand to fill space.
  */
-export function PaneContainer() {
-  const panes = useLayoutStore((s) => s.panes);
+export function PaneContainer({
+  cliCommand = "claude",
+  paneSource = "claude",
+}: PaneContainerProps) {
+  const claudePanes = useLayoutStore((s) => s.panes);
+  const codexPanes = useLayoutStore((s) => s.codexPanes);
   const removePane = useLayoutStore((s) => s.removePane);
+  const removeCodexPane = useLayoutStore((s) => s.removeCodexPane);
+
+  const panes: PaneConfig[] = paneSource === "codex" ? codexPanes : claudePanes;
+  const removeFn = paneSource === "codex" ? removeCodexPane : removePane;
 
   // Calculate grid columns based on pane count
   const gridStyle = useMemo(() => {
@@ -42,7 +56,7 @@ export function PaneContainer() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Session tab bar */}
-      <SessionTabBar />
+      <SessionTabBar cliType={paneSource} />
 
       {/* Grid of panes */}
       <div
@@ -53,8 +67,11 @@ export function PaneContainer() {
           <div key={pane.id} className="min-h-0 min-w-0 overflow-hidden">
             <TerminalPane
               paneId={pane.id}
-              onClose={() => removePane(pane.id)}
+              onClose={() => removeFn(pane.id)}
               showCloseButton={panes.length > 1}
+              cliCommand={cliCommand}
+              cliArgs={pane.cliArgs}
+              initialPrompt={pane.initialPrompt}
             />
           </div>
         ))}

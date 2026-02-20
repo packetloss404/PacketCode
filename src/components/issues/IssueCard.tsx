@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, Link } from "lucide-react";
+import { Trash2, Link, CheckSquare } from "lucide-react";
 import { useIssueStore, type Issue } from "@/stores/issueStore";
 
 // Consistent label colors based on label name
@@ -23,19 +23,23 @@ function getLabelColor(label: string): { bg: string; text: string } {
 interface IssueCardProps {
   issue: Issue;
   onDragStart: (e: React.DragEvent) => void;
+  onClick: () => void;
 }
 
-export function IssueCard({ issue, onDragStart }: IssueCardProps) {
+export function IssueCard({ issue, onDragStart, onClick }: IssueCardProps) {
   const deleteIssue = useIssueStore((s) => s.deleteIssue);
-  const [expanded, setExpanded] = useState(false);
 
   const timeAgo = getTimeAgo(issue.updatedAt);
+  const checkedCount = issue.acceptanceCriteria.filter((c) => c.checked).length;
+  const totalCriteria = issue.acceptanceCriteria.length;
+  const depCount = issue.blockedBy.length + issue.blocks.length;
 
   return (
     <div
       draggable
       onDragStart={onDragStart}
-      className="group bg-bg-primary border border-bg-border rounded-md p-2.5 cursor-grab active:cursor-grabbing hover:border-text-muted/30 transition-colors"
+      onClick={onClick}
+      className="group bg-bg-primary border border-bg-border rounded-md p-2.5 cursor-pointer hover:border-text-muted/30 transition-colors"
     >
       {/* Header row: ticket ID + priority */}
       <div className="flex items-center justify-between gap-1 mb-1">
@@ -47,7 +51,10 @@ export function IssueCard({ issue, onDragStart }: IssueCardProps) {
         </div>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
           <button
-            onClick={() => deleteIssue(issue.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteIssue(issue.id);
+            }}
             className="p-0.5 text-text-muted hover:text-accent-red transition-colors"
             title="Delete"
           >
@@ -57,23 +64,13 @@ export function IssueCard({ issue, onDragStart }: IssueCardProps) {
       </div>
 
       {/* Title */}
-      <p
-        className="text-xs text-text-primary leading-snug cursor-pointer mb-1"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <p className={`text-xs text-text-primary leading-snug mb-1 ${issue.status === "done" ? "line-through opacity-60" : ""}`}>
         {issue.title}
       </p>
 
       {/* Description preview */}
-      {issue.description && !expanded && (
+      {issue.description && (
         <p className="text-[10px] text-text-muted leading-relaxed truncate mb-1.5">
-          {issue.description}
-        </p>
-      )}
-
-      {/* Expanded description */}
-      {expanded && issue.description && (
-        <p className="text-[11px] text-text-secondary leading-relaxed border-t border-bg-border pt-2 mb-1.5">
           {issue.description}
         </p>
       )}
@@ -100,13 +97,24 @@ export function IssueCard({ issue, onDragStart }: IssueCardProps) {
         </div>
       )}
 
-      {/* Footer: session link + time ago */}
-      <div className="flex items-center justify-between mt-1.5">
-        <div>
+      {/* Footer: criteria progress + deps + session link + time ago */}
+      <div className="flex items-center justify-between mt-1.5 gap-2">
+        <div className="flex items-center gap-2">
           {issue.sessionId && (
             <span className="flex items-center gap-0.5 text-[9px] text-accent-blue">
               <Link size={8} />
               linked
+            </span>
+          )}
+          {totalCriteria > 0 && (
+            <span className="flex items-center gap-0.5 text-[9px] text-text-muted">
+              <CheckSquare size={8} />
+              {checkedCount}/{totalCriteria}
+            </span>
+          )}
+          {depCount > 0 && (
+            <span className="text-[9px] text-text-muted">
+              {depCount} dep{depCount !== 1 ? "s" : ""}
             </span>
           )}
         </div>

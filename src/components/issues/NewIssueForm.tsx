@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Plus, Trash2 } from "lucide-react";
 import {
   useIssueStore,
   type IssueStatus,
@@ -15,6 +15,9 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   const addIssue = useIssueStore((s) => s.addIssue);
   const labels = useIssueStore((s) => s.labels);
   const epics = useIssueStore((s) => s.epics);
+  const issues = useIssueStore((s) => s.issues);
+  const addBlockedBy = useIssueStore((s) => s.addBlockedBy);
+  const addBlocks = useIssueStore((s) => s.addBlocks);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -23,11 +26,19 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [epic, setEpic] = useState<string>("");
 
+  // Acceptance criteria
+  const [criteria, setCriteria] = useState<string[]>([]);
+  const [newCriterion, setNewCriterion] = useState("");
+
+  // Dependencies
+  const [blockedByIds, setBlockedByIds] = useState<string[]>([]);
+  const [blocksIds, setBlocksIds] = useState<string[]>([]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
 
-    addIssue({
+    const newIssue = addIssue({
       title: title.trim(),
       description: description.trim(),
       status,
@@ -35,7 +46,22 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
       labels: selectedLabels,
       epic: epic || null,
       sessionId: null,
+      acceptanceCriteria: criteria.map((text) => ({
+        id: `ac_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        text,
+        checked: false,
+      })),
+      blockedBy: [],
+      blocks: [],
     });
+
+    // Set up dependencies after creation
+    for (const id of blockedByIds) {
+      addBlockedBy(newIssue.id, id);
+    }
+    for (const id of blocksIds) {
+      addBlocks(newIssue.id, id);
+    }
 
     onClose();
   }
@@ -46,11 +72,21 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
     );
   }
 
+  function handleAddCriterion() {
+    if (!newCriterion.trim()) return;
+    setCriteria((prev) => [...prev, newCriterion.trim()]);
+    setNewCriterion("");
+  }
+
+  function removeCriterion(index: number) {
+    setCriteria((prev) => prev.filter((_, i) => i !== index));
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <form
         onSubmit={handleSubmit}
-        className="bg-bg-secondary border border-bg-border rounded-lg w-[420px] max-h-[80vh] overflow-y-auto"
+        className="bg-bg-secondary border border-bg-border rounded-lg w-[480px] max-h-[85vh] overflow-y-auto"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border">
@@ -172,6 +208,142 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
                     {e}
                   </option>
                 ))}
+              </select>
+            </div>
+          )}
+
+          {/* Acceptance Criteria */}
+          <div>
+            <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wider">
+              Acceptance Criteria
+            </label>
+            {criteria.length > 0 && (
+              <div className="flex flex-col gap-1 mb-1.5">
+                {criteria.map((text, idx) => (
+                  <div key={idx} className="flex items-center gap-2 group">
+                    <span className="text-[11px] text-text-secondary flex-1">{text}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeCriterion(idx)}
+                      className="p-0.5 text-text-muted hover:text-accent-red opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newCriterion}
+                onChange={(e) => setNewCriterion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddCriterion();
+                  }
+                }}
+                placeholder="Add criterion..."
+                className="flex-1 bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-green"
+              />
+              <button
+                type="button"
+                onClick={handleAddCriterion}
+                disabled={!newCriterion.trim()}
+                className="p-1 text-text-muted hover:text-accent-green transition-colors disabled:opacity-30"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
+          </div>
+
+          {/* Blocked By */}
+          {issues.length > 0 && (
+            <div>
+              <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wider">
+                Blocked By
+              </label>
+              {blockedByIds.length > 0 && (
+                <div className="flex flex-col gap-1 mb-1.5">
+                  {blockedByIds.map((id) => {
+                    const dep = issues.find((i) => i.id === id);
+                    if (!dep) return null;
+                    return (
+                      <div key={id} className="flex items-center gap-2 group">
+                        <span className="text-[11px] text-text-secondary">{dep.ticketId}: {dep.title}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBlockedByIds((prev) => prev.filter((x) => x !== id))}
+                          className="p-0.5 text-text-muted hover:text-accent-red opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <select
+                className="w-full bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && !blockedByIds.includes(e.target.value)) {
+                    setBlockedByIds((prev) => [...prev, e.target.value]);
+                  }
+                }}
+              >
+                <option value="">Add blocking issue...</option>
+                {issues
+                  .filter((i) => !blockedByIds.includes(i.id))
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>{i.ticketId}: {i.title}</option>
+                  ))}
+              </select>
+            </div>
+          )}
+
+          {/* Blocks */}
+          {issues.length > 0 && (
+            <div>
+              <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wider">
+                Blocks
+              </label>
+              {blocksIds.length > 0 && (
+                <div className="flex flex-col gap-1 mb-1.5">
+                  {blocksIds.map((id) => {
+                    const dep = issues.find((i) => i.id === id);
+                    if (!dep) return null;
+                    return (
+                      <div key={id} className="flex items-center gap-2 group">
+                        <span className="text-[11px] text-text-secondary">{dep.ticketId}: {dep.title}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBlocksIds((prev) => prev.filter((x) => x !== id))}
+                          className="p-0.5 text-text-muted hover:text-accent-red opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <select
+                className="w-full bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && !blocksIds.includes(e.target.value)) {
+                    setBlocksIds((prev) => [...prev, e.target.value]);
+                  }
+                }}
+              >
+                <option value="">Add blocked issue...</option>
+                {issues
+                  .filter((i) => !blocksIds.includes(i.id))
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>{i.ticketId}: {i.title}</option>
+                  ))}
               </select>
             </div>
           )}

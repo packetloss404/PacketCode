@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type AppView = "claude" | "issues" | "history" | "tools";
+export type AppView = "claude" | "codex" | "issues" | "history" | "tools";
 
 interface AppStore {
   activeView: AppView;

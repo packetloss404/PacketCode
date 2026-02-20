@@ -3,6 +3,12 @@ import { create } from "zustand";
 export type IssueStatus = "todo" | "in_progress" | "qa" | "done" | "blocked" | "needs_human";
 export type IssuePriority = "low" | "medium" | "high" | "critical";
 
+export interface AcceptanceCriterion {
+  id: string;
+  text: string;
+  checked: boolean;
+}
+
 export interface Issue {
   id: string;
   ticketId: string;
@@ -13,6 +19,9 @@ export interface Issue {
   labels: string[];
   epic: string | null;
   sessionId: string | null;
+  acceptanceCriteria: AcceptanceCriterion[];
+  blockedBy: string[]; // issue IDs
+  blocks: string[];    // issue IDs
   createdAt: number;
   updatedAt: number;
 }
@@ -43,10 +52,35 @@ interface IssueStore {
   setTicketPrefix: (prefix: string) => void;
   getIssuesByStatus: (status: IssueStatus) => Issue[];
   getColumns: () => typeof STATUS_COLUMNS;
+
+  // Acceptance criteria
+  toggleCriterion: (issueId: string, criterionId: string) => void;
+  addCriterion: (issueId: string, text: string) => void;
+  removeCriterion: (issueId: string, criterionId: string) => void;
+
+  // Dependencies
+  addBlockedBy: (issueId: string, blockerIssueId: string) => void;
+  removeBlockedBy: (issueId: string, blockerIssueId: string) => void;
+  addBlocks: (issueId: string, blockedIssueId: string) => void;
+  removeBlocks: (issueId: string, blockedIssueId: string) => void;
 }
 
 function generateId(): string {
   return `issue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateCriterionId(): string {
+  return `ac_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// Migrate old issues that lack new fields
+function migrateIssue(issue: Issue): Issue {
+  return {
+    ...issue,
+    acceptanceCriteria: issue.acceptanceCriteria || [],
+    blockedBy: issue.blockedBy || [],
+    blocks: issue.blocks || [],
+  };
 }
 
 // Load from localStorage
@@ -54,7 +88,11 @@ function loadState(): { issues: Issue[]; nextTicketNum: number; ticketPrefix: st
   try {
     const saved = localStorage.getItem("packetcode:issues");
     if (saved) {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      return {
+        ...parsed,
+        issues: (parsed.issues || []).map(migrateIssue),
+      };
     }
   } catch {}
   return {
@@ -111,7 +149,14 @@ export const useIssueStore = create<IssueStore>((set, get) => ({
 
   deleteIssue: (id) => {
     set((s) => {
-      const issues = s.issues.filter((i) => i.id !== id);
+      // Also remove this issue from any blockedBy/blocks arrays
+      const issues = s.issues
+        .filter((i) => i.id !== id)
+        .map((i) => ({
+          ...i,
+          blockedBy: i.blockedBy.filter((bid) => bid !== id),
+          blocks: i.blocks.filter((bid) => bid !== id),
+        }));
       saveState({ issues, nextTicketNum: s.nextTicketNum, ticketPrefix: s.ticketPrefix, epics: s.epics, labels: s.labels });
       return { issues };
     });
@@ -151,4 +196,80 @@ export const useIssueStore = create<IssueStore>((set, get) => ({
   getIssuesByStatus: (status) => get().issues.filter((i) => i.status === status),
 
   getColumns: () => STATUS_COLUMNS,
+
+  // Acceptance criteria
+  toggleCriterion: (issueId, criterionId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue) return;
+    const acceptanceCriteria = issue.acceptanceCriteria.map((c) =>
+      c.id === criterionId ? { ...c, checked: !c.checked } : c
+    );
+    get().updateIssue(issueId, { acceptanceCriteria });
+  },
+
+  addCriterion: (issueId, text) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue) return;
+    const newCriterion: AcceptanceCriterion = {
+      id: generateCriterionId(),
+      text,
+      checked: false,
+    };
+    get().updateIssue(issueId, {
+      acceptanceCriteria: [...issue.acceptanceCriteria, newCriterion],
+    });
+  },
+
+  removeCriterion: (issueId, criterionId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue) return;
+    get().updateIssue(issueId, {
+      acceptanceCriteria: issue.acceptanceCriteria.filter((c) => c.id !== criterionId),
+    });
+  },
+
+  // Dependencies
+  addBlockedBy: (issueId, blockerIssueId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue || issue.blockedBy.includes(blockerIssueId)) return;
+    get().updateIssue(issueId, { blockedBy: [...issue.blockedBy, blockerIssueId] });
+    // Also add the reverse relationship
+    const blocker = get().issues.find((i) => i.id === blockerIssueId);
+    if (blocker && !blocker.blocks.includes(issueId)) {
+      get().updateIssue(blockerIssueId, { blocks: [...blocker.blocks, issueId] });
+    }
+  },
+
+  removeBlockedBy: (issueId, blockerIssueId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue) return;
+    get().updateIssue(issueId, { blockedBy: issue.blockedBy.filter((id) => id !== blockerIssueId) });
+    // Also remove the reverse relationship
+    const blocker = get().issues.find((i) => i.id === blockerIssueId);
+    if (blocker) {
+      get().updateIssue(blockerIssueId, { blocks: blocker.blocks.filter((id) => id !== issueId) });
+    }
+  },
+
+  addBlocks: (issueId, blockedIssueId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue || issue.blocks.includes(blockedIssueId)) return;
+    get().updateIssue(issueId, { blocks: [...issue.blocks, blockedIssueId] });
+    // Also add the reverse relationship
+    const blocked = get().issues.find((i) => i.id === blockedIssueId);
+    if (blocked && !blocked.blockedBy.includes(issueId)) {
+      get().updateIssue(blockedIssueId, { blockedBy: [...blocked.blockedBy, issueId] });
+    }
+  },
+
+  removeBlocks: (issueId, blockedIssueId) => {
+    const issue = get().issues.find((i) => i.id === issueId);
+    if (!issue) return;
+    get().updateIssue(issueId, { blocks: issue.blocks.filter((id) => id !== blockedIssueId) });
+    // Also remove the reverse relationship
+    const blocked = get().issues.find((i) => i.id === blockedIssueId);
+    if (blocked) {
+      get().updateIssue(blockedIssueId, { blockedBy: blocked.blockedBy.filter((id) => id !== issueId) });
+    }
+  },
 }));

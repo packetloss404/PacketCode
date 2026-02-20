@@ -1,11 +1,17 @@
 import { Plus, X, Link } from "lucide-react";
 import { useTabStore, type SessionTab } from "@/stores/tabStore";
 
-export function SessionTabBar() {
+interface SessionTabBarProps {
+  cliType?: "claude" | "codex";
+}
+
+export function SessionTabBar({ cliType = "claude" }: SessionTabBarProps) {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const removeTab = useTabStore((s) => s.removeTab);
+
+  const eventName = cliType === "codex" ? "packetcode:new-codex-session" : "packetcode:new-session";
 
   return (
     <div className="flex items-center h-8 bg-bg-secondary border-b border-bg-border overflow-x-auto">
@@ -23,8 +29,7 @@ export function SessionTabBar() {
       </div>
       <button
         onClick={() => {
-          // Emit a custom event that PaneContainer will handle
-          window.dispatchEvent(new CustomEvent("packetcode:new-session"));
+          window.dispatchEvent(new CustomEvent(eventName));
         }}
         className="flex items-center justify-center w-7 h-7 ml-1 text-text-muted hover:text-accent-green hover:bg-bg-hover rounded transition-colors flex-shrink-0"
         title="New session"

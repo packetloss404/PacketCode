@@ -12,7 +12,9 @@ import { useAppStore } from "@/stores/appStore";
 
 export default function App() {
   const addPane = useLayoutStore((s) => s.addPane);
+  const addCodexPane = useLayoutStore((s) => s.addCodexPane);
   const panes = useLayoutStore((s) => s.panes);
+  const codexPanes = useLayoutStore((s) => s.codexPanes);
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
 
@@ -26,11 +28,23 @@ export default function App() {
         useLayoutStore.getState().addPane();
       }
     }
+    const savedCodex = localStorage.getItem("packetcode:codex-pane-count");
+    if (savedCodex) {
+      const count = parseInt(savedCodex, 10);
+      const current = useLayoutStore.getState().codexPanes.length;
+      for (let i = current; i < count; i++) {
+        useLayoutStore.getState().addCodexPane();
+      }
+    }
   }, []);
 
   useEffect(() => {
     localStorage.setItem("packetcode:pane-count", String(panes.length));
   }, [panes.length]);
+
+  useEffect(() => {
+    localStorage.setItem("packetcode:codex-pane-count", String(codexPanes.length));
+  }, [codexPanes.length]);
 
   // Persist project path
   useEffect(() => {
@@ -45,46 +59,74 @@ export default function App() {
     localStorage.setItem("packetcode:project-path", projectPath);
   }, [projectPath]);
 
-  // Listen for new session request from tab bar
+  // Listen for new session requests from tab bars
   useEffect(() => {
     function handleNewSession() {
-      // If we're not in claude view, switch to it
-      if (useAppStore.getState().activeView !== "claude") {
+      const view = useAppStore.getState().activeView;
+      if (view !== "claude" && view !== "codex") {
         useAppStore.getState().setActiveView("claude");
       }
-      // Add a new pane (which auto-starts a session)
-      useLayoutStore.getState().addPane();
+      if (view === "codex") {
+        useLayoutStore.getState().addCodexPane();
+      } else {
+        useLayoutStore.getState().addPane();
+      }
+    }
+
+    function handleNewCodexSession() {
+      if (useAppStore.getState().activeView !== "codex") {
+        useAppStore.getState().setActiveView("codex");
+      }
+      useLayoutStore.getState().addCodexPane();
     }
 
     window.addEventListener("packetcode:new-session", handleNewSession);
-    return () =>
+    window.addEventListener("packetcode:new-codex-session", handleNewCodexSession);
+    return () => {
       window.removeEventListener("packetcode:new-session", handleNewSession);
+      window.removeEventListener("packetcode:new-codex-session", handleNewCodexSession);
+    };
   }, []);
 
   // Global keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      // Ctrl+\ to split pane
+      // Ctrl+\ to split pane (in active CLI view)
       if (e.ctrlKey && e.key === "\\") {
         e.preventDefault();
-        addPane();
-      }
-      // Ctrl+1/2/3/4 to switch panes
-      if (e.ctrlKey && e.key >= "1" && e.key <= "4") {
-        e.preventDefault();
-        const currentPanes = useLayoutStore.getState().panes;
-        const idx = parseInt(e.key) - 1;
-        if (idx < currentPanes.length) {
-          useLayoutStore.getState().setActivePaneId(currentPanes[idx].id);
+        const view = useAppStore.getState().activeView;
+        if (view === "codex") {
+          addCodexPane();
+        } else {
+          addPane();
         }
       }
-      // Ctrl+Shift+1/2/3/4 to switch views
+      // Ctrl+1/2/3/4 to switch panes
+      if (e.ctrlKey && !e.shiftKey && e.key >= "1" && e.key <= "4") {
+        e.preventDefault();
+        const view = useAppStore.getState().activeView;
+        if (view === "codex") {
+          const currentPanes = useLayoutStore.getState().codexPanes;
+          const idx = parseInt(e.key) - 1;
+          if (idx < currentPanes.length) {
+            useLayoutStore.getState().setActiveCodexPaneId(currentPanes[idx].id);
+          }
+        } else {
+          const currentPanes = useLayoutStore.getState().panes;
+          const idx = parseInt(e.key) - 1;
+          if (idx < currentPanes.length) {
+            useLayoutStore.getState().setActivePaneId(currentPanes[idx].id);
+          }
+        }
+      }
+      // Ctrl+Shift+1/2/3/4/5 to switch views
       if (e.ctrlKey && e.shiftKey) {
         const viewMap: Record<string, typeof activeView> = {
           "!": "claude",    // Shift+1
-          "@": "issues",    // Shift+2
-          "#": "history",   // Shift+3
-          "$": "tools",     // Shift+4
+          "@": "codex",     // Shift+2
+          "#": "issues",    // Shift+3
+          "$": "history",   // Shift+4
+          "%": "tools",     // Shift+5
         };
         if (viewMap[e.key]) {
           e.preventDefault();
@@ -92,7 +134,7 @@ export default function App() {
         }
       }
     },
-    [addPane, setActiveView]
+    [addPane, addCodexPane, setActiveView]
   );
 
   useEffect(() => {
@@ -106,7 +148,21 @@ export default function App() {
         <TitleBar />
         <Toolbar />
         <ErrorBoundary fallbackMessage="View error">
-          <ViewContent activeView={activeView} />
+          {/* Claude and Codex PaneContainers always rendered, toggled via CSS */}
+          <div
+            className="flex flex-col flex-1 overflow-hidden"
+            style={{ display: activeView === "claude" ? "flex" : "none" }}
+          >
+            <PaneContainer cliCommand="claude" paneSource="claude" />
+          </div>
+          <div
+            className="flex flex-col flex-1 overflow-hidden"
+            style={{ display: activeView === "codex" ? "flex" : "none" }}
+          >
+            <PaneContainer cliCommand="codex" paneSource="codex" />
+          </div>
+          {/* Other views render conditionally */}
+          <OtherViewContent activeView={activeView} />
         </ErrorBoundary>
         <StatusBar />
       </div>
@@ -114,10 +170,8 @@ export default function App() {
   );
 }
 
-function ViewContent({ activeView }: { activeView: string }) {
+function OtherViewContent({ activeView }: { activeView: string }) {
   switch (activeView) {
-    case "claude":
-      return <PaneContainer />;
     case "issues":
       return <IssueBoard />;
     case "history":
@@ -125,6 +179,6 @@ function ViewContent({ activeView }: { activeView: string }) {
     case "tools":
       return <ToolsView />;
     default:
-      return <PaneContainer />;
+      return null;
   }
 }

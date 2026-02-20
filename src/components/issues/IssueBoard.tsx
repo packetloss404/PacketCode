@@ -1,13 +1,13 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, LayoutGrid, List, Eye, EyeOff } from "lucide-react";
+import { Plus, Search, Eye, EyeOff } from "lucide-react";
 import {
   useIssueStore,
   type Issue,
   type IssueStatus,
-  type IssuePriority,
 } from "@/stores/issueStore";
 import { IssueCard } from "./IssueCard";
 import { NewIssueForm } from "./NewIssueForm";
+import { IssueDetailView } from "./IssueDetailView";
 
 export function IssueBoard() {
   const issues = useIssueStore((s) => s.issues);
@@ -19,6 +19,7 @@ export function IssueBoard() {
   const [showNewIssue, setShowNewIssue] = useState(false);
   const [newIssueColumn, setNewIssueColumn] = useState<IssueStatus>("todo");
   const [dragOverColumn, setDragOverColumn] = useState<IssueStatus | null>(null);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -230,6 +231,7 @@ export function IssueBoard() {
                       key={issue.id}
                       issue={issue}
                       onDragStart={(e) => handleDragStart(e, issue.id)}
+                      onClick={() => setSelectedIssueId(issue.id)}
                     />
                   ))
                 )}
@@ -256,6 +258,14 @@ export function IssueBoard() {
         <NewIssueForm
           defaultStatus={newIssueColumn}
           onClose={() => setShowNewIssue(false)}
+        />
+      )}
+
+      {/* Issue detail view modal */}
+      {selectedIssueId && (
+        <IssueDetailView
+          issueId={selectedIssueId}
+          onClose={() => setSelectedIssueId(null)}
         />
       )}
     </div>

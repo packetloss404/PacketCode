@@ -30,6 +30,10 @@ pub fn run() {
             // Git
             commands::git::get_git_branch,
             commands::git::get_git_status,
+            // Code quality
+            commands::code_quality::analyze_code_quality,
+            // Filesystem
+            commands::fs::list_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
