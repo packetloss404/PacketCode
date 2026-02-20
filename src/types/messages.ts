@@ -1,35 +1,3 @@
-export interface RawClaudeMessage {
-  type: string;
-  subtype?: string;
-  message?: {
-    role?: string;
-    content?: ContentBlock[];
-    model?: string;
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_read_input_tokens?: number;
-      cache_creation_input_tokens?: number;
-    };
-  };
-  result?: string;
-  cost_usd?: number;
-  duration_ms?: number;
-  session_id?: string;
-  num_turns?: number;
-  [key: string]: unknown;
-}
-
-export interface ContentBlock {
-  type: string;
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-  content?: string | ContentBlock[];
-  partial_json?: string;
-}
-
 export type ParsedMessageType =
   | "text"
   | "tool_use"
@@ -50,7 +18,7 @@ export interface ParsedMessage {
   isStreaming?: boolean;
   costUsd?: number;
   sessionId?: string;
-  raw?: RawClaudeMessage;
+  raw?: Record<string, unknown>;
 }
 
 export interface SessionOutputEvent {

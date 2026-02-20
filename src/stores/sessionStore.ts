@@ -11,6 +11,7 @@ export interface SessionData {
   claudeSessionId: string | null;
   costUsd: number;
   numTurns: number;
+  error: string | null;
 }
 
 interface SessionStore {
@@ -26,12 +27,12 @@ interface SessionStore {
     sessionId: string,
     meta: Partial<Pick<SessionData, "claudeSessionId" | "costUsd" | "numTurns">>
   ) => void;
+  setError: (sessionId: string, error: string) => void;
   removeSession: (sessionId: string) => void;
-  clearMessages: (sessionId: string) => void;
-  getSession: (sessionId: string) => SessionData | undefined;
+  clearSession: (sessionId: string) => void;
 }
 
-export const useSessionStore = create<SessionStore>((set, get) => ({
+export const useSessionStore = create<SessionStore>((set) => ({
   sessions: new Map(),
 
   createSessionData: (id, projectPath, model) => {
@@ -46,6 +47,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         claudeSessionId: null,
         costUsd: 0,
         numTurns: 0,
+        error: null,
       });
       return { sessions };
     });
@@ -87,6 +89,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
+  setError: (sessionId, error) => {
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(sessionId);
+      if (session) {
+        sessions.set(sessionId, {
+          ...session,
+          error,
+          status: "error",
+        });
+      }
+      return { sessions };
+    });
+  },
+
   removeSession: (sessionId) => {
     set((state) => {
       const sessions = new Map(state.sessions);
@@ -95,18 +112,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  clearMessages: (sessionId) => {
+  clearSession: (sessionId) => {
     set((state) => {
       const sessions = new Map(state.sessions);
       const session = sessions.get(sessionId);
       if (session) {
-        sessions.set(sessionId, { ...session, messages: [] });
+        sessions.set(sessionId, {
+          ...session,
+          messages: [],
+          status: "idle",
+          error: null,
+          costUsd: 0,
+          numTurns: 0,
+          // Keep claudeSessionId for --resume
+        });
       }
       return { sessions };
     });
-  },
-
-  getSession: (sessionId) => {
-    return get().sessions.get(sessionId);
   },
 }));

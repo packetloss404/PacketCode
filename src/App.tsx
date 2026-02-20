@@ -3,12 +3,18 @@ import { TitleBar } from "@/components/layout/TitleBar";
 import { Toolbar } from "@/components/layout/Toolbar";
 import { PaneContainer } from "@/components/layout/PaneContainer";
 import { StatusBar } from "@/components/layout/StatusBar";
+import { IssueBoard } from "@/components/issues/IssueBoard";
+import { HistoryView } from "@/components/views/HistoryView";
+import { ToolsView } from "@/components/views/ToolsView";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useAppStore } from "@/stores/appStore";
 
 export default function App() {
   const addPane = useLayoutStore((s) => s.addPane);
   const panes = useLayoutStore((s) => s.panes);
+  const activeView = useAppStore((s) => s.activeView);
+  const setActiveView = useAppStore((s) => s.setActiveView);
 
   // Persist pane layout to localStorage
   useEffect(() => {
@@ -16,7 +22,7 @@ export default function App() {
     if (saved) {
       const count = parseInt(saved, 10);
       const current = useLayoutStore.getState().panes.length;
-      for (let i = current; i < count && i < 4; i++) {
+      for (let i = current; i < count; i++) {
         useLayoutStore.getState().addPane();
       }
     }
@@ -39,6 +45,22 @@ export default function App() {
     localStorage.setItem("packetcode:project-path", projectPath);
   }, [projectPath]);
 
+  // Listen for new session request from tab bar
+  useEffect(() => {
+    function handleNewSession() {
+      // If we're not in claude view, switch to it
+      if (useAppStore.getState().activeView !== "claude") {
+        useAppStore.getState().setActiveView("claude");
+      }
+      // Add a new pane (which auto-starts a session)
+      useLayoutStore.getState().addPane();
+    }
+
+    window.addEventListener("packetcode:new-session", handleNewSession);
+    return () =>
+      window.removeEventListener("packetcode:new-session", handleNewSession);
+  }, []);
+
   // Global keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -56,8 +78,21 @@ export default function App() {
           useLayoutStore.getState().setActivePaneId(currentPanes[idx].id);
         }
       }
+      // Ctrl+Shift+1/2/3/4 to switch views
+      if (e.ctrlKey && e.shiftKey) {
+        const viewMap: Record<string, typeof activeView> = {
+          "!": "claude",    // Shift+1
+          "@": "issues",    // Shift+2
+          "#": "history",   // Shift+3
+          "$": "tools",     // Shift+4
+        };
+        if (viewMap[e.key]) {
+          e.preventDefault();
+          setActiveView(viewMap[e.key]);
+        }
+      }
     },
-    [addPane]
+    [addPane, setActiveView]
   );
 
   useEffect(() => {
@@ -70,11 +105,26 @@ export default function App() {
       <div className="flex flex-col h-screen bg-bg-primary text-text-primary font-mono">
         <TitleBar />
         <Toolbar />
-        <ErrorBoundary fallbackMessage="Session pane error">
-          <PaneContainer />
+        <ErrorBoundary fallbackMessage="View error">
+          <ViewContent activeView={activeView} />
         </ErrorBoundary>
         <StatusBar />
       </div>
     </ErrorBoundary>
   );
+}
+
+function ViewContent({ activeView }: { activeView: string }) {
+  switch (activeView) {
+    case "claude":
+      return <PaneContainer />;
+    case "issues":
+      return <IssueBoard />;
+    case "history":
+      return <HistoryView />;
+    case "tools":
+      return <ToolsView />;
+    default:
+      return <PaneContainer />;
+  }
 }

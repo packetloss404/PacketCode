@@ -8,6 +8,8 @@ import {
   Globe,
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import type { ParsedMessage } from "@/types/messages";
 
@@ -25,36 +27,48 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   Glob: <FolderOpen size={14} />,
   WebSearch: <Globe size={14} />,
   WebFetch: <Globe size={14} />,
+  Task: <Terminal size={14} />,
 };
 
 function getToolIcon(toolName: string) {
   return TOOL_ICONS[toolName] || <Terminal size={14} />;
 }
 
-function getToolSummary(toolName: string, input?: Record<string, unknown>): string {
-  if (!input) return toolName;
+function getToolSummary(
+  toolName: string,
+  input?: Record<string, unknown>
+): string {
+  if (!input || Object.keys(input).length === 0) return "";
 
   switch (toolName) {
-    case "Bash":
-      return (input.command as string) || toolName;
+    case "Bash": {
+      const cmd = input.command as string;
+      return cmd
+        ? cmd.length > 80
+          ? cmd.slice(0, 80) + "..."
+          : cmd
+        : "";
+    }
     case "Read":
-      return (input.file_path as string) || toolName;
+      return (input.file_path as string) || "";
     case "Write":
-      return `Write → ${(input.file_path as string) || "file"}`;
+      return (input.file_path as string) || "";
     case "Edit":
-      return `Edit → ${(input.file_path as string) || "file"}`;
+      return (input.file_path as string) || "";
     case "Grep":
-      return `Grep: ${(input.pattern as string) || ""}`;
+      return (input.pattern as string) || "";
     case "Glob":
-      return `Glob: ${(input.pattern as string) || ""}`;
+      return (input.pattern as string) || "";
     default:
-      return toolName;
+      return "";
   }
 }
 
 export function ToolUseBlock({ message, result }: ToolUseBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const toolName = message.toolName || "Unknown";
+  const isStreaming = message.isStreaming && !result;
+  const summary = getToolSummary(toolName, message.toolInput);
 
   return (
     <div className="border border-bg-border rounded-md overflow-hidden my-1">
@@ -71,33 +85,41 @@ export function ToolUseBlock({ message, result }: ToolUseBlockProps) {
         <span className="text-accent-blue flex-shrink-0">
           {getToolIcon(toolName)}
         </span>
-        <span className="text-text-primary text-xs font-medium">
+        <span className="text-text-primary text-xs font-medium flex-shrink-0">
           {toolName}
         </span>
-        <span className="text-text-muted text-xs truncate flex-1">
-          {getToolSummary(toolName, message.toolInput)}
-        </span>
-        {message.isStreaming && (
-          <span className="text-accent-amber text-[10px] animate-pulse">
-            running...
+        {summary && (
+          <span className="text-text-muted text-xs truncate flex-1 font-mono">
+            {summary}
           </span>
         )}
+        <span className="flex-shrink-0 ml-auto">
+          {isStreaming ? (
+            <Loader2
+              size={12}
+              className="text-accent-amber animate-spin"
+            />
+          ) : result ? (
+            <CheckCircle2 size={12} className="text-accent-green" />
+          ) : null}
+        </span>
       </button>
 
       {/* Expanded content */}
       {expanded && (
         <div className="border-t border-bg-border">
           {/* Input */}
-          {message.toolInput && (
-            <div className="p-3 bg-bg-primary">
-              <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                Input
+          {message.toolInput &&
+            Object.keys(message.toolInput).length > 0 && (
+              <div className="p-3 bg-bg-primary">
+                <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+                  Input
+                </div>
+                <pre className="selectable text-xs text-text-primary overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                  {formatToolInput(toolName, message.toolInput)}
+                </pre>
               </div>
-              <pre className="selectable text-xs text-text-primary overflow-x-auto whitespace-pre-wrap break-all">
-                {JSON.stringify(message.toolInput, null, 2)}
-              </pre>
-            </div>
-          )}
+            )}
 
           {/* Result */}
           {result && (
@@ -114,4 +136,41 @@ export function ToolUseBlock({ message, result }: ToolUseBlockProps) {
       )}
     </div>
   );
+}
+
+function formatToolInput(
+  toolName: string,
+  input: Record<string, unknown>
+): string {
+  // For Bash, show just the command prominently
+  if (toolName === "Bash" && input.command) {
+    const parts: string[] = [input.command as string];
+    if (input.description) {
+      parts.push(`\n# ${input.description}`);
+    }
+    return parts.join("");
+  }
+
+  // For Read/Write/Edit, show file path + relevant content
+  if (
+    (toolName === "Read" || toolName === "Write" || toolName === "Edit") &&
+    input.file_path
+  ) {
+    const parts: string[] = [input.file_path as string];
+    if (input.old_string) {
+      parts.push(`\n--- old ---\n${input.old_string}`);
+    }
+    if (input.new_string) {
+      parts.push(`\n+++ new +++\n${input.new_string}`);
+    }
+    if (input.content && typeof input.content === "string") {
+      const content = input.content as string;
+      parts.push(
+        `\n${content.length > 500 ? content.slice(0, 500) + "\n...(truncated)" : content}`
+      );
+    }
+    return parts.join("");
+  }
+
+  return JSON.stringify(input, null, 2);
 }

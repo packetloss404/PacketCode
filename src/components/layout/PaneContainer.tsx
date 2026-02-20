@@ -1,27 +1,64 @@
-import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
-import { SessionPane } from "@/components/session/SessionPane";
+import { useMemo } from "react";
+import { TerminalPane } from "@/components/session/TerminalPane";
+import { SessionTabBar } from "@/components/layout/SessionTabBar";
 import { useLayoutStore } from "@/stores/layoutStore";
 
+/**
+ * Flexible grid layout for terminal panes.
+ * Sessions auto-arrange: 1 = full, 2 = side-by-side, 3 = row,
+ * 4+ = wrapping grid. Closing a pane makes others expand to fill space.
+ */
 export function PaneContainer() {
   const panes = useLayoutStore((s) => s.panes);
   const removePane = useLayoutStore((s) => s.removePane);
 
+  // Calculate grid columns based on pane count
+  const gridStyle = useMemo(() => {
+    const count = panes.length;
+    if (count <= 1) {
+      return { gridTemplateColumns: "1fr" };
+    }
+    if (count === 2) {
+      return { gridTemplateColumns: "1fr 1fr" };
+    }
+    if (count === 3) {
+      return { gridTemplateColumns: "1fr 1fr 1fr" };
+    }
+    if (count <= 6) {
+      // 2 rows: e.g. 4 → 2x2, 5 → 3+2, 6 → 3x2
+      const cols = Math.ceil(count / 2);
+      return { gridTemplateColumns: `repeat(${cols}, 1fr)` };
+    }
+    if (count <= 9) {
+      // 3 rows
+      const cols = Math.ceil(count / 3);
+      return { gridTemplateColumns: `repeat(${cols}, 1fr)` };
+    }
+    // 10+: 4+ columns auto-fill
+    const cols = Math.ceil(count / Math.ceil(count / 4));
+    return { gridTemplateColumns: `repeat(${cols}, 1fr)` };
+  }, [panes.length]);
+
   return (
-    <PanelGroup direction="horizontal" className="flex-1">
-      {panes.map((pane, index) => (
-        <div key={pane.id} className="contents">
-          {index > 0 && (
-            <PanelResizeHandle className="w-[3px] bg-bg-elevated hover:bg-accent-green transition-colors" />
-          )}
-          <Panel minSize={20} defaultSize={100 / panes.length}>
-            <SessionPane
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Session tab bar */}
+      <SessionTabBar />
+
+      {/* Grid of panes */}
+      <div
+        className="flex-1 grid gap-[2px] bg-bg-border overflow-hidden"
+        style={gridStyle}
+      >
+        {panes.map((pane) => (
+          <div key={pane.id} className="min-h-0 min-w-0 overflow-hidden">
+            <TerminalPane
               paneId={pane.id}
               onClose={() => removePane(pane.id)}
               showCloseButton={panes.length > 1}
             />
-          </Panel>
-        </div>
-      ))}
-    </PanelGroup>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
