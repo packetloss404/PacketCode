@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionInfo } from "@/types/session";
+import type { StatusLineData } from "@/types/statusline";
 
 export async function createSession(
   projectPath: string,
@@ -42,4 +43,8 @@ export async function getGitBranch(projectPath: string): Promise<string> {
 
 export async function getGitStatus(projectPath: string): Promise<string> {
   return invoke<string>("get_git_status", { projectPath });
+}
+
+export async function readStatusLineStates(): Promise<StatusLineData[]> {
+  return invoke<StatusLineData[]>("read_statusline_states");
 }

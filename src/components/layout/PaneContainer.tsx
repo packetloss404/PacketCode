@@ -53,6 +53,19 @@ export function PaneContainer({
     return { gridTemplateColumns: `repeat(${cols}, 1fr)` };
   }, [panes.length]);
 
+  if (panes.length === 0) {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <SessionTabBar cliType={paneSource} />
+        <div className="flex-1 flex items-center justify-center bg-bg-primary">
+          <p className="text-sm text-text-muted">
+            Click <span className="text-text-secondary font-medium">+</span> above to start a {paneSource === "codex" ? "Codex" : "Claude"} session
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Session tab bar */}

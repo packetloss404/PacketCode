@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, Sparkles } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
@@ -101,7 +101,7 @@ export function Toolbar() {
           <button
             onClick={() => setShowToolsMenu(!showToolsMenu)}
             className={`px-2.5 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-              activeView === "tools"
+              activeView === "tools" || activeView === "architect"
                 ? "text-accent-green bg-bg-elevated"
                 : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
@@ -124,6 +124,16 @@ export function Toolbar() {
                 {showExplorer && (
                   <span className="ml-auto text-[9px] text-accent-green">open</span>
                 )}
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("architect");
+                  setShowToolsMenu(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+              >
+                <Sparkles size={12} className="text-accent-purple" />
+                Vibe Architect
               </button>
               <button
                 onClick={() => {

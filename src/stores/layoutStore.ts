@@ -27,14 +27,11 @@ function createPaneId(): string {
   return `pane_${++paneCounter}`;
 }
 
-const initialPaneId = createPaneId();
-const initialCodexPaneId = createPaneId();
-
 export const useLayoutStore = create<LayoutStore>((set, get) => ({
-  panes: [{ id: initialPaneId, sessionId: null }],
-  activePaneId: initialPaneId,
-  codexPanes: [{ id: initialCodexPaneId, sessionId: null }],
-  activeCodexPaneId: initialCodexPaneId,
+  panes: [],
+  activePaneId: "",
+  codexPanes: [],
+  activeCodexPaneId: "",
   projectPath: "D:\\projects\\PacketCode",
 
   setProjectPath: (path) => set({ projectPath: path }),
@@ -50,11 +47,10 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
 
   removePane: (paneId) => {
     set((state) => {
-      if (state.panes.length <= 1) return state;
       const panes = state.panes.filter((p) => p.id !== paneId);
       const activePaneId =
         state.activePaneId === paneId
-          ? panes[panes.length - 1].id
+          ? (panes[panes.length - 1]?.id ?? "")
           : state.activePaneId;
       return { panes, activePaneId };
     });
@@ -86,11 +82,10 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
 
   removeCodexPane: (paneId) => {
     set((state) => {
-      if (state.codexPanes.length <= 1) return state;
       const codexPanes = state.codexPanes.filter((p) => p.id !== paneId);
       const activeCodexPaneId =
         state.activeCodexPaneId === paneId
-          ? codexPanes[codexPanes.length - 1].id
+          ? (codexPanes[codexPanes.length - 1]?.id ?? "")
           : state.activeCodexPaneId;
       return { codexPanes, activeCodexPaneId };
     });

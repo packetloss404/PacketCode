@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type AppView = "claude" | "codex" | "issues" | "history" | "tools";
+export type AppView = "welcome" | "claude" | "codex" | "issues" | "history" | "tools" | "architect";
 
 interface AppStore {
   activeView: AppView;
@@ -14,7 +14,7 @@ interface AppStore {
 }
 
 export const useAppStore = create<AppStore>((set) => ({
-  activeView: "claude",
+  activeView: "welcome",
   gitBranch: null,
   claudeVersion: null,
   isMaximized: false,

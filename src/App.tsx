@@ -6,9 +6,12 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { IssueBoard } from "@/components/issues/IssueBoard";
 import { HistoryView } from "@/components/views/HistoryView";
 import { ToolsView } from "@/components/views/ToolsView";
+import { VibeArchitectView } from "@/components/views/VibeArchitectView";
+import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore } from "@/stores/appStore";
+import { useStatusLinePoller } from "@/hooks/useStatusLine";
 
 export default function App() {
   const addPane = useLayoutStore((s) => s.addPane);
@@ -18,26 +21,10 @@ export default function App() {
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
 
-  // Persist pane layout to localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("packetcode:pane-count");
-    if (saved) {
-      const count = parseInt(saved, 10);
-      const current = useLayoutStore.getState().panes.length;
-      for (let i = current; i < count; i++) {
-        useLayoutStore.getState().addPane();
-      }
-    }
-    const savedCodex = localStorage.getItem("packetcode:codex-pane-count");
-    if (savedCodex) {
-      const count = parseInt(savedCodex, 10);
-      const current = useLayoutStore.getState().codexPanes.length;
-      for (let i = current; i < count; i++) {
-        useLayoutStore.getState().addCodexPane();
-      }
-    }
-  }, []);
+  // Poll Claude Code status line data
+  useStatusLinePoller();
 
+  // Persist pane counts to localStorage
   useEffect(() => {
     localStorage.setItem("packetcode:pane-count", String(panes.length));
   }, [panes.length]);
@@ -127,6 +114,7 @@ export default function App() {
           "#": "issues",    // Shift+3
           "$": "history",   // Shift+4
           "%": "tools",     // Shift+5
+          "^": "architect", // Shift+6
         };
         if (viewMap[e.key]) {
           e.preventDefault();
@@ -148,6 +136,12 @@ export default function App() {
         <TitleBar />
         <Toolbar />
         <ErrorBoundary fallbackMessage="View error">
+          {/* Welcome screen */}
+          {activeView === "welcome" && (
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <WelcomeScreen />
+            </div>
+          )}
           {/* Claude and Codex PaneContainers always rendered, toggled via CSS */}
           <div
             className="flex flex-col flex-1 overflow-hidden"
@@ -172,12 +166,16 @@ export default function App() {
 
 function OtherViewContent({ activeView }: { activeView: string }) {
   switch (activeView) {
+    case "welcome":
+      return null; // rendered above
     case "issues":
       return <IssueBoard />;
     case "history":
       return <HistoryView />;
     case "tools":
       return <ToolsView />;
+    case "architect":
+      return <VibeArchitectView />;
     default:
       return null;
   }

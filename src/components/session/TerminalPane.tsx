@@ -7,6 +7,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { X, RotateCcw, Plus } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useTabStore } from "@/stores/tabStore";
+import { ClaudeStatusBar } from "@/components/session/ClaudeStatusBar";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPaneProps {
@@ -415,6 +416,11 @@ export function TerminalPane({
         className="flex-1 overflow-hidden"
         style={{ padding: "4px" }}
       />
+
+      {/* Claude Status Bar */}
+      {cliCommand === "claude" && alive && (
+        <ClaudeStatusBar projectPath={projectPath} />
+      )}
     </div>
   );
 }

@@ -34,6 +34,8 @@ pub fn run() {
             commands::code_quality::analyze_code_quality,
             // Filesystem
             commands::fs::list_directory,
+            // Status line
+            commands::statusline::read_statusline_states,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -75,7 +75,14 @@ pub fn create_pty_session(
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
     // Build the command: launch the specified CLI interactively
-    let mut cmd = CommandBuilder::new(&command);
+    // On Windows, npm global installs use .cmd wrappers (e.g. codex.cmd, claude.cmd)
+    // CommandBuilder doesn't resolve .cmd like a shell does, so we must add the extension.
+    let resolved_command = if cfg!(windows) && !command.ends_with(".cmd") && !command.ends_with(".exe") {
+        format!("{}.cmd", command)
+    } else {
+        command.clone()
+    };
+    let mut cmd = CommandBuilder::new(&resolved_command);
     cmd.cwd(&project_path);
 
     // Append any extra arguments (e.g. --model)
@@ -89,6 +96,8 @@ pub fn create_pty_session(
     if command == "claude" {
         cmd.env_remove("CLAUDECODE");
         cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+        // Tell statusline.ps1 to suppress terminal output (PacketCode has its own native status bar)
+        cmd.env("PACKETCODE", "1");
     }
 
     // Spawn the child process in the PTY
