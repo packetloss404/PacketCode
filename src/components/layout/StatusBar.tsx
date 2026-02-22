@@ -5,7 +5,6 @@ import { useAppStore } from "@/stores/appStore";
 export function StatusBar() {
   const tabs = useTabStore((s) => s.tabs);
   const panes = useLayoutStore((s) => s.panes);
-  const codexPanes = useLayoutStore((s) => s.codexPanes);
   const activeView = useAppStore((s) => s.activeView);
 
   // Count active sessions
@@ -16,15 +15,16 @@ export function StatusBar() {
   const totalSessions = tabs.length;
 
   const isCliView = activeView === "claude" || activeView === "codex";
-  const currentPaneCount = activeView === "codex" ? codexPanes.length : panes.length;
+  const claudeCount = panes.filter((p) => p.cliCommand === "claude").length;
+  const codexCount = panes.filter((p) => p.cliCommand === "codex").length;
 
   return (
     <div className="flex items-center h-6 px-3 bg-bg-secondary border-t border-bg-border text-[10px] text-text-muted gap-4">
       <span>
-        {panes.length} claude pane{panes.length !== 1 ? "s" : ""}
+        {claudeCount} claude
       </span>
       <span>
-        {codexPanes.length} codex pane{codexPanes.length !== 1 ? "s" : ""}
+        {codexCount} codex
       </span>
       <span>
         {totalSessions} session{totalSessions !== 1 ? "s" : ""}
@@ -38,7 +38,7 @@ export function StatusBar() {
       {isCliView && (
         <>
           <span>Ctrl+\\ split</span>
-          <span>Ctrl+1-{currentPaneCount > 4 ? 4 : currentPaneCount} panes</span>
+          <span>Ctrl+1-{panes.length > 4 ? 4 : panes.length} panes</span>
         </>
       )}
       <span>Ctrl+Shift+1-5 views</span>

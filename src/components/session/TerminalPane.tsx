@@ -8,6 +8,7 @@ import { X, RotateCcw, Plus } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useTabStore } from "@/stores/tabStore";
 import { ClaudeStatusBar } from "@/components/session/ClaudeStatusBar";
+import { CodexStatusBar } from "@/components/session/CodexStatusBar";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPaneProps {
@@ -374,7 +375,14 @@ export function TerminalPane({
                   : "bg-text-muted"
             }`}
           />
-          <span className="text-text-secondary text-xs">{cliCommand.charAt(0).toUpperCase() + cliCommand.slice(1)}</span>
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full text-white font-medium"
+            style={{
+              backgroundColor: cliCommand === "claude" ? "#f0b400" : "#58a6ff",
+            }}
+          >
+            {cliCommand === "claude" ? "Claude" : "Codex"}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           {!alive && (
@@ -417,9 +425,12 @@ export function TerminalPane({
         style={{ padding: "4px" }}
       />
 
-      {/* Claude Status Bar */}
+      {/* Status Bars */}
       {cliCommand === "claude" && alive && (
         <ClaudeStatusBar projectPath={projectPath} />
+      )}
+      {cliCommand === "codex" && alive && (
+        <CodexStatusBar projectPath={projectPath} />
       )}
     </div>
   );

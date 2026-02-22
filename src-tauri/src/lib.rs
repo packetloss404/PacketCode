@@ -36,6 +36,23 @@ pub fn run() {
             commands::fs::list_directory,
             // Status line
             commands::statusline::read_statusline_states,
+            commands::statusline::read_codex_statusline_states,
+            // Spec parsing
+            commands::spec::parse_spec_to_tickets,
+            // Insights chat
+            commands::insights::ask_insights,
+            // Ideation scanner
+            commands::ideation::generate_ideas,
+            // GitHub integration
+            commands::github::github_list_repos,
+            commands::github::github_list_issues,
+            commands::github::github_get_issue,
+            commands::github::github_create_pr,
+            commands::github::github_investigate_issue,
+            // Memory layer
+            commands::memory::scan_codebase_memory,
+            commands::memory::summarize_session,
+            commands::memory::extract_patterns,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

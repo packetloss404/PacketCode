@@ -1,11 +1,8 @@
 export interface PaneConfig {
   id: string;
   sessionId: string | null;
+  cliCommand: "claude" | "codex";
   cliArgs?: string[];
   initialPrompt?: string;
-}
-
-export interface LayoutState {
-  panes: PaneConfig[];
-  activePaneId: string;
+  flexSize?: number; // relative size for resizing (default 1)
 }

@@ -1,6 +1,11 @@
 pub mod code_quality;
 pub mod fs;
 pub mod git;
+pub mod github;
+pub mod ideation;
+pub mod insights;
+pub mod memory;
 pub mod pty;
 pub mod session;
+pub mod spec;
 pub mod statusline;

@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { X, Bot } from "lucide-react";
+import { X, Bot, User } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useProfileStore } from "@/stores/profileStore";
+import { useMemoryStore } from "@/stores/memoryStore";
 
 type CliChoice = "claude" | "codex";
 
@@ -27,30 +29,71 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
   const [cli, setCli] = useState<CliChoice>(defaultCli);
   const [model, setModel] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+    useProfileStore.getState().activeProfileId
+  );
+  const [includeMemory, setIncludeMemory] = useState(true);
+
+  const profiles = useProfileStore((s) => s.profiles);
+  const getContextForSession = useMemoryStore((s) => s.getContextForSession);
 
   const cliLabel = cli === "claude" ? "Claude" : "Codex";
 
+  function handleProfileChange(profileId: string | null) {
+    setSelectedProfileId(profileId);
+    if (profileId) {
+      const profile = profiles.find((p) => p.id === profileId);
+      if (profile?.defaultModel) {
+        const matchingModel = MODELS.find((m) => m.value && profile.defaultModel.includes(m.value));
+        if (matchingModel) setModel(matchingModel.value);
+      }
+    }
+  }
+
   function handleStart() {
     const args: string[] = [];
-    if (model) {
-      args.push("--model", model);
+    const selectedProfile = selectedProfileId
+      ? profiles.find((p) => p.id === selectedProfileId)
+      : null;
+
+    // Use profile's default model if set and no manual override
+    const effectiveModel = model || (selectedProfile?.defaultModel || null);
+    if (effectiveModel) {
+      args.push("--model", effectiveModel);
+    }
+
+    // Build final prompt with profile system prompt and memory context
+    let finalPrompt = "";
+
+    if (selectedProfile?.systemPrompt) {
+      finalPrompt += selectedProfile.systemPrompt + "\n\n";
+    }
+
+    if (includeMemory) {
+      const memoryContext = getContextForSession();
+      if (memoryContext.trim()) {
+        finalPrompt += memoryContext + "\n\n";
+      }
+    }
+
+    if (prompt.trim()) {
+      finalPrompt += prompt.trim();
+    }
+
+    // Set active profile globally
+    if (selectedProfileId) {
+      useProfileStore.getState().setActiveProfile(selectedProfileId);
     }
 
     // Switch to the right view
     useAppStore.getState().setActiveView(cli);
 
     // Create pane with args and prompt
-    if (cli === "codex") {
-      useLayoutStore.getState().addCodexPane({
-        cliArgs: args.length > 0 ? args : undefined,
-        initialPrompt: prompt.trim() || undefined,
-      });
-    } else {
-      useLayoutStore.getState().addPane({
-        cliArgs: args.length > 0 ? args : undefined,
-        initialPrompt: prompt.trim() || undefined,
-      });
-    }
+    useLayoutStore.getState().addPane({
+      cliCommand: cli,
+      cliArgs: args.length > 0 ? args : undefined,
+      initialPrompt: finalPrompt.trim() || undefined,
+    });
 
     onClose();
   }
@@ -102,6 +145,55 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
             >
               Codex
             </button>
+          </div>
+
+          {/* Agent Profile */}
+          <div>
+            <label className="block text-[10px] text-text-muted mb-1.5 uppercase tracking-wider">
+              Agent Profile
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => handleProfileChange(null)}
+                className={`flex items-center gap-1 px-2.5 py-1 text-[11px] rounded border transition-colors ${
+                  !selectedProfileId
+                    ? "bg-accent-green/15 border-accent-green/40 text-accent-green font-medium"
+                    : "bg-bg-primary border-bg-border text-text-muted hover:text-text-secondary hover:border-text-muted/30"
+                }`}
+              >
+                None
+              </button>
+              {profiles.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleProfileChange(p.id)}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-[11px] rounded border transition-colors ${
+                    selectedProfileId === p.id
+                      ? "bg-accent-green/15 border-accent-green/40 text-accent-green font-medium"
+                      : "bg-bg-primary border-bg-border text-text-muted hover:text-text-secondary hover:border-text-muted/30"
+                  }`}
+                  title={p.description}
+                >
+                  <User size={10} className={p.color} />
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Memory context toggle */}
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeMemory}
+                onChange={(e) => setIncludeMemory(e.target.checked)}
+                className="w-3 h-3 rounded border-bg-border accent-accent-green"
+              />
+              <span className="text-[11px] text-text-secondary">
+                Include memory context
+              </span>
+            </label>
           </div>
 
           {/* Model selection */}

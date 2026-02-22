@@ -4,22 +4,15 @@ import type { PaneConfig } from "@/types/layout";
 interface LayoutStore {
   panes: PaneConfig[];
   activePaneId: string;
-  codexPanes: PaneConfig[];
-  activeCodexPaneId: string;
   projectPath: string;
 
   setProjectPath: (path: string) => void;
-  addPane: (opts?: { cliArgs?: string[]; initialPrompt?: string }) => string;
+  addPane: (opts?: { cliCommand?: "claude" | "codex"; cliArgs?: string[]; initialPrompt?: string }) => string;
   removePane: (paneId: string) => void;
   setActivePaneId: (paneId: string) => void;
   setPaneSession: (paneId: string, sessionId: string | null) => void;
   getActivePane: () => PaneConfig | undefined;
-
-  addCodexPane: (opts?: { cliArgs?: string[]; initialPrompt?: string }) => string;
-  removeCodexPane: (paneId: string) => void;
-  setActiveCodexPaneId: (paneId: string) => void;
-  setCodexPaneSession: (paneId: string, sessionId: string | null) => void;
-  getActiveCodexPane: () => PaneConfig | undefined;
+  updatePaneSize: (paneId: string, flexSize: number) => void;
 }
 
 let paneCounter = 0;
@@ -30,8 +23,6 @@ function createPaneId(): string {
 export const useLayoutStore = create<LayoutStore>((set, get) => ({
   panes: [],
   activePaneId: "",
-  codexPanes: [],
-  activeCodexPaneId: "",
   projectPath: "D:\\projects\\PacketCode",
 
   setProjectPath: (path) => set({ projectPath: path }),
@@ -39,7 +30,17 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
   addPane: (opts) => {
     const id = createPaneId();
     set((state) => ({
-      panes: [...state.panes, { id, sessionId: null, cliArgs: opts?.cliArgs, initialPrompt: opts?.initialPrompt }],
+      panes: [
+        ...state.panes,
+        {
+          id,
+          sessionId: null,
+          cliCommand: opts?.cliCommand ?? "claude",
+          cliArgs: opts?.cliArgs,
+          initialPrompt: opts?.initialPrompt,
+          flexSize: 1,
+        },
+      ],
       activePaneId: id,
     }));
     return id;
@@ -71,38 +72,11 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
     return state.panes.find((p) => p.id === state.activePaneId);
   },
 
-  addCodexPane: (opts) => {
-    const id = createPaneId();
+  updatePaneSize: (paneId, flexSize) => {
     set((state) => ({
-      codexPanes: [...state.codexPanes, { id, sessionId: null, cliArgs: opts?.cliArgs, initialPrompt: opts?.initialPrompt }],
-      activeCodexPaneId: id,
-    }));
-    return id;
-  },
-
-  removeCodexPane: (paneId) => {
-    set((state) => {
-      const codexPanes = state.codexPanes.filter((p) => p.id !== paneId);
-      const activeCodexPaneId =
-        state.activeCodexPaneId === paneId
-          ? (codexPanes[codexPanes.length - 1]?.id ?? "")
-          : state.activeCodexPaneId;
-      return { codexPanes, activeCodexPaneId };
-    });
-  },
-
-  setActiveCodexPaneId: (paneId) => set({ activeCodexPaneId: paneId }),
-
-  setCodexPaneSession: (paneId, sessionId) => {
-    set((state) => ({
-      codexPanes: state.codexPanes.map((p) =>
-        p.id === paneId ? { ...p, sessionId } : p
+      panes: state.panes.map((p) =>
+        p.id === paneId ? { ...p, flexSize } : p
       ),
     }));
-  },
-
-  getActiveCodexPane: () => {
-    const state = get();
-    return state.codexPanes.find((p) => p.id === state.activeCodexPaneId);
   },
 }));

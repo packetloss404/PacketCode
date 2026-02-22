@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, Sparkles } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, Sparkles, MessageSquare, Lightbulb, Github, Brain, User } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, type AppView } from "@/stores/appStore";
+import { useProfileStore } from "@/stores/profileStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CodeQualityModal } from "@/components/quality/CodeQualityModal";
@@ -17,7 +18,6 @@ const TABS: { key: AppView; label: string }[] = [
 
 export function Toolbar() {
   const addPane = useLayoutStore((s) => s.addPane);
-  const addCodexPane = useLayoutStore((s) => s.addCodexPane);
   const projectPath = useLayoutStore((s) => s.projectPath);
   const setProjectPath = useLayoutStore((s) => s.setProjectPath);
   const gitBranch = useGitInfo();
@@ -25,7 +25,14 @@ export function Toolbar() {
   const [newSessionCli, setNewSessionCli] = useState<"claude" | "codex" | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showExplorer, setShowExplorer] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  const activeProfileId = useProfileStore((s) => s.activeProfileId);
+  const profiles = useProfileStore((s) => s.profiles);
+  const setActiveProfile = useProfileStore((s) => s.setActiveProfile);
+  const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
@@ -34,15 +41,18 @@ export function Toolbar() {
 
   // Close tools menu when clicking outside
   useEffect(() => {
-    if (!showToolsMenu) return;
+    if (!showToolsMenu && !showProfileMenu) return;
     function handleClick(e: MouseEvent) {
-      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
+      if (showToolsMenu && toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
         setShowToolsMenu(false);
+      }
+      if (showProfileMenu && profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showToolsMenu]);
+  }, [showToolsMenu, showProfileMenu]);
 
   async function handleOpenFolder() {
     const selected = await open({
@@ -56,11 +66,7 @@ export function Toolbar() {
   }
 
   function handleSplit() {
-    if (activeView === "codex") {
-      addCodexPane();
-    } else {
-      addPane();
-    }
+    setNewSessionCli(activeView === "codex" ? "codex" : "claude");
   }
 
   function handleTabClick(key: AppView) {
@@ -82,12 +88,30 @@ export function Toolbar() {
     <div className="flex items-center h-9 px-3 bg-bg-tertiary border-b border-bg-border gap-2">
       {/* Left section — view tabs + actions */}
       <div className="flex items-center gap-1 flex-1">
+        {/* Sessions — navigate to sessions view without opening modal */}
+        <button
+          onClick={() => {
+            if (activeView !== "claude" && activeView !== "codex") {
+              setActiveView("claude");
+            }
+          }}
+          className={`px-2.5 py-1 text-xs rounded transition-colors ${
+            activeView === "claude" || activeView === "codex"
+              ? "text-accent-green bg-bg-elevated"
+              : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          }`}
+        >
+          Sessions
+        </button>
+
         {TABS.map((tab) => (
           <button
             key={tab.key}
             onClick={() => handleTabClick(tab.key)}
             className={`px-2.5 py-1 text-xs rounded transition-colors ${
-              activeView === tab.key
+              activeView === tab.key ||
+              ((tab.key === "claude" || tab.key === "codex") &&
+                (activeView === "claude" || activeView === "codex"))
                 ? "text-accent-green bg-bg-elevated"
                 : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
@@ -101,7 +125,7 @@ export function Toolbar() {
           <button
             onClick={() => setShowToolsMenu(!showToolsMenu)}
             className={`px-2.5 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-              activeView === "tools" || activeView === "architect"
+              activeView === "tools" || activeView === "architect" || activeView === "insights" || activeView === "ideation" || activeView === "github" || activeView === "memory"
                 ? "text-accent-green bg-bg-elevated"
                 : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
@@ -137,6 +161,47 @@ export function Toolbar() {
               </button>
               <button
                 onClick={() => {
+                  setActiveView("insights");
+                  setShowToolsMenu(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+              >
+                <MessageSquare size={12} className="text-accent-blue" />
+                Insights Chat
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("ideation");
+                  setShowToolsMenu(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+              >
+                <Lightbulb size={12} className="text-accent-amber" />
+                Ideation Scanner
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("github");
+                  setShowToolsMenu(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+              >
+                <Github size={12} className="text-text-primary" />
+                GitHub
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("memory");
+                  setShowToolsMenu(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+              >
+                <Brain size={12} className="text-accent-purple" />
+                Memory
+              </button>
+              <div className="h-px bg-bg-border my-0.5" />
+              <button
+                onClick={() => {
                   setActiveView("tools");
                   setShowToolsMenu(false);
                 }}
@@ -161,6 +226,58 @@ export function Toolbar() {
             <Plus size={12} />
             <span>Split</span>
           </button>
+        )}
+      </div>
+
+      {/* Profile quick-switch */}
+      <div className="relative" ref={profileMenuRef}>
+        <button
+          onClick={() => setShowProfileMenu(!showProfileMenu)}
+          className={`flex items-center gap-1.5 px-2 py-1 text-[11px] rounded transition-colors ${
+            activeProfile
+              ? `${activeProfile.color} bg-bg-elevated`
+              : "text-text-muted hover:text-text-primary hover:bg-bg-hover"
+          }`}
+          title="Agent Profile"
+        >
+          <User size={11} />
+          <span>{activeProfile?.name || "No Profile"}</span>
+        </button>
+
+        {showProfileMenu && (
+          <div className="absolute top-full right-0 mt-1 w-52 bg-bg-secondary border border-bg-border rounded-lg shadow-xl z-50 py-1">
+            <button
+              onClick={() => {
+                setActiveProfile(null);
+                setShowProfileMenu(false);
+              }}
+              className={`flex items-center gap-2 w-full px-3 py-1.5 text-[11px] hover:bg-bg-hover transition-colors text-left ${
+                !activeProfileId ? "text-accent-green" : "text-text-secondary"
+              }`}
+            >
+              No Profile
+            </button>
+            {profiles.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  setActiveProfile(p.id);
+                  setShowProfileMenu(false);
+                }}
+                className={`flex items-center gap-2 w-full px-3 py-1.5 text-[11px] hover:bg-bg-hover transition-colors text-left ${
+                  activeProfileId === p.id ? "text-accent-green" : "text-text-secondary"
+                }`}
+              >
+                <span className={p.color}>
+                  <User size={10} />
+                </span>
+                <span className="flex-1">{p.name}</span>
+                {activeProfileId === p.id && (
+                  <span className="text-[9px] text-accent-green">active</span>
+                )}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
