@@ -6,17 +6,18 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { IssueBoard } from "@/components/issues/IssueBoard";
 import { HistoryView } from "@/components/views/HistoryView";
 import { ToolsView } from "@/components/views/ToolsView";
-import { VibeArchitectView } from "@/components/views/VibeArchitectView";
 import { InsightsView } from "@/components/views/InsightsView";
-import { IdeationView } from "@/components/views/IdeationView";
 import { GitHubView } from "@/components/views/GitHubView";
 import { MemoryView } from "@/components/views/MemoryView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { useAppStore } from "@/stores/appStore";
+import { useAppStore, getExtensionId, extensionViewId } from "@/stores/appStore";
+import { useExtensionStore } from "@/stores/extensionStore";
+import { getExtension } from "@/extensions/registry";
 import { useStatusLinePoller } from "@/hooks/useStatusLine";
 import { useCodexStatusLinePoller } from "@/hooks/useCodexStatusLine";
+import type { AppView } from "@/stores/appStore";
 
 export default function App() {
   const addPane = useLayoutStore((s) => s.addPane);
@@ -46,6 +47,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("packetcode:project-path", projectPath);
   }, [projectPath]);
+
+  // Guard: if active view is a disabled extension, redirect to tools
+  useEffect(() => {
+    const extId = getExtensionId(activeView);
+    if (extId && !useExtensionStore.getState().isEnabled(extId)) {
+      setActiveView("tools");
+    }
+  }, [activeView, setActiveView]);
 
   // Listen for new session requests
   useEffect(() => {
@@ -91,16 +100,24 @@ export default function App() {
           useLayoutStore.getState().setActivePaneId(currentPanes[idx].id);
         }
       }
-      // Ctrl+Shift+1/2/3/4/5 to switch views
+      // Ctrl+Shift+1/2/3/4/5/6 to switch views
       if (e.ctrlKey && e.shiftKey) {
-        const viewMap: Record<string, typeof activeView> = {
+        const viewMap: Record<string, AppView> = {
           "!": "claude",    // Shift+1
           "@": "codex",     // Shift+2
           "#": "issues",    // Shift+3
           "$": "history",   // Shift+4
           "%": "tools",     // Shift+5
-          "^": "architect", // Shift+6
         };
+        // Shift+6 -> Vibe Architect (only if enabled)
+        if (e.key === "^") {
+          const extView = extensionViewId("vibe-architect");
+          if (useExtensionStore.getState().isEnabled("vibe-architect")) {
+            e.preventDefault();
+            setActiveView(extView);
+          }
+          return;
+        }
         if (viewMap[e.key]) {
           e.preventDefault();
           setActiveView(viewMap[e.key]);
@@ -145,7 +162,7 @@ export default function App() {
   );
 }
 
-function OtherViewContent({ activeView }: { activeView: string }) {
+function OtherViewContent({ activeView }: { activeView: AppView }) {
   switch (activeView) {
     case "welcome":
       return null; // rendered above
@@ -155,17 +172,23 @@ function OtherViewContent({ activeView }: { activeView: string }) {
       return <HistoryView />;
     case "tools":
       return <ToolsView />;
-    case "architect":
-      return <VibeArchitectView />;
     case "insights":
       return <InsightsView />;
-    case "ideation":
-      return <IdeationView />;
     case "github":
       return <GitHubView />;
     case "memory":
       return <MemoryView />;
-    default:
-      return null;
   }
+
+  // Extension views — dynamic lookup
+  const extId = getExtensionId(activeView);
+  if (!extId) return null;
+  const ext = getExtension(extId);
+  if (!ext || !useExtensionStore.getState().isEnabled(extId)) return null;
+  const ExtComponent = ext.component;
+  return (
+    <ErrorBoundary fallbackMessage={`${ext.name} encountered an error`}>
+      <ExtComponent />
+    </ErrorBoundary>
+  );
 }

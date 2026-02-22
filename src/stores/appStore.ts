@@ -1,6 +1,19 @@
 import { create } from "zustand";
 
-export type AppView = "welcome" | "claude" | "codex" | "issues" | "history" | "tools" | "architect" | "insights" | "ideation" | "github" | "memory";
+export type CoreView = "welcome" | "claude" | "codex" | "issues" | "history" | "tools" | "insights" | "github" | "memory";
+export type AppView = CoreView | `ext:${string}`;
+
+export function isExtensionView(view: AppView): boolean {
+  return view.startsWith("ext:");
+}
+
+export function getExtensionId(view: AppView): string | null {
+  return view.startsWith("ext:") ? view.slice(4) : null;
+}
+
+export function extensionViewId(id: string): AppView {
+  return `ext:${id}` as AppView;
+}
 
 interface AppStore {
   activeView: AppView;

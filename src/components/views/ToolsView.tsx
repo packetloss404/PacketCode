@@ -1,8 +1,11 @@
-import { Wrench, GitBranch, FolderOpen, Settings, ClipboardList, User, Plus, Pencil, Trash2 } from "lucide-react";
+import { Wrench, GitBranch, FolderOpen, Settings, ClipboardList, User, Plus, Pencil, Trash2, Puzzle } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { useIssueStore } from "@/stores/issueStore";
 import { useProfileStore } from "@/stores/profileStore";
+import { useExtensionStore } from "@/stores/extensionStore";
+import { useAppStore, isExtensionView, extensionViewId } from "@/stores/appStore";
+import { getExtensionsSorted } from "@/extensions/registry";
 import { useState } from "react";
 import { SpecImportModal } from "./SpecImportModal";
 import type { AgentProfile } from "@/types/profiles";
@@ -283,11 +286,101 @@ export function ToolsView() {
             />
           )}
         </div>
+
+        {/* Extensions — spans full width */}
+        <ExtensionsCard />
       </div>
 
       {showSpecImport && (
         <SpecImportModal onClose={() => setShowSpecImport(false)} />
       )}
+    </div>
+  );
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  ai: "AI",
+  analysis: "Analysis",
+  integration: "Integration",
+  utility: "Utility",
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  ai: "bg-accent-purple/15 text-accent-purple",
+  analysis: "bg-accent-amber/15 text-accent-amber",
+  integration: "bg-accent-blue/15 text-accent-blue",
+  utility: "bg-bg-elevated text-text-muted",
+};
+
+function ExtensionsCard() {
+  const extensions = getExtensionsSorted();
+  const { states, toggleExtension } = useExtensionStore();
+  const activeView = useAppStore((s) => s.activeView);
+  const setActiveView = useAppStore((s) => s.setActiveView);
+
+  const enabledCount = extensions.filter((ext) => states[ext.id]?.enabled).length;
+
+  return (
+    <div className="bg-bg-secondary border border-bg-border rounded-lg p-4 col-span-2">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-primary flex items-center gap-2">
+          <Puzzle size={12} className="text-accent-blue" />
+          Extensions
+        </h3>
+        <span className="text-[10px] text-text-muted px-1.5 py-0.5 bg-bg-elevated rounded">
+          {enabledCount} of {extensions.length} enabled
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {extensions.map((ext) => {
+          const enabled = states[ext.id]?.enabled ?? false;
+          const Icon = ext.icon;
+          return (
+            <div
+              key={ext.id}
+              className="flex items-center gap-3 px-3 py-2 bg-bg-primary border border-bg-border rounded"
+            >
+              <span className={enabled ? ext.iconColor : "text-text-muted"}>
+                <Icon size={12} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] text-text-primary font-medium flex items-center gap-2">
+                  {ext.name}
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[ext.category] ?? "bg-bg-elevated text-text-muted"}`}>
+                    {CATEGORY_LABELS[ext.category] ?? ext.category}
+                  </span>
+                </div>
+                <div className="text-[10px] text-text-muted truncate">
+                  {ext.description}
+                  {ext.shortcutHint && (
+                    <span className="ml-2 text-text-muted opacity-60">({ext.shortcutHint})</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  toggleExtension(ext.id);
+                  // If disabling the currently active extension, redirect to tools
+                  if (enabled && activeView === extensionViewId(ext.id)) {
+                    setActiveView("tools");
+                  }
+                }}
+                className={`relative w-8 h-4 rounded-full transition-colors ${
+                  enabled ? "bg-accent-green" : "bg-bg-elevated"
+                }`}
+                title={enabled ? "Disable" : "Enable"}
+              >
+                <span
+                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                    enabled ? "left-4" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, Sparkles, MessageSquare, Lightbulb, Github, Brain, User } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { useAppStore, type AppView } from "@/stores/appStore";
+import { useAppStore, isExtensionView, extensionViewId, type AppView } from "@/stores/appStore";
+import { useExtensionStore } from "@/stores/extensionStore";
+import { getExtensionsSorted } from "@/extensions/registry";
 import { useProfileStore } from "@/stores/profileStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -125,7 +127,7 @@ export function Toolbar() {
           <button
             onClick={() => setShowToolsMenu(!showToolsMenu)}
             className={`px-2.5 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-              activeView === "tools" || activeView === "architect" || activeView === "insights" || activeView === "ideation" || activeView === "github" || activeView === "memory"
+              activeView === "tools" || activeView === "insights" || activeView === "github" || activeView === "memory" || isExtensionView(activeView)
                 ? "text-accent-green bg-bg-elevated"
                 : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
@@ -149,16 +151,25 @@ export function Toolbar() {
                   <span className="ml-auto text-[9px] text-accent-green">open</span>
                 )}
               </button>
-              <button
-                onClick={() => {
-                  setActiveView("architect");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <Sparkles size={12} className="text-accent-purple" />
-                Vibe Architect
-              </button>
+              {/* Dynamic extension entries */}
+              {getExtensionsSorted()
+                .filter((ext) => useExtensionStore.getState().isEnabled(ext.id))
+                .map((ext) => {
+                  const Icon = ext.icon;
+                  return (
+                    <button
+                      key={ext.id}
+                      onClick={() => {
+                        setActiveView(extensionViewId(ext.id));
+                        setShowToolsMenu(false);
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
+                    >
+                      <Icon size={12} className={ext.iconColor} />
+                      {ext.name}
+                    </button>
+                  );
+                })}
               <button
                 onClick={() => {
                   setActiveView("insights");
@@ -168,16 +179,6 @@ export function Toolbar() {
               >
                 <MessageSquare size={12} className="text-accent-blue" />
                 Insights Chat
-              </button>
-              <button
-                onClick={() => {
-                  setActiveView("ideation");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <Lightbulb size={12} className="text-accent-amber" />
-                Ideation Scanner
               </button>
               <button
                 onClick={() => {
