@@ -1,9 +1,7 @@
-import { Columns2 } from "lucide-react";
-
 export function WelcomeScreen() {
   return (
     <div className="flex flex-col items-center justify-center h-full bg-bg-primary select-none">
-      <Columns2 size={64} className="text-accent-green mb-4" strokeWidth={1.5} />
+      <img src="/favicon.png" alt="PacketCode" className="w-16 h-16 mb-4" />
       <h1 className="text-2xl font-semibold text-text-primary mb-2">
         PacketCode
       </h1>
