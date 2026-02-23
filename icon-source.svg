@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f1923"/>
+      <stop offset="100%" stop-color="#0a0f14"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#33ff66"/>
+      <stop offset="100%" stop-color="#00dd35"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#00ff41" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" ry="220" fill="url(#bg)"/>
+
+  <!-- Subtle inner border -->
+  <rect x="10" y="10" width="1004" height="1004" rx="214" ry="214" fill="none" stroke="#00ff41" stroke-opacity="0.06" stroke-width="1.5"/>
+
+  <!-- Main "P" letterform -->
+  <g filter="url(#shadow)">
+    <!-- P as a single clean path with smooth bowl -->
+    <path d="
+      M 280,790
+      L 280,220
+      Q 280,200 300,200
+      L 520,200
+      Q 680,200 680,355
+      Q 680,510 520,510
+      L 390,510
+      L 390,790
+      Q 390,810 370,810
+      L 300,810
+      Q 280,810 280,790
+      Z
+      M 390,310
+      L 390,400
+      L 500,400
+      Q 568,400 568,355
+      Q 568,310 500,310
+      Z
+    " fill="url(#glow)" fill-rule="evenodd"/>
+  </g>
+
+  <!-- Terminal prompt ">" -->
+  <path d="M 560,580 L 700,665 L 560,750" fill="none" stroke="#00ff41" stroke-width="52" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+
+  <!-- Cursor block -->
+  <rect x="730" y="638" width="54" height="54" rx="6" fill="#00ff41" opacity="0.65"/>
+</svg>

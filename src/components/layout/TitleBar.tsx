@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, Copy, X, Columns2 } from "lucide-react";
+import { Minus, Square, Copy, X } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 
 export function TitleBar() {
@@ -44,7 +44,7 @@ export function TitleBar() {
       >
         {/* pointer-events-none so children don't swallow the drag */}
         <div className="flex items-center gap-2 pointer-events-none">
-          <Columns2 size={14} className="text-accent-green" />
+          <img src="/favicon.png" alt="PacketCode" className="w-4 h-4" />
           <span className="text-text-primary text-xs font-semibold tracking-wide">
             PacketCode
           </span>
