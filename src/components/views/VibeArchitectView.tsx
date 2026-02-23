@@ -39,6 +39,7 @@ export function VibeArchitectView() {
         className="flex-1 w-full border-none"
         title="Vibe Architect"
         allow="clipboard-read; clipboard-write"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-clipboard-read allow-clipboard-write"
       />
       {showImport && <SpecImportModal onClose={() => setShowImport(false)} />}
     </div>

@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; connect-src ipc: http://ipc.localhost http://localhost:1420 https://api.github.com https://specs-gen.vercel.app; frame-src https://specs-gen.vercel.app"
     }
   },
   "bundle": {

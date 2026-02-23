@@ -56,14 +56,25 @@ function MarkdownContent({ content }: { content: string }) {
                   {seg.slice(1, -1)}
                 </code>
               ) : (
-                <span
-                  key={k}
-                  dangerouslySetInnerHTML={{
-                    __html: seg
-                      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-                      .replace(/\n/g, "<br/>"),
-                  }}
-                />
+                <span key={k}>
+                  {seg
+                    .split(/(\*\*.*?\*\*)/g)
+                    .flatMap((fragment, fi) => {
+                      const boldMatch = fragment.match(/^\*\*(.+?)\*\*$/);
+                      const content = boldMatch ? boldMatch[1] : fragment;
+                      const lines = content.split("\n");
+                      const elements: React.ReactNode[] = [];
+                      lines.forEach((line, li) => {
+                        if (li > 0) elements.push(<br key={`${fi}-br-${li}`} />);
+                        if (boldMatch) {
+                          elements.push(<strong key={`${fi}-${li}`}>{line}</strong>);
+                        } else {
+                          elements.push(line);
+                        }
+                      });
+                      return elements;
+                    })}
+                </span>
               )
             )}
           </p>

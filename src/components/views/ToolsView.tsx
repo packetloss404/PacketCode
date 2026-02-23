@@ -8,7 +8,6 @@ import { useAppStore, moduleViewId } from "@/stores/appStore";
 import { getModulesSorted } from "@/modules/registry";
 import { useState } from "react";
 import { SpecImportModal } from "./SpecImportModal";
-import type { AgentProfile } from "@/types/profiles";
 
 export function ToolsView() {
   const projectPath = useLayoutStore((s) => s.projectPath);

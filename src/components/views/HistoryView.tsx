@@ -1,4 +1,4 @@
-import { Clock, Trash2 } from "lucide-react";
+import { Clock } from "lucide-react";
 import { useTabStore } from "@/stores/tabStore";
 
 export function HistoryView() {

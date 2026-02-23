@@ -107,9 +107,7 @@ export function TerminalPane({
     term.onData((data) => {
       const sid = sessionIdRef.current;
       if (sid) {
-        invoke("write_pty", { sessionId: sid, data }).catch((err) => {
-          console.error("write_pty error:", err);
-        });
+        invoke("write_pty", { sessionId: sid, data }).catch(() => {});
       }
     });
 

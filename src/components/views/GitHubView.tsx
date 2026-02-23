@@ -7,7 +7,6 @@ import {
   Download,
   Brain,
   GitPullRequest,
-  Lock,
   Loader2,
   AlertCircle,
   X,

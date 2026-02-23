@@ -19,7 +19,6 @@ const TABS: { key: AppView; label: string }[] = [
 ];
 
 export function Toolbar() {
-  const addPane = useLayoutStore((s) => s.addPane);
   const projectPath = useLayoutStore((s) => s.projectPath);
   const setProjectPath = useLayoutStore((s) => s.setProjectPath);
   const gitBranch = useGitInfo();

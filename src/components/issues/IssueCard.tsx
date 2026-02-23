@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Trash2, Link, CheckSquare } from "lucide-react";
 import { useIssueStore, type Issue } from "@/stores/issueStore";
 
