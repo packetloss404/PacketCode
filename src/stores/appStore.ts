@@ -1,18 +1,18 @@
 import { create } from "zustand";
 
 export type CoreView = "welcome" | "claude" | "codex" | "issues" | "history" | "tools" | "insights" | "github" | "memory";
-export type AppView = CoreView | `ext:${string}`;
+export type AppView = CoreView | `mod:${string}`;
 
-export function isExtensionView(view: AppView): boolean {
-  return view.startsWith("ext:");
+export function isModuleView(view: AppView): boolean {
+  return view.startsWith("mod:");
 }
 
-export function getExtensionId(view: AppView): string | null {
-  return view.startsWith("ext:") ? view.slice(4) : null;
+export function getModuleId(view: AppView): string | null {
+  return view.startsWith("mod:") ? view.slice(4) : null;
 }
 
-export function extensionViewId(id: string): AppView {
-  return `ext:${id}` as AppView;
+export function moduleViewId(id: string): AppView {
+  return `mod:${id}` as AppView;
 }
 
 interface AppStore {

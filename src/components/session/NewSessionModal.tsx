@@ -12,12 +12,20 @@ interface ModelOption {
   value: string | null; // null = system default (no --model flag)
 }
 
-const MODELS: ModelOption[] = [
+const CLAUDE_MODELS: ModelOption[] = [
   { label: "System Default", value: null },
   { label: "Opus 4.6", value: "claude-opus-4-6-20250610" },
   { label: "Opus 4.5", value: "claude-opus-4-5-20250514" },
   { label: "Sonnet 4.5", value: "claude-sonnet-4-5-20250514" },
   { label: "Haiku 4.5", value: "claude-haiku-4-5-20250514" },
+];
+
+const CODEX_MODELS: ModelOption[] = [
+  { label: "System Default", value: null },
+  { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+  { label: "GPT-5.2 Codex", value: "gpt-5.2-codex" },
+  { label: "GPT-5.1 Codex", value: "gpt-5.1-codex" },
+  { label: "Codex Mini", value: "codex-mini-latest" },
 ];
 
 interface NewSessionModalProps {
@@ -38,13 +46,19 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
   const getContextForSession = useMemoryStore((s) => s.getContextForSession);
 
   const cliLabel = cli === "claude" ? "Claude" : "Codex";
+  const models = cli === "claude" ? CLAUDE_MODELS : CODEX_MODELS;
+
+  function handleCliChange(newCli: CliChoice) {
+    setCli(newCli);
+    setModel(null); // Reset to system default when switching CLIs
+  }
 
   function handleProfileChange(profileId: string | null) {
     setSelectedProfileId(profileId);
     if (profileId) {
       const profile = profiles.find((p) => p.id === profileId);
       if (profile?.defaultModel) {
-        const matchingModel = MODELS.find((m) => m.value && profile.defaultModel.includes(m.value));
+        const matchingModel = models.find((m) => m.value && profile.defaultModel.includes(m.value));
         if (matchingModel) setModel(matchingModel.value);
       }
     }
@@ -126,7 +140,7 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
           {/* CLI toggle */}
           <div className="flex rounded-lg border border-bg-border overflow-hidden">
             <button
-              onClick={() => setCli("claude")}
+              onClick={() => handleCliChange("claude")}
               className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
                 cli === "claude"
                   ? "bg-accent-green/15 text-accent-green border-r border-bg-border"
@@ -136,7 +150,7 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
               Claude
             </button>
             <button
-              onClick={() => setCli("codex")}
+              onClick={() => handleCliChange("codex")}
               className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
                 cli === "codex"
                   ? "bg-accent-green/15 text-accent-green"
@@ -202,7 +216,7 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
               Model
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {MODELS.map((m) => (
+              {models.map((m) => (
                 <button
                   key={m.label}
                   onClick={() => setModel(m.value)}

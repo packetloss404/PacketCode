@@ -3,9 +3,9 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { useIssueStore } from "@/stores/issueStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { useExtensionStore } from "@/stores/extensionStore";
-import { useAppStore, isExtensionView, extensionViewId } from "@/stores/appStore";
-import { getExtensionsSorted } from "@/extensions/registry";
+import { useModuleStore } from "@/stores/moduleStore";
+import { useAppStore, moduleViewId } from "@/stores/appStore";
+import { getModulesSorted } from "@/modules/registry";
 import { useState } from "react";
 import { SpecImportModal } from "./SpecImportModal";
 import type { AgentProfile } from "@/types/profiles";
@@ -287,8 +287,8 @@ export function ToolsView() {
           )}
         </div>
 
-        {/* Extensions — spans full width */}
-        <ExtensionsCard />
+        {/* Modules — spans full width */}
+        <ModulesCard />
       </div>
 
       {showSpecImport && (
@@ -312,57 +312,57 @@ const CATEGORY_COLORS: Record<string, string> = {
   utility: "bg-bg-elevated text-text-muted",
 };
 
-function ExtensionsCard() {
-  const extensions = getExtensionsSorted();
-  const { states, toggleExtension } = useExtensionStore();
+function ModulesCard() {
+  const modules = getModulesSorted();
+  const { states, toggleModule } = useModuleStore();
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
 
-  const enabledCount = extensions.filter((ext) => states[ext.id]?.enabled).length;
+  const enabledCount = modules.filter((mod) => states[mod.id]?.enabled).length;
 
   return (
     <div className="bg-bg-secondary border border-bg-border rounded-lg p-4 col-span-2">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold text-text-primary flex items-center gap-2">
           <Puzzle size={12} className="text-accent-blue" />
-          Extensions
+          Modules
         </h3>
         <span className="text-[10px] text-text-muted px-1.5 py-0.5 bg-bg-elevated rounded">
-          {enabledCount} of {extensions.length} enabled
+          {enabledCount} of {modules.length} enabled
         </span>
       </div>
 
       <div className="flex flex-col gap-2">
-        {extensions.map((ext) => {
-          const enabled = states[ext.id]?.enabled ?? false;
-          const Icon = ext.icon;
+        {modules.map((mod) => {
+          const enabled = states[mod.id]?.enabled ?? false;
+          const Icon = mod.icon;
           return (
             <div
-              key={ext.id}
+              key={mod.id}
               className="flex items-center gap-3 px-3 py-2 bg-bg-primary border border-bg-border rounded"
             >
-              <span className={enabled ? ext.iconColor : "text-text-muted"}>
+              <span className={enabled ? mod.iconColor : "text-text-muted"}>
                 <Icon size={12} />
               </span>
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] text-text-primary font-medium flex items-center gap-2">
-                  {ext.name}
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[ext.category] ?? "bg-bg-elevated text-text-muted"}`}>
-                    {CATEGORY_LABELS[ext.category] ?? ext.category}
+                  {mod.name}
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[mod.category] ?? "bg-bg-elevated text-text-muted"}`}>
+                    {CATEGORY_LABELS[mod.category] ?? mod.category}
                   </span>
                 </div>
                 <div className="text-[10px] text-text-muted truncate">
-                  {ext.description}
-                  {ext.shortcutHint && (
-                    <span className="ml-2 text-text-muted opacity-60">({ext.shortcutHint})</span>
+                  {mod.description}
+                  {mod.shortcutHint && (
+                    <span className="ml-2 text-text-muted opacity-60">({mod.shortcutHint})</span>
                   )}
                 </div>
               </div>
               <button
                 onClick={() => {
-                  toggleExtension(ext.id);
-                  // If disabling the currently active extension, redirect to tools
-                  if (enabled && activeView === extensionViewId(ext.id)) {
+                  toggleModule(mod.id);
+                  // If disabling the currently active module, redirect to tools
+                  if (enabled && activeView === moduleViewId(mod.id)) {
                     setActiveView("tools");
                   }
                 }}

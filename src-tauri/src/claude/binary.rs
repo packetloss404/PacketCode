@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 /// Discover the Claude CLI binary path.
 /// Checks PATH first (via `where` on Windows), then common global install locations.
-#[allow(dead_code)]
 pub fn find_claude_binary() -> Option<PathBuf> {
     // Try `where claude` on Windows
     #[cfg(windows)]
@@ -65,6 +64,28 @@ pub fn find_claude_binary() -> Option<PathBuf> {
 
     // Fallback: just try "claude" and let the OS resolve it
     Some(PathBuf::from("claude"))
+}
+
+/// Build a `tokio::process::Command` for the Claude CLI with the correct binary path
+/// and Windows console-hiding flags pre-applied.
+pub fn claude_command() -> Result<tokio::process::Command, String> {
+    let binary = find_claude_binary()
+        .ok_or_else(|| "Failed to run Claude CLI: program not found. Is claude installed and on PATH?".to_string())?;
+
+    let mut cmd = tokio::process::Command::new(binary);
+
+    // Prevent "nested session" detection when PacketCode itself runs inside Claude Code
+    cmd.env_remove("CLAUDECODE");
+    cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+
+    #[cfg(windows)]
+    {
+        #[allow(unused_imports)]
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    Ok(cmd)
 }
 
 /// Check if Claude CLI is available and return its version string.

@@ -12,9 +12,9 @@ import { MemoryView } from "@/components/views/MemoryView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { useAppStore, getExtensionId, extensionViewId } from "@/stores/appStore";
-import { useExtensionStore } from "@/stores/extensionStore";
-import { getExtension } from "@/extensions/registry";
+import { useAppStore, getModuleId, moduleViewId } from "@/stores/appStore";
+import { useModuleStore } from "@/stores/moduleStore";
+import { getModule } from "@/modules/registry";
 import { useStatusLinePoller } from "@/hooks/useStatusLine";
 import { useCodexStatusLinePoller } from "@/hooks/useCodexStatusLine";
 import type { AppView } from "@/stores/appStore";
@@ -48,10 +48,10 @@ export default function App() {
     localStorage.setItem("packetcode:project-path", projectPath);
   }, [projectPath]);
 
-  // Guard: if active view is a disabled extension, redirect to tools
+  // Guard: if active view is a disabled module, redirect to tools
   useEffect(() => {
-    const extId = getExtensionId(activeView);
-    if (extId && !useExtensionStore.getState().isEnabled(extId)) {
+    const modId = getModuleId(activeView);
+    if (modId && !useModuleStore.getState().isEnabled(modId)) {
       setActiveView("tools");
     }
   }, [activeView, setActiveView]);
@@ -111,10 +111,10 @@ export default function App() {
         };
         // Shift+6 -> Vibe Architect (only if enabled)
         if (e.key === "^") {
-          const extView = extensionViewId("vibe-architect");
-          if (useExtensionStore.getState().isEnabled("vibe-architect")) {
+          const modView = moduleViewId("vibe-architect");
+          if (useModuleStore.getState().isEnabled("vibe-architect")) {
             e.preventDefault();
-            setActiveView(extView);
+            setActiveView(modView);
           }
           return;
         }
@@ -180,15 +180,15 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
       return <MemoryView />;
   }
 
-  // Extension views — dynamic lookup
-  const extId = getExtensionId(activeView);
-  if (!extId) return null;
-  const ext = getExtension(extId);
-  if (!ext || !useExtensionStore.getState().isEnabled(extId)) return null;
-  const ExtComponent = ext.component;
+  // Module views — dynamic lookup
+  const modId = getModuleId(activeView);
+  if (!modId) return null;
+  const mod = getModule(modId);
+  if (!mod || !useModuleStore.getState().isEnabled(modId)) return null;
+  const ModComponent = mod.component;
   return (
-    <ErrorBoundary fallbackMessage={`${ext.name} encountered an error`}>
-      <ExtComponent />
+    <ErrorBoundary fallbackMessage={`${mod.name} encountered an error`}>
+      <ModComponent />
     </ErrorBoundary>
   );
 }

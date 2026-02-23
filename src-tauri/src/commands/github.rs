@@ -177,18 +177,9 @@ Be specific — reference actual file paths and code."#,
         title, body
     );
 
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = crate::claude::binary::claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);
     cmd.current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()

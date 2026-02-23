@@ -1,8 +1,8 @@
 import { Lightbulb } from "lucide-react";
 import { IdeationView } from "@/components/views/IdeationView";
-import type { ExtensionManifest } from "@/types/extensions";
+import type { ModuleManifest } from "@/types/modules";
 
-export const ideationExtension: ExtensionManifest = {
+export const ideationModule: ModuleManifest = {
   id: "ideation",
   name: "Ideation Scanner",
   description: "Scan your codebase for improvement ideas and feature suggestions",

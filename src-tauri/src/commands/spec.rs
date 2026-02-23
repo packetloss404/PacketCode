@@ -1,3 +1,5 @@
+use crate::claude::binary::claude_command;
+
 #[tauri::command]
 pub async fn parse_spec_to_tickets(spec_text: String) -> Result<String, String> {
     let prompt = format!(
@@ -17,19 +19,8 @@ PROJECT SPEC:
         spec_text
     );
 
-    // On Windows, npm global installs use .cmd wrappers
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);
-
-    // Windows: hide console window
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()

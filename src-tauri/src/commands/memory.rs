@@ -1,19 +1,12 @@
+use crate::claude::binary::claude_command;
+
 #[tauri::command]
 pub async fn scan_codebase_memory(project_path: String) -> Result<String, String> {
     let prompt = r#"List the key files in this project with 1-line summaries. Output ONLY a JSON array with no markdown formatting, like: [{"path": "src/main.ts", "summary": "App entry point"}]. Include the most important 30-50 files."#;
 
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = claude_command()?;
     cmd.args(&["-p", prompt, "--output-format", "text"]);
     cmd.current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()
@@ -38,18 +31,9 @@ Session log:
         session_log
     );
 
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);
     cmd.current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()
@@ -75,18 +59,9 @@ Session summaries:
         summaries
     );
 
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);
     cmd.current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()

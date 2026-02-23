@@ -1,3 +1,5 @@
+use crate::claude::binary::claude_command;
+
 #[tauri::command]
 pub async fn generate_ideas(
     project_path: String,
@@ -23,18 +25,9 @@ Generate 5-15 ideas across the requested categories. Be specific and actionable.
         types_str
     );
 
-    let command = if cfg!(windows) { "claude.cmd" } else { "claude" };
-
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);
     cmd.current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let output = cmd
         .output()

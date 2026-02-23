@@ -1,21 +1,21 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 
-export type ExtensionCategory = "ai" | "integration" | "utility" | "analysis";
+export type ModuleCategory = "ai" | "integration" | "utility" | "analysis";
 
-export interface ExtensionManifest {
+export interface ModuleManifest {
   id: string;
   name: string;
   description: string;
   icon: LucideIcon;
   iconColor: string;
   component: ComponentType;
-  category: ExtensionCategory;
+  category: ModuleCategory;
   order?: number;
   enabledByDefault: boolean;
   shortcutHint?: string;
 }
 
-export interface ExtensionState {
+export interface ModuleState {
   enabled: boolean;
 }
