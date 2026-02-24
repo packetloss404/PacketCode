@@ -662,9 +662,12 @@ function TestsTab({ report }: { report: CodeQualityReport }) {
       <div>
         <h4 className="text-[11px] text-text-secondary font-medium mb-1">Detection</h4>
         <p className="text-[10px] text-text-muted leading-relaxed">
-          Files are detected as tests if their path contains <code className="text-accent-blue">test</code>,{" "}
-          <code className="text-accent-blue">spec</code>, or <code className="text-accent-blue">__tests__</code>.
-          For more accurate coverage data, integrate a coverage tool and import results.
+          Files are detected as tests when the path includes{" "}
+          <code className="text-accent-blue">/tests/</code> or{" "}
+          <code className="text-accent-blue">/__tests__/</code>, or when filenames match{" "}
+          <code className="text-accent-blue">*.test.*</code> or{" "}
+          <code className="text-accent-blue">*.spec.*</code>. For more accurate coverage
+          data, integrate a coverage tool and import results.
         </p>
       </div>
 

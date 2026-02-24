@@ -3,7 +3,9 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{
+    native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -27,6 +29,7 @@ pub struct PtySessionInfo {
 /// Internal state for one PTY session
 struct PtySession {
     info: PtySessionInfo,
+    child: Box<dyn PtyChild + Send>,
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     kill_flag: Arc<std::sync::atomic::AtomicBool>,
@@ -129,6 +132,7 @@ pub fn create_pty_session(
 
     let session = PtySession {
         info: info.clone(),
+        child,
         writer,
         master: pair.master,
         kill_flag: kill_flag.clone(),
@@ -177,11 +181,9 @@ pub fn create_pty_session(
             }
         }
 
-        // Mark session as dead
+        // Remove session so stale entries cannot accumulate.
         if let Ok(mut mgr) = mgr_ref.lock() {
-            if let Some(session) = mgr.sessions.get_mut(&sid) {
-                session.info.alive = false;
-            }
+            mgr.sessions.remove(&sid);
         }
 
         let _ = app_handle.emit("pty:exit", &sid);
@@ -246,13 +248,14 @@ pub fn kill_pty(
     session_id: String,
 ) -> Result<(), String> {
     let mut mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
-    if let Some(session) = mgr.sessions.get_mut(&session_id) {
+    if let Some(mut session) = mgr.sessions.remove(&session_id) {
         session
             .kill_flag
             .store(true, std::sync::atomic::Ordering::Relaxed);
         session.info.alive = false;
-        // Drop the writer to close the PTY input, which signals the child
-        // We replace with a dummy that does nothing
+        let _ = session.child.kill();
+    } else {
+        return Err(format!("PTY session {} not found", session_id));
     }
 
     Ok(())

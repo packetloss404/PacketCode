@@ -122,8 +122,17 @@ fn line_complexity(line: &str, lang: &str) -> u32 {
 }
 
 fn is_test_file(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    lower.contains("test") || lower.contains("spec") || lower.contains("__tests__")
+    let normalized = path.replace('\\', "/").to_lowercase();
+    if normalized.starts_with("tests/")
+        || normalized.starts_with("__tests__/")
+        || normalized.contains("/tests/")
+        || normalized.contains("/__tests__/")
+    {
+        return true;
+    }
+
+    let file_name = normalized.rsplit('/').next().unwrap_or("");
+    file_name.contains(".test.") || file_name.contains(".spec.")
 }
 
 fn analyze_file(path: &Path, lang: &str) -> (u32, u32, u32, u32, u32) {
@@ -380,4 +389,113 @@ pub async fn analyze_code_quality(project_path: String) -> Result<CodeQualityRep
         test_ratio,
         org_score,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("packetcode-{}-{}", prefix, unique));
+        fs::create_dir_all(&dir).expect("failed to create temp test directory");
+        dir
+    }
+
+    fn normalize(path: &str) -> String {
+        path.replace('\\', "/")
+    }
+
+    #[test]
+    fn is_test_file_matches_strict_test_patterns() {
+        assert!(is_test_file("src/foo.test.ts"));
+        assert!(is_test_file("src/foo.spec.tsx"));
+        assert!(is_test_file("tests/integration.ts"));
+        assert!(is_test_file("src\\__tests__\\suite.ts"));
+    }
+
+    #[test]
+    fn is_test_file_rejects_substring_false_positives() {
+        assert!(!is_test_file("src/specification.ts"));
+        assert!(!is_test_file("src/latestest.ts"));
+        assert!(!is_test_file("src/testimony.ts"));
+    }
+
+    #[test]
+    fn line_complexity_ignores_non_code_languages() {
+        assert_eq!(line_complexity(r#"{"if":true}"#, "json"), 0);
+        assert_eq!(line_complexity("if (x) {}", "css"), 0);
+    }
+
+    #[test]
+    fn analyze_file_counts_code_comments_and_complexity() {
+        let dir = temp_test_dir("code-quality-analyze-file");
+        let path = dir.join("sample.rs");
+        fs::write(
+            &path,
+            "// comment\nlet x = 1;\nif x > 0 {\n}\n",
+        )
+        .expect("failed to write fixture");
+
+        let (code, comments, blanks, total, complexity) = analyze_file(&path, "rust");
+        assert_eq!(code, 3);
+        assert_eq!(comments, 1);
+        assert_eq!(blanks, 0);
+        assert_eq!(total, 4);
+        assert_eq!(complexity, 1);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn walk_dir_skips_known_directories() {
+        let dir = temp_test_dir("code-quality-walk-dir");
+        fs::create_dir_all(dir.join("src")).expect("failed to create src dir");
+        fs::create_dir_all(dir.join("node_modules/pkg")).expect("failed to create node_modules dir");
+
+        fs::write(dir.join("src/app.ts"), "export const x = 1;\n").expect("failed to write app.ts");
+        fs::write(dir.join("node_modules/pkg/index.ts"), "export const y = 2;\n")
+            .expect("failed to write node_modules fixture");
+
+        let mut files = Vec::new();
+        walk_dir(&dir, &dir, &mut files);
+        let normalized: Vec<String> = files.iter().map(|(p, _)| normalize(p)).collect();
+
+        assert!(normalized.iter().any(|p| p.ends_with("src/app.ts")));
+        assert!(!normalized.iter().any(|p| p.contains("node_modules")));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn analyze_code_quality_counts_only_strict_test_files() {
+        let dir = temp_test_dir("code-quality-report-tests");
+        fs::create_dir_all(dir.join("src")).expect("failed to create src dir");
+        fs::create_dir_all(dir.join("tests")).expect("failed to create tests dir");
+
+        fs::write(dir.join("src/main.ts"), "export const main = true;\n")
+            .expect("failed to write main.ts");
+        fs::write(dir.join("src/specification.ts"), "export const spec = true;\n")
+            .expect("failed to write specification.ts");
+        fs::write(dir.join("src/app.test.ts"), "describe('x', () => {});\n")
+            .expect("failed to write app.test.ts");
+        fs::write(dir.join("tests/integration.ts"), "describe('i', () => {});\n")
+            .expect("failed to write tests/integration.ts");
+
+        let report = analyze_code_quality(dir.to_string_lossy().to_string())
+            .await
+            .expect("analysis should succeed");
+
+        // 4 recognized TypeScript files; only *.test.* and /tests/ should count as test files.
+        assert_eq!(report.total_files, 4);
+        assert_eq!(report.test_files, 2);
+
+        let _ = fs::remove_dir_all(dir);
+    }
 }

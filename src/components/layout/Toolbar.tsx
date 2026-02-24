@@ -37,6 +37,7 @@ export function Toolbar() {
 
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
+  const moduleStates = useModuleStore((s) => s.states);
 
   const projectName = projectPath.split(/[/\\]/).pop() || "PacketCode";
 
@@ -152,7 +153,7 @@ export function Toolbar() {
               </button>
               {/* Dynamic module entries */}
               {getModulesSorted()
-                .filter((mod) => useModuleStore.getState().isEnabled(mod.id))
+                .filter((mod) => moduleStates[mod.id]?.enabled ?? false)
                 .map((mod) => {
                   const Icon = mod.icon;
                   return (

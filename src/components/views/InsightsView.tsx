@@ -9,6 +9,7 @@ import {
   User,
 } from "lucide-react";
 import { useInsightsStore } from "@/stores/insightsStore";
+import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { InsightsMessage } from "@/types/insights";
 
 function formatTime(ts: number): string {
@@ -23,65 +24,6 @@ function formatDate(ts: number): string {
     month: "short",
     day: "numeric",
   });
-}
-
-/** Simple markdown-ish renderer: handles code fences, inline code, bold, and paragraphs */
-function MarkdownContent({ content }: { content: string }) {
-  const parts = content.split(/(```[\s\S]*?```)/g);
-
-  return (
-    <div className="text-sm leading-relaxed space-y-2">
-      {parts.map((part, i) => {
-        if (part.startsWith("```")) {
-          const match = part.match(/```(\w*)\n?([\s\S]*?)```/);
-          const code = match ? match[2] : part.slice(3, -3);
-          return (
-            <pre
-              key={i}
-              className="bg-bg-primary rounded p-3 text-xs overflow-x-auto border border-bg-border"
-            >
-              <code>{code.trim()}</code>
-            </pre>
-          );
-        }
-        // Split into paragraphs and handle inline formatting
-        return part.split("\n\n").map((para, j) => (
-          <p key={`${i}-${j}`} className="whitespace-pre-wrap">
-            {para.split(/(`[^`]+`)/).map((seg, k) =>
-              seg.startsWith("`") && seg.endsWith("`") ? (
-                <code
-                  key={k}
-                  className="bg-bg-primary px-1 py-0.5 rounded text-xs text-accent-amber"
-                >
-                  {seg.slice(1, -1)}
-                </code>
-              ) : (
-                <span key={k}>
-                  {seg
-                    .split(/(\*\*.*?\*\*)/g)
-                    .flatMap((fragment, fi) => {
-                      const boldMatch = fragment.match(/^\*\*(.+?)\*\*$/);
-                      const content = boldMatch ? boldMatch[1] : fragment;
-                      const lines = content.split("\n");
-                      const elements: React.ReactNode[] = [];
-                      lines.forEach((line, li) => {
-                        if (li > 0) elements.push(<br key={`${fi}-br-${li}`} />);
-                        if (boldMatch) {
-                          elements.push(<strong key={`${fi}-${li}`}>{line}</strong>);
-                        } else {
-                          elements.push(line);
-                        }
-                      });
-                      return elements;
-                    })}
-                </span>
-              )
-            )}
-          </p>
-        ));
-      })}
-    </div>
-  );
 }
 
 function MessageBubble({ message }: { message: InsightsMessage }) {
@@ -108,7 +50,10 @@ function MessageBubble({ message }: { message: InsightsMessage }) {
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <MarkdownContent content={message.content} />
+          <MarkdownRenderer
+            content={message.content}
+            className="text-sm leading-relaxed space-y-2"
+          />
         )}
         <span className="text-[10px] text-text-muted mt-1 block">
           {formatTime(message.timestamp)}

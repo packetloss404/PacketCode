@@ -1,40 +1,20 @@
-import { useEffect, useRef } from "react";
 import { readCodexStatusLineStates } from "@/lib/tauri";
 import { useCodexStatusLineStore, useCodexStatusLineForCwd } from "@/stores/codexStatusLineStore";
+import { useStatusLinePollerBase } from "@/hooks/useStatusLinePollerBase";
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 5000;
 
 /**
- * Polls readCodexStatusLineStates every 2s and updates the store.
+ * Polls readCodexStatusLineStates every 5s and updates the store.
  * Call once at the app root level.
  */
 export function useCodexStatusLinePoller() {
   const update = useCodexStatusLineStore((s) => s.update);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    async function poll() {
-      try {
-        const states = await readCodexStatusLineStates();
-        if (states.length > 0) {
-          update(states);
-        }
-      } catch {
-        // Silently ignore polling errors
-      }
-    }
-
-    // Initial poll
-    poll();
-
-    intervalRef.current = setInterval(poll, POLL_INTERVAL_MS);
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [update]);
+  useStatusLinePollerBase({
+    read: readCodexStatusLineStates,
+    update,
+    intervalMs: POLL_INTERVAL_MS,
+  });
 }
 
 export { useCodexStatusLineForCwd };

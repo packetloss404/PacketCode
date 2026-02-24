@@ -21,6 +21,5 @@ export interface GitHubIssue {
 }
 
 export interface GitHubConfig {
-  token: string;
   selectedRepo: { owner: string; repo: string } | null;
 }

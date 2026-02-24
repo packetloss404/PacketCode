@@ -16,6 +16,8 @@ export function ToolsView() {
   const setTicketPrefix = useIssueStore((s) => s.setTicketPrefix);
   const addEpic = useIssueStore((s) => s.addEpic);
   const addLabel = useIssueStore((s) => s.addLabel);
+  const epics = useIssueStore((s) => s.epics);
+  const labels = useIssueStore((s) => s.labels);
   const [newEpic, setNewEpic] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [showSpecImport, setShowSpecImport] = useState(false);
@@ -118,7 +120,7 @@ export function ToolsView() {
             </button>
           </div>
           <div className="flex flex-wrap gap-1">
-            {useIssueStore.getState().epics.map((e) => (
+            {epics.map((e) => (
               <span
                 key={e}
                 className="text-[10px] px-1.5 py-0.5 bg-accent-purple/15 text-accent-purple rounded"
@@ -161,7 +163,7 @@ export function ToolsView() {
             </button>
           </div>
           <div className="flex flex-wrap gap-1">
-            {useIssueStore.getState().labels.map((l) => (
+            {labels.map((l) => (
               <span
                 key={l}
                 className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded"

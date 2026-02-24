@@ -33,7 +33,7 @@ export function useGitInfo() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [projectPath]);
+  }, [projectPath, setGitBranch]);
 
   return gitBranch;
 }

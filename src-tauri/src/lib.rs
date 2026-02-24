@@ -1,9 +1,8 @@
 mod claude;
 mod commands;
-mod session;
 
+use commands::github::create_github_auth_state;
 use commands::pty::create_shared_pty_manager;
-use session::manager::create_shared_manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,7 +11,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(create_shared_manager())
+        .manage(create_github_auth_state())
         .manage(create_shared_pty_manager())
         .invoke_handler(tauri::generate_handler![
             // PTY-based sessions (primary)
@@ -21,12 +20,6 @@ pub fn run() {
             commands::pty::resize_pty,
             commands::pty::kill_pty,
             commands::pty::list_pty_sessions,
-            // Legacy JSONL sessions (kept for flexibility)
-            commands::session::create_session,
-            commands::session::send_input,
-            commands::session::kill_session,
-            commands::session::list_sessions,
-            commands::session::get_session_info,
             // Git
             commands::git::get_git_branch,
             commands::git::get_git_status,
@@ -44,6 +37,9 @@ pub fn run() {
             // Ideation scanner
             commands::ideation::generate_ideas,
             // GitHub integration
+            commands::github::github_set_token,
+            commands::github::github_clear_token,
+            commands::github::github_has_token,
             commands::github::github_list_repos,
             commands::github::github_list_issues,
             commands::github::github_get_issue,

@@ -1,4 +1,22 @@
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
+use tauri::State;
+use tokio::sync::RwLock;
+
+pub struct GitHubAuthState {
+    token: RwLock<Option<String>>,
+}
+
+impl GitHubAuthState {
+    pub fn new() -> Self {
+        Self {
+            token: RwLock::new(None),
+        }
+    }
+}
+
+pub fn create_github_auth_state() -> GitHubAuthState {
+    GitHubAuthState::new()
+}
 
 fn github_client(token: &str) -> Result<reqwest::Client, String> {
     let mut headers = reqwest::header::HeaderMap::new();
@@ -28,8 +46,72 @@ fn github_client(token: &str) -> Result<reqwest::Client, String> {
 }
 
 #[tauri::command]
-pub async fn github_list_repos(token: String) -> Result<String, String> {
-    let client = github_client(&token)?;
+pub async fn github_set_token(
+    auth: State<'_, GitHubAuthState>,
+    token: String,
+) -> Result<(), String> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Err("GitHub token cannot be empty".to_string());
+    }
+    let mut guard = auth.token.write().await;
+    *guard = Some(trimmed.to_string());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn github_clear_token(auth: State<'_, GitHubAuthState>) -> Result<(), String> {
+    let mut guard = auth.token.write().await;
+    *guard = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn github_has_token(auth: State<'_, GitHubAuthState>) -> Result<bool, String> {
+    let guard = auth.token.read().await;
+    Ok(guard.is_some())
+}
+
+async fn github_client_from_state(auth: &GitHubAuthState) -> Result<reqwest::Client, String> {
+    let token = auth
+        .token
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "GitHub token not set. Connect first.".to_string())?;
+    github_client(&token)
+}
+
+async fn github_get_issue_with_client(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    issue_number: u32,
+) -> Result<String, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}",
+        owner, repo, issue_number
+    );
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error {}: {}", status, body));
+    }
+
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
+}
+
+#[tauri::command]
+pub async fn github_list_repos(auth: State<'_, GitHubAuthState>) -> Result<String, String> {
+    let client = github_client_from_state(auth.inner()).await?;
     let resp = client
         .get("https://api.github.com/user/repos?sort=updated&per_page=30")
         .send()
@@ -49,11 +131,11 @@ pub async fn github_list_repos(token: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn github_list_issues(
-    token: String,
+    auth: State<'_, GitHubAuthState>,
     owner: String,
     repo: String,
 ) -> Result<String, String> {
-    let client = github_client(&token)?;
+    let client = github_client_from_state(auth.inner()).await?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues?state=open&per_page=50",
         owner, repo
@@ -77,36 +159,18 @@ pub async fn github_list_issues(
 
 #[tauri::command]
 pub async fn github_get_issue(
-    token: String,
+    auth: State<'_, GitHubAuthState>,
     owner: String,
     repo: String,
     issue_number: u32,
 ) -> Result<String, String> {
-    let client = github_client(&token)?;
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/issues/{}",
-        owner, repo, issue_number
-    );
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
-    }
-
-    resp.text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+    let client = github_client_from_state(auth.inner()).await?;
+    github_get_issue_with_client(&client, &owner, &repo, issue_number).await
 }
 
 #[tauri::command]
 pub async fn github_create_pr(
-    token: String,
+    auth: State<'_, GitHubAuthState>,
     owner: String,
     repo: String,
     title: String,
@@ -114,7 +178,7 @@ pub async fn github_create_pr(
     head: String,
     base: String,
 ) -> Result<String, String> {
-    let client = github_client(&token)?;
+    let client = github_client_from_state(auth.inner()).await?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/pulls",
         owner, repo
@@ -147,14 +211,16 @@ pub async fn github_create_pr(
 
 #[tauri::command]
 pub async fn github_investigate_issue(
+    auth: State<'_, GitHubAuthState>,
     project_path: String,
-    token: String,
     owner: String,
     repo: String,
     issue_number: u32,
 ) -> Result<String, String> {
+    let client = github_client_from_state(auth.inner()).await?;
+
     // First fetch the issue details
-    let issue_json = github_get_issue(token, owner, repo, issue_number).await?;
+    let issue_json = github_get_issue_with_client(&client, &owner, &repo, issue_number).await?;
     let issue: serde_json::Value =
         serde_json::from_str(&issue_json).map_err(|e| format!("Failed to parse issue: {}", e))?;
 

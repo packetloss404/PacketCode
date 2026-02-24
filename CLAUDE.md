@@ -12,7 +12,7 @@ PacketCode is a custom desktop IDE built on Tauri v2 that wraps Claude Code and 
 - **Styling:** Tailwind CSS with custom dark theme tokens (`bg-bg-primary`, `text-text-secondary`, `accent-green`, etc.)
 - **Icons:** lucide-react
 - **Terminal:** xterm.js with PTY backend (portable-pty)
-- **Markdown:** react-markdown + remark-gfm + react-syntax-highlighter
+- **Markdown:** react-markdown + remark-gfm
 
 ## Project Structure
 
@@ -21,6 +21,7 @@ src/
   App.tsx                          # Root component, view routing
   main.tsx                         # React entry point
   components/
+    common/MarkdownRenderer.tsx    # Shared markdown rendering
     explorer/FileExplorer.tsx      # Floating file tree panel
     issues/                        # Kanban issue board (IssueBoard, IssueCard, etc.)
     layout/                        # TitleBar, Toolbar, PaneContainer, StatusBar, SessionTabBar
@@ -28,10 +29,9 @@ src/
     session/                       # TerminalPane, NewSessionModal, ClaudeStatusBar, CodexStatusBar
     ui/                            # Button, Dropdown, ErrorBoundary
     views/                         # GitHubView, MemoryView, ToolsView, VibeArchitectView, etc.
-  hooks/                           # useGitInfo, useStatusLine, useCodexStatusLine, useSession
+  hooks/                           # useGitInfo, useStatusLine, useCodexStatusLine, shared poller hooks
   lib/
     tauri.ts                       # All Tauri invoke wrappers
-    messageParser.ts               # JSONL message parsing
   stores/                          # Zustand stores (appStore, layoutStore, issueStore, etc.)
   types/                           # TypeScript interfaces
 
@@ -40,7 +40,6 @@ src-tauri/
     lib.rs                         # Tauri app builder, command registration
     commands/
       pty.rs                       # PTY session management
-      session.rs                   # Legacy JSONL sessions
       git.rs                       # Git branch/status
       github.rs                    # GitHub API (reqwest)
       memory.rs                    # AI memory commands
@@ -52,7 +51,6 @@ src-tauri/
       fs.rs                        # Directory listing
       mod.rs                       # Module exports
     claude/                        # Claude CLI interaction helpers
-    session/                       # Session manager
 ```
 
 ## Key Conventions
@@ -60,10 +58,12 @@ src-tauri/
 - **Views** are routed via `AppView` union type in `appStore.ts` — add new views there
 - **Tauri commands** go in `src-tauri/src/commands/`, register in `lib.rs`, add TS bindings in `src/lib/tauri.ts`
 - **Stores** use Zustand with `create<StoreInterface>()` pattern; persist to `packetcode:*` localStorage keys
+- **Session architecture** is PTY-only (`create_pty_session`, `write_pty`, `resize_pty`, `kill_pty`); legacy JSONL session stack is removed
+- **GitHub auth** uses backend memory only; token is not persisted across app restarts
 - **Theme tokens** — never use raw Tailwind colors; use `bg-bg-primary`, `text-accent-green`, etc.
 - **Font sizes** — primarily `text-xs` (12px) and `text-[11px]`/`text-[10px]` for compact UI
 - **Icons** — use lucide-react, typically `size={12}` in toolbars, `size={14}` in headers
-- **CLI commands** — Rust commands that invoke Claude use `claude.cmd` on Windows, `claude` on other platforms; always set `creation_flags(0x08000000)` on Windows to hide console window
+- **CLI commands** — PTY session startup resolves `.cmd` wrappers on Windows (e.g., `claude.cmd`, `codex.cmd`)
 
 ## Build & Run
 
@@ -79,7 +79,8 @@ pnpm tauri dev
 # Build
 pnpm tauri build
 
-# Frontend only (type check + vite build)
+# Lint + type check build
+pnpm lint
 pnpm build
 
 # Rust check only

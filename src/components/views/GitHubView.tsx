@@ -14,18 +14,23 @@ import {
 import { useGitHubStore } from "@/stores/githubStore";
 import { useIssueStore } from "@/stores/issueStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { GitHubIssue } from "@/types/github";
 
 export function GitHubView() {
   const {
     config,
+    isConnected,
+    isInitializing,
     repos,
     issues,
     isLoading,
     error,
     investigation,
     isInvestigating,
-    setToken,
+    initializeAuth,
+    connect,
+    disconnect,
     fetchRepos,
     selectRepo,
     fetchIssues,
@@ -43,23 +48,25 @@ export function GitHubView() {
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
   const [showPRModal, setShowPRModal] = useState(false);
 
-  const isConnected = !!config.token;
+  useEffect(() => {
+    initializeAuth();
+  }, [initializeAuth]);
 
   useEffect(() => {
     if (isConnected && repos.length === 0) {
       fetchRepos();
     }
-  }, [isConnected]);
+  }, [isConnected, repos.length, fetchRepos]);
 
   useEffect(() => {
-    if (config.selectedRepo) {
+    if (isConnected && config.selectedRepo) {
       fetchIssues();
     }
-  }, [config.selectedRepo?.owner, config.selectedRepo?.repo]);
+  }, [isConnected, config.selectedRepo, fetchIssues]);
 
-  function handleConnect() {
+  async function handleConnect() {
     if (tokenInput.trim()) {
-      setToken(tokenInput.trim());
+      await connect(tokenInput.trim());
       setTokenInput("");
     }
   }
@@ -106,6 +113,9 @@ export function GitHubView() {
               Enter a personal access token with repo scope to browse
               repositories and issues.
             </p>
+            {isInitializing && (
+              <p className="text-[11px] text-text-muted mb-3">Checking auth state...</p>
+            )}
             <div className="flex gap-2">
               <input
                 type="password"
@@ -117,6 +127,7 @@ export function GitHubView() {
               />
               <button
                 onClick={handleConnect}
+                disabled={isLoading || isInitializing}
                 className="px-4 py-1.5 text-xs bg-accent-green/15 text-accent-green border border-accent-green/30 rounded font-medium hover:bg-accent-green/25 transition-colors"
               >
                 Connect
@@ -180,9 +191,7 @@ export function GitHubView() {
         </button>
 
         <button
-          onClick={() => {
-            setToken("");
-          }}
+          onClick={disconnect}
           className="text-[10px] text-text-muted hover:text-accent-red transition-colors"
         >
           Disconnect
@@ -323,9 +332,10 @@ export function GitHubView() {
 
               {/* Body */}
               <div className="bg-bg-secondary border border-bg-border rounded-lg p-4 mb-4">
-                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">
-                  {selectedIssue.body || "No description provided."}
-                </pre>
+                <MarkdownRenderer
+                  content={selectedIssue.body || "No description provided."}
+                  className="text-[11px] text-text-secondary leading-relaxed"
+                />
               </div>
 
               {/* Action buttons */}
@@ -366,9 +376,10 @@ export function GitHubView() {
                       Analyzing codebase...
                     </div>
                   ) : (
-                    <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">
-                      {investigation}
-                    </pre>
+                    <MarkdownRenderer
+                      content={investigation || ""}
+                      className="text-[11px] text-text-secondary leading-relaxed"
+                    />
                   )}
                 </div>
               )}

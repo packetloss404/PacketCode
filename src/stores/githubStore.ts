@@ -1,23 +1,63 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  githubClearToken,
+  githubCreatePr,
+  githubHasToken,
+  githubInvestigateIssue,
+  githubListIssues,
+  githubListRepos,
+  githubSetToken,
+} from "@/lib/tauri";
 import type { GitHubRepo, GitHubIssue, GitHubConfig } from "@/types/github";
 
-function loadConfig(): GitHubConfig {
+const STORAGE_KEY = "packetcode:github";
+
+interface LoadedConfig {
+  config: GitHubConfig;
+  legacyToken: string | null;
+}
+
+function loadConfig(): LoadedConfig {
   try {
-    const saved = localStorage.getItem("packetcode:github");
-    if (saved) return JSON.parse(saved);
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) {
+      return { config: { selectedRepo: null }, legacyToken: null };
+    }
+    const parsed = JSON.parse(saved) as {
+      token?: unknown;
+      selectedRepo?: unknown;
+    };
+    const selectedRepo =
+      parsed.selectedRepo &&
+      typeof parsed.selectedRepo === "object" &&
+      "owner" in parsed.selectedRepo &&
+      "repo" in parsed.selectedRepo
+        ? (parsed.selectedRepo as { owner: string; repo: string })
+        : null;
+    const legacyToken =
+      typeof parsed.token === "string" && parsed.token.trim()
+        ? parsed.token.trim()
+        : null;
+    return { config: { selectedRepo }, legacyToken };
   } catch {
     // ignore
+    return { config: { selectedRepo: null }, legacyToken: null };
   }
-  return { token: "", selectedRepo: null };
 }
 
 function saveConfig(config: GitHubConfig) {
-  localStorage.setItem("packetcode:github", JSON.stringify(config));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      selectedRepo: config.selectedRepo,
+    })
+  );
 }
 
 interface GitHubStore {
   config: GitHubConfig;
+  isConnected: boolean;
+  isInitializing: boolean;
   repos: GitHubRepo[];
   issues: GitHubIssue[];
   isLoading: boolean;
@@ -25,7 +65,9 @@ interface GitHubStore {
   investigation: string | null;
   isInvestigating: boolean;
 
-  setToken: (token: string) => void;
+  initializeAuth: () => Promise<void>;
+  connect: (token: string) => Promise<void>;
+  disconnect: () => Promise<void>;
   fetchRepos: () => Promise<void>;
   selectRepo: (owner: string, repo: string) => void;
   fetchIssues: () => Promise<void>;
@@ -40,8 +82,13 @@ interface GitHubStore {
   clearInvestigation: () => void;
 }
 
+const loaded = loadConfig();
+let pendingLegacyToken = loaded.legacyToken;
+
 export const useGitHubStore = create<GitHubStore>((set, get) => ({
-  config: loadConfig(),
+  config: loaded.config,
+  isConnected: false,
+  isInitializing: false,
   repos: [],
   issues: [],
   isLoading: false,
@@ -49,24 +96,91 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
   investigation: null,
   isInvestigating: false,
 
-  setToken: (token) => {
-    const config = { ...get().config, token };
-    saveConfig(config);
-    set({ config, repos: [], issues: [], error: null });
+  initializeAuth: async () => {
+    if (get().isInitializing) return;
+    set({ isInitializing: true, error: null });
+    try {
+      let hasToken = await githubHasToken();
+      if (!hasToken && pendingLegacyToken) {
+        await githubSetToken(pendingLegacyToken);
+        hasToken = true;
+      }
+
+      // One-time migration: rewrite persisted config without token.
+      if (pendingLegacyToken) {
+        pendingLegacyToken = null;
+        saveConfig(get().config);
+      }
+
+      set({
+        isConnected: hasToken,
+        isInitializing: false,
+      });
+    } catch (e) {
+      set({
+        isConnected: false,
+        isInitializing: false,
+        error: String(e),
+      });
+    }
+  },
+
+  connect: async (token) => {
+    const trimmed = token.trim();
+    if (!trimmed) return;
+    set({ isLoading: true, error: null });
+    try {
+      await githubSetToken(trimmed);
+      pendingLegacyToken = null;
+      set({
+        isConnected: true,
+        isLoading: false,
+        repos: [],
+        issues: [],
+      });
+    } catch (e) {
+      set({
+        isConnected: false,
+        isLoading: false,
+        error: String(e),
+      });
+    }
+  },
+
+  disconnect: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      await githubClearToken();
+      set({
+        isConnected: false,
+        isLoading: false,
+        repos: [],
+        issues: [],
+      });
+    } catch (e) {
+      set({
+        isLoading: false,
+        error: String(e),
+      });
+    }
   },
 
   fetchRepos: async () => {
-    const { config } = get();
-    if (!config.token) return;
+    if (!get().isConnected) return;
     set({ isLoading: true, error: null });
     try {
-      const json = await invoke<string>("github_list_repos", {
-        token: config.token,
-      });
+      const json = await githubListRepos();
       const repos: GitHubRepo[] = JSON.parse(json);
       set({ repos, isLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const message = String(e);
+      set({
+        isConnected: message.toLowerCase().includes("token not set")
+          ? false
+          : get().isConnected,
+        error: message,
+        isLoading: false,
+      });
     }
   },
 
@@ -78,37 +192,46 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
 
   fetchIssues: async () => {
     const { config } = get();
-    if (!config.token || !config.selectedRepo) return;
+    if (!get().isConnected || !config.selectedRepo) return;
     set({ isLoading: true, error: null });
     try {
-      const json = await invoke<string>("github_list_issues", {
-        token: config.token,
-        owner: config.selectedRepo.owner,
-        repo: config.selectedRepo.repo,
-      });
+      const json = await githubListIssues(
+        config.selectedRepo.owner,
+        config.selectedRepo.repo
+      );
       const issues: GitHubIssue[] = JSON.parse(json);
       set({ issues, isLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const message = String(e);
+      set({
+        isConnected: message.toLowerCase().includes("token not set")
+          ? false
+          : get().isConnected,
+        error: message,
+        isLoading: false,
+      });
     }
   },
 
   investigateIssue: async (projectPath, issueNumber) => {
     const { config } = get();
-    if (!config.token || !config.selectedRepo) return;
+    if (!get().isConnected || !config.selectedRepo) return;
     set({ isInvestigating: true, investigation: null });
     try {
-      const result = await invoke<string>("github_investigate_issue", {
+      const result = await githubInvestigateIssue(
         projectPath,
-        token: config.token,
-        owner: config.selectedRepo.owner,
-        repo: config.selectedRepo.repo,
-        issueNumber: issueNumber,
-      });
+        config.selectedRepo.owner,
+        config.selectedRepo.repo,
+        issueNumber
+      );
       set({ investigation: result, isInvestigating: false });
     } catch (e) {
+      const message = String(e);
       set({
-        error: String(e),
+        isConnected: message.toLowerCase().includes("token not set")
+          ? false
+          : get().isConnected,
+        error: message,
         isInvestigating: false,
         investigation: null,
       });
@@ -117,23 +240,29 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
 
   createPR: async (title, body, head, base) => {
     const { config } = get();
-    if (!config.token || !config.selectedRepo)
+    if (!get().isConnected || !config.selectedRepo)
       throw new Error("No repo selected");
     set({ isLoading: true, error: null });
     try {
-      const json = await invoke<string>("github_create_pr", {
-        token: config.token,
-        owner: config.selectedRepo.owner,
-        repo: config.selectedRepo.repo,
+      const json = await githubCreatePr(
+        config.selectedRepo.owner,
+        config.selectedRepo.repo,
         title,
         body,
         head,
-        base,
-      });
+        base
+      );
       set({ isLoading: false });
       return json;
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const message = String(e);
+      set({
+        isConnected: message.toLowerCase().includes("token not set")
+          ? false
+          : get().isConnected,
+        error: message,
+        isLoading: false,
+      });
       throw e;
     }
   },

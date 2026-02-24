@@ -1,41 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SessionInfo } from "@/types/session";
 import type { StatusLineData, CodexStatusLineData } from "@/types/statusline";
-
-export async function createSession(
-  projectPath: string,
-  prompt: string,
-  model?: string,
-  resumeSessionId?: string
-): Promise<string> {
-  return invoke<string>("create_session", {
-    projectPath,
-    prompt,
-    model,
-    resumeSessionId,
-  });
-}
-
-export async function sendInput(
-  sessionId: string,
-  input: string
-): Promise<void> {
-  return invoke("send_input", { sessionId, input });
-}
-
-export async function killSession(sessionId: string): Promise<void> {
-  return invoke("kill_session", { sessionId });
-}
-
-export async function listSessions(): Promise<SessionInfo[]> {
-  return invoke<SessionInfo[]>("list_sessions");
-}
-
-export async function getSessionInfo(
-  sessionId: string
-): Promise<SessionInfo> {
-  return invoke<SessionInfo>("get_session_info", { sessionId });
-}
 
 export async function getGitBranch(projectPath: string): Promise<string> {
   return invoke<string>("get_git_branch", { projectPath });
@@ -72,29 +36,38 @@ export async function generateIdeas(
 }
 
 // GitHub integration
-export async function githubListRepos(token: string): Promise<string> {
-  return invoke<string>("github_list_repos", { token });
+export async function githubSetToken(token: string): Promise<void> {
+  return invoke("github_set_token", { token });
+}
+
+export async function githubClearToken(): Promise<void> {
+  return invoke("github_clear_token");
+}
+
+export async function githubHasToken(): Promise<boolean> {
+  return invoke<boolean>("github_has_token");
+}
+
+export async function githubListRepos(): Promise<string> {
+  return invoke<string>("github_list_repos");
 }
 
 export async function githubListIssues(
-  token: string,
   owner: string,
   repo: string
 ): Promise<string> {
-  return invoke<string>("github_list_issues", { token, owner, repo });
+  return invoke<string>("github_list_issues", { owner, repo });
 }
 
 export async function githubGetIssue(
-  token: string,
   owner: string,
   repo: string,
   issueNumber: number
 ): Promise<string> {
-  return invoke<string>("github_get_issue", { token, owner, repo, issueNumber });
+  return invoke<string>("github_get_issue", { owner, repo, issueNumber });
 }
 
 export async function githubCreatePr(
-  token: string,
   owner: string,
   repo: string,
   title: string,
@@ -102,17 +75,21 @@ export async function githubCreatePr(
   head: string,
   base: string
 ): Promise<string> {
-  return invoke<string>("github_create_pr", { token, owner, repo, title, body, head, base });
+  return invoke<string>("github_create_pr", { owner, repo, title, body, head, base });
 }
 
 export async function githubInvestigateIssue(
   projectPath: string,
-  token: string,
   owner: string,
   repo: string,
   issueNumber: number
 ): Promise<string> {
-  return invoke<string>("github_investigate_issue", { projectPath, token, owner, repo, issueNumber });
+  return invoke<string>("github_investigate_issue", {
+    projectPath,
+    owner,
+    repo,
+    issueNumber,
+  });
 }
 
 // Memory layer

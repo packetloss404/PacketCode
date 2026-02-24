@@ -10,7 +10,7 @@ A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.
 - Real-time status line monitoring for both Claude and Codex
 - Model selection (Opus 4.6, Opus 4.5, Sonnet 4.5, Haiku 4.5) per session
 - Session tab bar with live status labels
-- Session history with resume support
+- Session history and status tracking
 
 ### Agent Profiles
 - 5 built-in personalities: **Auto**, **Speed Runner**, **Thorough Reviewer**, **Security Auditor**, **Refactor Pro**
@@ -27,6 +27,7 @@ A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.
 
 ### GitHub Integration
 - Connect with a personal access token
+- Token is held in backend memory only (not persisted across app restarts)
 - Browse repositories and open issues
 - View full issue details with labels and metadata
 - **Import to Board**: convert GitHub issues into local kanban tickets
@@ -111,7 +112,6 @@ PacketCode/
     src/
       commands/           # Tauri command handlers
       claude/             # Claude CLI helpers
-      session/            # Session management
   public/                 # Static assets
   docs/                   # Website (index.html)
 ```
