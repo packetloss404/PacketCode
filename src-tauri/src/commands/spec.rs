@@ -1,4 +1,4 @@
-use crate::claude::binary::claude_command;
+use crate::claude::binary::run_claude;
 
 #[tauri::command]
 pub async fn parse_spec_to_tickets(spec_text: String) -> Result<String, String> {
@@ -19,19 +19,5 @@ PROJECT SPEC:
         spec_text
     );
 
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(stdout)
+    run_claude(&prompt, None).await
 }

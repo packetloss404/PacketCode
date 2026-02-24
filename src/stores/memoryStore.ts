@@ -6,24 +6,17 @@ import type {
   SessionSummary,
   LearnedPattern,
 } from "@/types/memory";
+import { loadFromStorage, saveToStorage, parseJsonFromResponse } from "@/lib/storage";
+
+const STORAGE_KEY = "packetcode:memory";
+const DEFAULT_MEMORY: MemoryState = { fileMap: [], sessionSummaries: [], patterns: [], lastScanAt: null };
 
 function loadMemory(): MemoryState {
-  try {
-    const saved = localStorage.getItem("packetcode:memory");
-    if (saved) return JSON.parse(saved);
-  } catch {
-    // ignore
-  }
-  return {
-    fileMap: [],
-    sessionSummaries: [],
-    patterns: [],
-    lastScanAt: null,
-  };
+  return loadFromStorage(STORAGE_KEY, DEFAULT_MEMORY);
 }
 
 function saveMemory(memory: MemoryState) {
-  localStorage.setItem("packetcode:memory", JSON.stringify(memory));
+  saveToStorage(STORAGE_KEY, memory);
 }
 
 interface MemoryStore {
@@ -42,25 +35,6 @@ interface MemoryStore {
   deletePattern: (id: string) => void;
   deleteSummary: (id: string) => void;
   getContextForSession: () => string;
-}
-
-function parseJsonFromResponse(text: string): unknown {
-  // Try direct parse first
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Try extracting JSON from markdown code blocks
-    const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) {
-      return JSON.parse(match[1].trim());
-    }
-    // Try finding array or object
-    const arrMatch = text.match(/\[[\s\S]*\]/);
-    if (arrMatch) return JSON.parse(arrMatch[0]);
-    const objMatch = text.match(/\{[\s\S]*\}/);
-    if (objMatch) return JSON.parse(objMatch[0]);
-    throw new Error("No valid JSON found in response");
-  }
 }
 
 export const useMemoryStore = create<MemoryStore>((set, get) => ({

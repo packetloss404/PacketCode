@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { X, Diamond, Code2, FileText, Gauge, TestTube2 } from "lucide-react";
+import { Diamond, Code2, FileText, Gauge, TestTube2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { Modal } from "@/components/ui/Modal";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore } from "@/stores/appStore";
 
@@ -299,78 +300,64 @@ export function CodeQualityModal({ onClose }: CodeQualityModalProps) {
     onClose();
   }
 
+  const footerContent = report && !loading ? (
+    <button
+      onClick={handleGetAIInsight}
+      className="flex items-center justify-center gap-2 w-full py-2.5 bg-accent-green/10 border border-accent-green/20 rounded-lg text-accent-green text-xs font-medium hover:bg-accent-green/20 transition-colors"
+    >
+      <Diamond size={12} />
+      Get AI Insight
+    </button>
+  ) : undefined;
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-bg-secondary border border-bg-border rounded-lg w-[480px] max-h-[85vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-bg-border">
-          <div className="flex items-center gap-2">
-            <Diamond size={14} className="text-accent-amber" />
-            <h2 className="text-sm font-semibold text-text-primary">Code Quality</h2>
-          </div>
+    <Modal
+      onClose={onClose}
+      title="Code Quality"
+      icon={<Diamond size={14} className="text-accent-amber" />}
+      footer={footerContent}
+    >
+      {/* Tabs */}
+      <div className="flex items-center gap-1 px-5 pt-3">
+        {TABS.map((tab) => (
           <button
-            onClick={onClose}
-            className="p-1 text-text-muted hover:text-text-primary transition-colors"
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-3 py-1.5 text-[11px] rounded-t transition-colors ${
+              activeTab === tab.key
+                ? "text-accent-green bg-bg-primary border border-bg-border border-b-0"
+                : "text-text-muted hover:text-text-secondary"
+            }`}
           >
-            <X size={16} />
+            {tab.label}
           </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Tabs */}
-        <div className="flex items-center gap-1 px-5 pt-3">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-3 py-1.5 text-[11px] rounded-t transition-colors ${
-                activeTab === tab.key
-                  ? "text-accent-green bg-bg-primary border border-bg-border border-b-0"
-                  : "text-text-muted hover:text-text-secondary"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 bg-bg-primary mx-0">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <span className="text-xs text-text-muted animate-pulse">Analyzing codebase...</span>
-            </div>
-          )}
-          {error && (
-            <div className="text-xs text-accent-red py-4">{error}</div>
-          )}
-          {report && !loading && (
-            <>
-              {activeTab === "overview" && (
-                <OverviewTab report={report} totalScore={totalScore}
-                  commentScore={commentScore} testScore={testScore}
-                  complexityScore={complexityScore} orgScore={orgScore} />
-              )}
-              {activeTab === "languages" && <LanguagesTab report={report} />}
-              {activeTab === "complexity" && <ComplexityTab report={report} />}
-              {activeTab === "tests" && <TestsTab report={report} />}
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        {report && !loading && (
-          <div className="px-5 py-3 border-t border-bg-border">
-            <button
-              onClick={handleGetAIInsight}
-              className="flex items-center justify-center gap-2 w-full py-2.5 bg-accent-green/10 border border-accent-green/20 rounded-lg text-accent-green text-xs font-medium hover:bg-accent-green/20 transition-colors"
-            >
-              <Diamond size={12} />
-              Get AI Insight
-            </button>
+      {/* Content */}
+      <div className="px-5 py-4 bg-bg-primary mx-0">
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <span className="text-xs text-text-muted animate-pulse">Analyzing codebase...</span>
           </div>
         )}
+        {error && (
+          <div className="text-xs text-accent-red py-4">{error}</div>
+        )}
+        {report && !loading && (
+          <>
+            {activeTab === "overview" && (
+              <OverviewTab report={report} totalScore={totalScore}
+                commentScore={commentScore} testScore={testScore}
+                complexityScore={complexityScore} orgScore={orgScore} />
+            )}
+            {activeTab === "languages" && <LanguagesTab report={report} />}
+            {activeTab === "complexity" && <ComplexityTab report={report} />}
+            {activeTab === "tests" && <TestsTab report={report} />}
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 

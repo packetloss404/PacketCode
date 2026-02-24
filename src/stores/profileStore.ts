@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AgentProfile } from "@/types/profiles";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 
 const BUILTIN_PROFILES: AgentProfile[] = [
   {
@@ -59,21 +60,12 @@ const BUILTIN_PROFILES: AgentProfile[] = [
 ];
 
 function loadProfiles(): AgentProfile[] {
-  try {
-    const saved = localStorage.getItem("packetcode:profiles");
-    if (saved) {
-      const userProfiles: AgentProfile[] = JSON.parse(saved);
-      return [...BUILTIN_PROFILES, ...userProfiles.filter((p) => !p.isBuiltin)];
-    }
-  } catch {
-    // ignore
-  }
-  return [...BUILTIN_PROFILES];
+  const userProfiles = loadFromStorage<AgentProfile[]>("packetcode:profiles", []);
+  return [...BUILTIN_PROFILES, ...userProfiles.filter((p) => !p.isBuiltin)];
 }
 
 function saveUserProfiles(profiles: AgentProfile[]) {
-  const userOnly = profiles.filter((p) => !p.isBuiltin);
-  localStorage.setItem("packetcode:profiles", JSON.stringify(userOnly));
+  saveToStorage("packetcode:profiles", profiles.filter((p) => !p.isBuiltin));
 }
 
 interface ProfileStore {

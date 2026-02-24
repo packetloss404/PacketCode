@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { X, Bot, User } from "lucide-react";
+import { Bot, User } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -119,24 +120,32 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-bg-secondary border border-bg-border rounded-lg w-[420px] overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-bg-border">
-          <div className="flex items-center gap-2">
-            <Bot size={14} className="text-accent-green" />
-            <h2 className="text-sm font-semibold text-text-primary">New Agent Session</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-text-muted hover:text-text-primary transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
+  const footerContent = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        onClick={onClose}
+        className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={handleStart}
+        className="px-4 py-1.5 text-xs bg-accent-green/15 text-accent-green border border-accent-green/30 rounded font-medium hover:bg-accent-green/25 transition-colors"
+      >
+        Start {cliLabel}
+      </button>
+    </div>
+  );
 
-        <div className="px-5 py-4 flex flex-col gap-4" onKeyDown={handleKeyDown}>
+  return (
+    <Modal
+      onClose={onClose}
+      title="New Agent Session"
+      icon={<Bot size={14} className="text-accent-green" />}
+      width="w-[420px]"
+      footer={footerContent}
+    >
+      <div className="px-5 py-4 flex flex-col gap-4" onKeyDown={handleKeyDown}>
           {/* CLI toggle */}
           <div className="flex rounded-lg border border-bg-border overflow-hidden">
             <button
@@ -249,24 +258,7 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
               Press Ctrl+Enter to start
             </p>
           </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-bg-border">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleStart}
-            className="px-4 py-1.5 text-xs bg-accent-green/15 text-accent-green border border-accent-green/30 rounded font-medium hover:bg-accent-green/25 transition-colors"
-          >
-            Start {cliLabel}
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -6,5 +6,6 @@ pub mod ideation;
 pub mod insights;
 pub mod memory;
 pub mod pty;
+pub mod shared;
 pub mod spec;
 pub mod statusline;

@@ -1,3 +1,4 @@
+use super::shared::lock_mutex;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -139,7 +140,7 @@ pub fn create_pty_session(
     };
 
     {
-        let mut mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut mgr = lock_mutex(&manager)?;
         mgr.sessions.insert(session_id.clone(), session);
     }
 
@@ -198,7 +199,7 @@ pub fn write_pty(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut mgr = lock_mutex(&manager)?;
     let session = mgr
         .sessions
         .get_mut(&session_id)
@@ -223,7 +224,7 @@ pub fn resize_pty(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mgr = lock_mutex(&manager)?;
     let session = mgr
         .sessions
         .get(&session_id)
@@ -247,7 +248,7 @@ pub fn kill_pty(
     manager: State<'_, SharedPtyManager>,
     session_id: String,
 ) -> Result<(), String> {
-    let mut mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut mgr = lock_mutex(&manager)?;
     if let Some(mut session) = mgr.sessions.remove(&session_id) {
         session
             .kill_flag
@@ -265,6 +266,6 @@ pub fn kill_pty(
 pub fn list_pty_sessions(
     manager: State<'_, SharedPtyManager>,
 ) -> Result<Vec<PtySessionInfo>, String> {
-    let mgr = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mgr = lock_mutex(&manager)?;
     Ok(mgr.sessions.values().map(|s| s.info.clone()).collect())
 }

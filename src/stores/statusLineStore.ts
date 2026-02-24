@@ -1,30 +1,38 @@
 import { create } from "zustand";
-import type { StatusLineData } from "@/types/statusline";
+import type { StatusLineData, CodexStatusLineData } from "@/types/statusline";
 import {
   mergeStatusLineEntries,
   normalizeStatusLineCwd,
+  type StatusLineEntryBase,
 } from "@/stores/statusLineStoreUtils";
 
-interface StatusLineStore {
-  /** Map from normalized cwd to the most recent StatusLineData */
-  byCwd: Record<string, StatusLineData>;
-  /** Update from a batch of status line entries */
-  update: (entries: StatusLineData[]) => void;
+interface StatusLineStoreShape<T extends StatusLineEntryBase> {
+  byCwd: Record<string, T>;
+  update: (entries: T[]) => void;
 }
 
-export const useStatusLineStore = create<StatusLineStore>((set) => ({
-  byCwd: {},
-  update: (entries) =>
-    set((state) => {
-      return { byCwd: mergeStatusLineEntries(state.byCwd, entries) };
-    }),
-}));
-
-/** Selector hook: get status line data for a specific project path */
-export function useStatusLineForCwd(cwd: string | undefined): StatusLineData | null {
-  return useStatusLineStore((state) => {
-    if (!cwd) return null;
-    const key = normalizeStatusLineCwd(cwd);
-    return state.byCwd[key] ?? null;
-  });
+function createStatusLineStore<T extends StatusLineEntryBase>() {
+  return create<StatusLineStoreShape<T>>((set) => ({
+    byCwd: {},
+    update: (entries) =>
+      set((state) => ({ byCwd: mergeStatusLineEntries(state.byCwd, entries) })),
+  }));
 }
+
+function createForCwdSelector<T extends StatusLineEntryBase>(
+  useStore: ReturnType<typeof createStatusLineStore<T>>
+) {
+  return function useForCwd(cwd: string | undefined): T | null {
+    return useStore((state) => {
+      if (!cwd) return null;
+      const key = normalizeStatusLineCwd(cwd);
+      return state.byCwd[key] ?? null;
+    });
+  };
+}
+
+export const useStatusLineStore = createStatusLineStore<StatusLineData>();
+export const useStatusLineForCwd = createForCwdSelector(useStatusLineStore);
+
+export const useCodexStatusLineStore = createStatusLineStore<CodexStatusLineData>();
+export const useCodexStatusLineForCwd = createForCwdSelector(useCodexStatusLineStore);

@@ -59,14 +59,6 @@ export async function githubListIssues(
   return invoke<string>("github_list_issues", { owner, repo });
 }
 
-export async function githubGetIssue(
-  owner: string,
-  repo: string,
-  issueNumber: number
-): Promise<string> {
-  return invoke<string>("github_get_issue", { owner, repo, issueNumber });
-}
-
 export async function githubCreatePr(
   owner: string,
   repo: string,
@@ -92,21 +84,3 @@ export async function githubInvestigateIssue(
   });
 }
 
-// Memory layer
-export async function scanCodebaseMemory(projectPath: string): Promise<string> {
-  return invoke<string>("scan_codebase_memory", { projectPath });
-}
-
-export async function summarizeSession(
-  projectPath: string,
-  sessionLog: string
-): Promise<string> {
-  return invoke<string>("summarize_session", { projectPath, sessionLog });
-}
-
-export async function extractPatterns(
-  projectPath: string,
-  summaries: string
-): Promise<string> {
-  return invoke<string>("extract_patterns", { projectPath, summaries });
-}

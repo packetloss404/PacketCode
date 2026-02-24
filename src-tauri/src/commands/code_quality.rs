@@ -1,3 +1,4 @@
+use super::shared::SKIP_DIRS;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -39,27 +40,6 @@ pub struct CodeQualityReport {
     pub test_ratio: f64,
     pub org_score: u32,
 }
-
-/// Directories to always skip
-const SKIP_DIRS: &[&str] = &[
-    ".git",
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".next",
-    "__pycache__",
-    ".venv",
-    "venv",
-    ".idea",
-    ".vscode",
-    "coverage",
-    ".turbo",
-    ".cache",
-    ".parcel-cache",
-    "vendor",
-    "pkg",
-];
 
 fn get_language(ext: &str) -> Option<&'static str> {
     match ext {
@@ -178,7 +158,7 @@ fn analyze_file(path: &Path, lang: &str) -> (u32, u32, u32, u32, u32) {
             }
 
             // Line comments
-            if trimmed.starts_with("//") || trimmed.starts_with('#') && matches!(lang, "python" | "ruby" | "shell" | "r" | "yaml" | "toml") {
+            if trimmed.starts_with("//") || (trimmed.starts_with('#') && matches!(lang, "python" | "ruby" | "shell" | "r" | "yaml" | "toml")) {
                 comments += 1;
                 continue;
             }

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ModuleState } from "@/types/modules";
 import { moduleRegistry } from "@/modules/registry";
+import { loadFromStorage, saveToStorage, removeFromStorage } from "@/lib/storage";
 
 const STORAGE_KEY = "packetcode:modules";
 const OLD_STORAGE_KEY = "packetcode:extensions";
@@ -13,19 +14,15 @@ interface ModuleStore {
 }
 
 function loadPersistedStates(): Record<string, ModuleState> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-    // One-time migration from old key
-    const old = localStorage.getItem(OLD_STORAGE_KEY);
-    if (old) {
-      const parsed = JSON.parse(old);
-      localStorage.setItem(STORAGE_KEY, old);
-      localStorage.removeItem(OLD_STORAGE_KEY);
-      return parsed;
-    }
-  } catch {
-    // ignore
+  const saved = loadFromStorage<Record<string, ModuleState>>(STORAGE_KEY, {});
+  if (Object.keys(saved).length > 0) return saved;
+
+  // One-time migration from old key
+  const old = loadFromStorage<Record<string, ModuleState>>(OLD_STORAGE_KEY, {});
+  if (Object.keys(old).length > 0) {
+    saveToStorage(STORAGE_KEY, old);
+    removeFromStorage(OLD_STORAGE_KEY);
+    return old;
   }
   return {};
 }
@@ -39,7 +36,7 @@ function mergeWithDefaults(saved: Record<string, ModuleState>): Record<string, M
 }
 
 function persist(states: Record<string, ModuleState>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
+  saveToStorage(STORAGE_KEY, states);
 }
 
 export const useModuleStore = create<ModuleStore>((set, get) => ({

@@ -1,3 +1,4 @@
+use super::shared::home_dir;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -36,9 +37,9 @@ fn now_epoch_seconds() -> u64 {
 
 #[tauri::command]
 pub fn read_statusline_states() -> Vec<StatusLineData> {
-    let home = match std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
-        Ok(h) => h,
-        Err(_) => return vec![],
+    let home = match home_dir() {
+        Some(h) => h,
+        None => return vec![],
     };
 
     let state_dir = PathBuf::from(&home).join(".claude").join("statusline-state");
@@ -543,9 +544,9 @@ fn should_full_scan(cache: &CodexStatusCache, now: u64) -> bool {
 
 #[tauri::command]
 pub fn read_codex_statusline_states() -> Vec<CodexStatusLineData> {
-    let home = match std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
-        Ok(h) => h,
-        Err(_) => return vec![],
+    let home = match home_dir() {
+        Some(h) => h,
+        None => return vec![],
     };
 
     let (config_model, config_effort) = read_codex_config(&home);

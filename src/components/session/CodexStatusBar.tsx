@@ -1,5 +1,5 @@
 import { Database, Gauge, Zap } from "lucide-react";
-import { useCodexStatusLineForCwd } from "@/hooks/useCodexStatusLine";
+import { useCodexStatusLineForCwd } from "@/hooks/useStatusLine";
 
 interface CodexStatusBarProps {
   projectPath: string;

@@ -1,3 +1,4 @@
+use super::shared::SKIP_DIRS;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -10,13 +11,6 @@ pub struct DirEntry {
     pub size: u64,
     pub extension: Option<String>,
 }
-
-/// Directories to skip in the explorer
-const SKIP_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "dist", "build", ".next",
-    "__pycache__", ".venv", "venv", ".idea", ".vscode", "coverage",
-    ".turbo", ".cache", ".parcel-cache", "pkg", ".svelte-kit",
-];
 
 #[tauri::command]
 pub async fn list_directory(dir_path: String) -> Result<Vec<DirEntry>, String> {

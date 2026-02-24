@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User } from "lucide-react";
+import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
 import { useModuleStore } from "@/stores/moduleStore";
@@ -138,79 +139,34 @@ export function Toolbar() {
 
           {showToolsMenu && (
             <div className="absolute top-full left-0 mt-1 w-48 bg-bg-secondary border border-bg-border rounded-lg shadow-xl z-50 py-1">
-              <button
-                onClick={() => {
-                  setShowExplorer(!showExplorer);
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <FolderTree size={12} className="text-accent-amber" />
-                Explorer
-                {showExplorer && (
-                  <span className="ml-auto text-[9px] text-accent-green">open</span>
-                )}
-              </button>
-              {/* Dynamic module entries */}
+              <DropdownItem
+                icon={<FolderTree size={12} className="text-accent-amber" />}
+                label="Explorer"
+                badge={showExplorer ? "open" : undefined}
+                onClick={() => { setShowExplorer(!showExplorer); setShowToolsMenu(false); }}
+              />
               {getModulesSorted()
                 .filter((mod) => moduleStates[mod.id]?.enabled ?? false)
                 .map((mod) => {
                   const Icon = mod.icon;
                   return (
-                    <button
+                    <DropdownItem
                       key={mod.id}
-                      onClick={() => {
-                        setActiveView(moduleViewId(mod.id));
-                        setShowToolsMenu(false);
-                      }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-                    >
-                      <Icon size={12} className={mod.iconColor} />
-                      {mod.name}
-                    </button>
+                      icon={<Icon size={12} className={mod.iconColor} />}
+                      label={mod.name}
+                      onClick={() => { setActiveView(moduleViewId(mod.id)); setShowToolsMenu(false); }}
+                    />
                   );
                 })}
-              <button
-                onClick={() => {
-                  setActiveView("insights");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <MessageSquare size={12} className="text-accent-blue" />
-                Insights Chat
-              </button>
-              <button
-                onClick={() => {
-                  setActiveView("github");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <Github size={12} className="text-text-primary" />
-                GitHub
-              </button>
-              <button
-                onClick={() => {
-                  setActiveView("memory");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <Brain size={12} className="text-accent-purple" />
-                Memory
-              </button>
+              <DropdownItem icon={<MessageSquare size={12} className="text-accent-blue" />} label="Insights Chat"
+                onClick={() => { setActiveView("insights"); setShowToolsMenu(false); }} />
+              <DropdownItem icon={<Github size={12} className="text-text-primary" />} label="GitHub"
+                onClick={() => { setActiveView("github"); setShowToolsMenu(false); }} />
+              <DropdownItem icon={<Brain size={12} className="text-accent-purple" />} label="Memory"
+                onClick={() => { setActiveView("memory"); setShowToolsMenu(false); }} />
               <div className="h-px bg-bg-border my-0.5" />
-              <button
-                onClick={() => {
-                  setActiveView("tools");
-                  setShowToolsMenu(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-left"
-              >
-                <Wrench size={12} className="text-text-muted" />
-                Settings
-              </button>
+              <DropdownItem icon={<Wrench size={12} className="text-text-muted" />} label="Settings"
+                onClick={() => { setActiveView("tools"); setShowToolsMenu(false); }} />
             </div>
           )}
         </div>

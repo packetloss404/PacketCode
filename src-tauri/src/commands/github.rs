@@ -24,25 +24,36 @@ fn github_client(token: &str) -> Result<reqwest::Client, String> {
         AUTHORIZATION,
         format!("Bearer {}", token)
             .parse()
-            .map_err(|e| format!("Invalid token header: {}", e))?,
+            .map_err(|e| format!("Invalid header: {}", e))?,
     );
     headers.insert(
         ACCEPT,
         "application/vnd.github+json"
             .parse()
-            .map_err(|e| format!("Invalid accept header: {}", e))?,
+            .map_err(|e| format!("Invalid header: {}", e))?,
     );
     headers.insert(
         USER_AGENT,
         "PacketCode/1.0"
             .parse()
-            .map_err(|e| format!("Invalid user-agent header: {}", e))?,
+            .map_err(|e| format!("Invalid header: {}", e))?,
     );
 
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
+}
+
+async fn github_response_text(resp: reqwest::Response) -> Result<String, String> {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error {}: {}", status, body));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
 }
 
 #[tauri::command]
@@ -97,16 +108,7 @@ async fn github_get_issue_with_client(
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
-    }
-
-    resp.text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+    github_response_text(resp).await
 }
 
 #[tauri::command]
@@ -117,16 +119,7 @@ pub async fn github_list_repos(auth: State<'_, GitHubAuthState>) -> Result<Strin
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
-    }
-
-    resp.text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+    github_response_text(resp).await
 }
 
 #[tauri::command]
@@ -145,16 +138,7 @@ pub async fn github_list_issues(
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
-    }
-
-    resp.text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+    github_response_text(resp).await
 }
 
 #[tauri::command]
@@ -197,16 +181,7 @@ pub async fn github_create_pr(
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let resp_body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, resp_body));
-    }
-
-    resp.text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+    github_response_text(resp).await
 }
 
 #[tauri::command]
@@ -219,7 +194,6 @@ pub async fn github_investigate_issue(
 ) -> Result<String, String> {
     let client = github_client_from_state(auth.inner()).await?;
 
-    // First fetch the issue details
     let issue_json = github_get_issue_with_client(&client, &owner, &repo, issue_number).await?;
     let issue: serde_json::Value =
         serde_json::from_str(&issue_json).map_err(|e| format!("Failed to parse issue: {}", e))?;
@@ -243,19 +217,5 @@ Be specific — reference actual file paths and code."#,
         title, body
     );
 
-    let mut cmd = crate::claude::binary::claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    crate::claude::binary::run_claude(&prompt, Some(&project_path)).await
 }

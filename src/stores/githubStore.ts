@@ -9,6 +9,7 @@ import {
   githubSetToken,
 } from "@/lib/tauri";
 import type { GitHubRepo, GitHubIssue, GitHubConfig } from "@/types/github";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 
 const STORAGE_KEY = "packetcode:github";
 
@@ -18,40 +19,27 @@ interface LoadedConfig {
 }
 
 function loadConfig(): LoadedConfig {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      return { config: { selectedRepo: null }, legacyToken: null };
-    }
-    const parsed = JSON.parse(saved) as {
-      token?: unknown;
-      selectedRepo?: unknown;
-    };
-    const selectedRepo =
-      parsed.selectedRepo &&
-      typeof parsed.selectedRepo === "object" &&
-      "owner" in parsed.selectedRepo &&
-      "repo" in parsed.selectedRepo
-        ? (parsed.selectedRepo as { owner: string; repo: string })
-        : null;
-    const legacyToken =
-      typeof parsed.token === "string" && parsed.token.trim()
-        ? parsed.token.trim()
-        : null;
-    return { config: { selectedRepo }, legacyToken };
-  } catch {
-    // ignore
-    return { config: { selectedRepo: null }, legacyToken: null };
-  }
+  const parsed = loadFromStorage<{ token?: unknown; selectedRepo?: unknown }>(STORAGE_KEY, {});
+  const selectedRepo =
+    parsed.selectedRepo &&
+    typeof parsed.selectedRepo === "object" &&
+    "owner" in parsed.selectedRepo &&
+    "repo" in parsed.selectedRepo
+      ? (parsed.selectedRepo as { owner: string; repo: string })
+      : null;
+  const legacyToken =
+    typeof parsed.token === "string" && parsed.token.trim()
+      ? parsed.token.trim()
+      : null;
+  return { config: { selectedRepo }, legacyToken };
 }
 
 function saveConfig(config: GitHubConfig) {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      selectedRepo: config.selectedRepo,
-    })
-  );
+  saveToStorage(STORAGE_KEY, { selectedRepo: config.selectedRepo });
+}
+
+function isTokenError(message: string): boolean {
+  return message.toLowerCase().includes("token not set");
 }
 
 interface GitHubStore {
@@ -175,9 +163,7 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
     } catch (e) {
       const message = String(e);
       set({
-        isConnected: message.toLowerCase().includes("token not set")
-          ? false
-          : get().isConnected,
+        isConnected: isTokenError(message) ? false : get().isConnected,
         error: message,
         isLoading: false,
       });
@@ -204,9 +190,7 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
     } catch (e) {
       const message = String(e);
       set({
-        isConnected: message.toLowerCase().includes("token not set")
-          ? false
-          : get().isConnected,
+        isConnected: isTokenError(message) ? false : get().isConnected,
         error: message,
         isLoading: false,
       });
@@ -228,9 +212,7 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
     } catch (e) {
       const message = String(e);
       set({
-        isConnected: message.toLowerCase().includes("token not set")
-          ? false
-          : get().isConnected,
+        isConnected: isTokenError(message) ? false : get().isConnected,
         error: message,
         isInvestigating: false,
         investigation: null,
@@ -257,9 +239,7 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
     } catch (e) {
       const message = String(e);
       set({
-        isConnected: message.toLowerCase().includes("token not set")
-          ? false
-          : get().isConnected,
+        isConnected: isTokenError(message) ? false : get().isConnected,
         error: message,
         isLoading: false,
       });

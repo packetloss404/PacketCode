@@ -1,23 +1,6 @@
 import { Trash2, Link, CheckSquare } from "lucide-react";
 import { useIssueStore, type Issue } from "@/stores/issueStore";
-
-// Consistent label colors based on label name
-const LABEL_COLORS: Record<string, { bg: string; text: string }> = {
-  api: { bg: "bg-accent-green/20", text: "text-accent-green" },
-  frontend: { bg: "bg-accent-amber/20", text: "text-accent-amber" },
-  working: { bg: "bg-accent-green/20", text: "text-accent-green" },
-  bug: { bg: "bg-accent-red/20", text: "text-accent-red" },
-  feature: { bg: "bg-accent-blue/20", text: "text-accent-blue" },
-  enhancement: { bg: "bg-accent-blue/20", text: "text-accent-blue" },
-  refactor: { bg: "bg-accent-purple/20", text: "text-accent-purple" },
-  docs: { bg: "bg-text-muted/20", text: "text-text-secondary" },
-  devops: { bg: "bg-accent-amber/20", text: "text-accent-amber" },
-  mvp: { bg: "bg-accent-green/20", text: "text-accent-green" },
-};
-
-function getLabelColor(label: string): { bg: string; text: string } {
-  return LABEL_COLORS[label.toLowerCase()] || { bg: "bg-bg-elevated", text: "text-text-muted" };
-}
+import { getLabelColor } from "@/lib/colors";
 
 interface IssueCardProps {
   issue: Issue;

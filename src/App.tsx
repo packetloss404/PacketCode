@@ -15,8 +15,7 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, getModuleId, moduleViewId } from "@/stores/appStore";
 import { useModuleStore } from "@/stores/moduleStore";
 import { getModule } from "@/modules/registry";
-import { useStatusLinePoller } from "@/hooks/useStatusLine";
-import { useCodexStatusLinePoller } from "@/hooks/useCodexStatusLine";
+import { useStatusLinePoller, useCodexStatusLinePoller } from "@/hooks/useStatusLine";
 import type { AppView } from "@/stores/appStore";
 
 export default function App() {

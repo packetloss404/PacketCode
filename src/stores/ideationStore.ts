@@ -3,10 +3,9 @@ import type { Idea, IdeationType, IdeationSession } from "@/types/ideation";
 import { generateIdeas as generateIdeasApi } from "@/lib/tauri";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useIssueStore } from "@/stores/issueStore";
+import { loadFromStorage, saveToStorage, removeFromStorage, parseJsonFromResponse, generateId } from "@/lib/storage";
 
-function generateId(): string {
-  return `idea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
+const STORAGE_KEY = "packetcode:ideation-session";
 
 interface IdeationStore {
   session: IdeationSession | null;
@@ -21,21 +20,15 @@ interface IdeationStore {
 }
 
 function loadSession(): IdeationSession | null {
-  try {
-    const saved = localStorage.getItem("packetcode:ideation-session");
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return null;
+  return loadFromStorage<IdeationSession | null>(STORAGE_KEY, null);
 }
 
 function saveSession(session: IdeationSession | null) {
-  try {
-    if (session) {
-      localStorage.setItem("packetcode:ideation-session", JSON.stringify(session));
-    } else {
-      localStorage.removeItem("packetcode:ideation-session");
-    }
-  } catch {}
+  if (session) {
+    saveToStorage(STORAGE_KEY, session);
+  } else {
+    removeFromStorage(STORAGE_KEY);
+  }
 }
 
 export const useIdeationStore = create<IdeationStore>((set, get) => ({
@@ -50,14 +43,7 @@ export const useIdeationStore = create<IdeationStore>((set, get) => ({
       const projectPath = useLayoutStore.getState().projectPath;
       const raw = await generateIdeasApi(projectPath, types);
 
-      // Parse JSON from response — handle possible markdown fences
-      let jsonStr = raw.trim();
-      const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (fenceMatch) {
-        jsonStr = fenceMatch[1].trim();
-      }
-
-      const parsed: Array<{
+      const parsed = parseJsonFromResponse(raw) as Array<{
         type: string;
         title: string;
         description: string;
@@ -65,10 +51,10 @@ export const useIdeationStore = create<IdeationStore>((set, get) => ({
         affectedFiles: string[];
         suggestion: string;
         effort: string;
-      }> = JSON.parse(jsonStr);
+      }>;
 
       const ideas: Idea[] = parsed.map((item) => ({
-        id: generateId(),
+        id: generateId("idea"),
         type: item.type as IdeationType,
         title: item.title,
         description: item.description,
@@ -80,7 +66,7 @@ export const useIdeationStore = create<IdeationStore>((set, get) => ({
       }));
 
       const session: IdeationSession = {
-        id: generateId(),
+        id: generateId("idea"),
         ideas,
         config: { enabledTypes: types },
         generatedAt: Date.now(),

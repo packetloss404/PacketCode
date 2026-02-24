@@ -1,37 +1,17 @@
 import { useState } from "react";
-import { X, Loader2, Check, ChevronLeft, AlertCircle } from "lucide-react";
+import { Loader2, Check, ChevronLeft, AlertCircle } from "lucide-react";
 import { parseSpecToTickets } from "@/lib/tauri";
 import { useIssueStore } from "@/stores/issueStore";
 import { useAppStore } from "@/stores/appStore";
+import { Modal } from "@/components/ui/Modal";
+import { parseJsonFromResponse, generateId } from "@/lib/storage";
+import { getPriorityColor } from "@/lib/colors";
 import type { TicketCandidate } from "@/types/spec";
 
 type Phase = "paste" | "loading" | "preview";
 
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: "bg-red-500/20 text-red-400",
-  high: "bg-orange-500/20 text-orange-400",
-  medium: "bg-yellow-500/20 text-yellow-400",
-  low: "bg-blue-500/20 text-blue-400",
-};
-
-function stripCodeFences(text: string): string {
-  let s = text.trim();
-  // Remove ```json ... ``` or ``` ... ```
-  if (s.startsWith("```")) {
-    const firstNewline = s.indexOf("\n");
-    if (firstNewline !== -1) {
-      s = s.slice(firstNewline + 1);
-    }
-    if (s.endsWith("```")) {
-      s = s.slice(0, -3);
-    }
-  }
-  return s.trim();
-}
-
 function parseTickets(raw: string): TicketCandidate[] {
-  const cleaned = stripCodeFences(raw);
-  const parsed = JSON.parse(cleaned);
+  const parsed = parseJsonFromResponse(raw);
   if (!Array.isArray(parsed)) {
     throw new Error("Expected a JSON array of tickets");
   }
@@ -105,7 +85,7 @@ export function SpecImportModal({ onClose }: SpecImportModalProps) {
         epic: null,
         sessionId: null,
         acceptanceCriteria: ticket.acceptanceCriteria.map((text) => ({
-          id: `ac_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: generateId("ac", 6),
           text,
           checked: false,
         })),
@@ -117,24 +97,45 @@ export function SpecImportModal({ onClose }: SpecImportModalProps) {
     setActiveView("issues");
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-bg-secondary border border-bg-border rounded-lg shadow-2xl w-[720px] max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border">
-          <span className="text-xs font-semibold text-text-primary">
-            Import Spec to Issues
-          </span>
+  const footerContent = (
+    <div className="flex items-center justify-between">
+      {phase === "preview" ? (
+        <>
           <button
-            onClick={onClose}
-            className="text-text-muted hover:text-text-primary transition-colors"
+            onClick={() => { setPhase("paste"); setTickets([]); }}
+            className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors"
           >
-            <X size={14} />
+            <ChevronLeft size={12} />
+            Back
           </button>
-        </div>
+          <button
+            onClick={handleCreate}
+            disabled={selectedCount === 0}
+            className="px-3 py-1.5 text-[11px] font-medium rounded bg-accent-green text-bg-primary hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Create {selectedCount} Ticket{selectedCount !== 1 ? "s" : ""}
+          </button>
+        </>
+      ) : phase === "paste" ? (
+        <>
+          <div />
+          <button
+            onClick={handleGenerate}
+            disabled={!specText.trim()}
+            className="px-3 py-1.5 text-[11px] font-medium rounded bg-accent-green text-bg-primary hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Generate Tickets
+          </button>
+        </>
+      ) : (
+        <div />
+      )}
+    </div>
+  );
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+  return (
+    <Modal onClose={onClose} title="Import Spec to Issues" width="w-[720px]" footer={footerContent}>
+      <div className="p-4">
           {/* Phase: Paste */}
           {phase === "paste" && (
             <div className="flex flex-col gap-3">
@@ -215,9 +216,7 @@ export function SpecImportModal({ onClose }: SpecImportModalProps) {
                           {ticket.title}
                         </span>
                         <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
-                            PRIORITY_COLORS[ticket.priority] || ""
-                          }`}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${getPriorityColor(ticket.priority).cls}`}
                         >
                           {ticket.priority}
                         </span>
@@ -246,46 +245,7 @@ export function SpecImportModal({ onClose }: SpecImportModalProps) {
               </div>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border">
-          {phase === "preview" ? (
-            <>
-              <button
-                onClick={() => {
-                  setPhase("paste");
-                  setTickets([]);
-                }}
-                className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors"
-              >
-                <ChevronLeft size={12} />
-                Back
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={selectedCount === 0}
-                className="px-3 py-1.5 text-[11px] font-medium rounded bg-accent-green text-bg-primary hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Create {selectedCount} Ticket{selectedCount !== 1 ? "s" : ""}
-              </button>
-            </>
-          ) : phase === "paste" ? (
-            <>
-              <div />
-              <button
-                onClick={handleGenerate}
-                disabled={!specText.trim()}
-                className="px-3 py-1.5 text-[11px] font-medium rounded bg-accent-green text-bg-primary hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Generate Tickets
-              </button>
-            </>
-          ) : (
-            <div />
-          )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

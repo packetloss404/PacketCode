@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { loadFromStorage, saveToStorage, generateId as genId } from "@/lib/storage";
 
 export type IssueStatus = "todo" | "in_progress" | "qa" | "done" | "blocked" | "needs_human";
 export type IssuePriority = "low" | "medium" | "high" | "critical";
@@ -65,13 +66,8 @@ interface IssueStore {
   removeBlocks: (issueId: string, blockedIssueId: string) => void;
 }
 
-function generateId(): string {
-  return `issue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function generateCriterionId(): string {
-  return `ac_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
+const generateIssueId = () => genId("issue");
+const generateCriterionId = () => genId("ac", 6);
 
 // Migrate old issues that lack new fields
 function migrateIssue(issue: Issue): Issue {
@@ -83,31 +79,23 @@ function migrateIssue(issue: Issue): Issue {
   };
 }
 
-// Load from localStorage
-function loadState(): { issues: Issue[]; nextTicketNum: number; ticketPrefix: string; epics: string[]; labels: string[] } {
-  try {
-    const saved = localStorage.getItem("packetcode:issues");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        ...parsed,
-        issues: (parsed.issues || []).map(migrateIssue),
-      };
-    }
-  } catch {}
-  return {
-    issues: [],
-    nextTicketNum: 1,
-    ticketPrefix: "PKT",
-    epics: [],
-    labels: ["bug", "feature", "enhancement", "refactor", "docs", "api", "frontend", "working", "devops"],
-  };
+type IssueState = { issues: Issue[]; nextTicketNum: number; ticketPrefix: string; epics: string[]; labels: string[] };
+
+const DEFAULT_ISSUE_STATE: IssueState = {
+  issues: [],
+  nextTicketNum: 1,
+  ticketPrefix: "PKT",
+  epics: [],
+  labels: ["bug", "feature", "enhancement", "refactor", "docs", "api", "frontend", "working", "devops"],
+};
+
+function loadState(): IssueState {
+  const parsed = loadFromStorage<IssueState>("packetcode:issues", DEFAULT_ISSUE_STATE);
+  return { ...parsed, issues: (parsed.issues || []).map(migrateIssue) };
 }
 
-function saveState(state: { issues: Issue[]; nextTicketNum: number; ticketPrefix: string; epics: string[]; labels: string[] }) {
-  try {
-    localStorage.setItem("packetcode:issues", JSON.stringify(state));
-  } catch {}
+function saveState(state: IssueState) {
+  saveToStorage("packetcode:issues", state);
 }
 
 const initial = loadState();
@@ -120,7 +108,7 @@ export const useIssueStore = create<IssueStore>((set, get) => ({
     const ticketId = `${state.ticketPrefix}-${String(state.nextTicketNum).padStart(3, "0")}`;
     const newIssue: Issue = {
       ...issue,
-      id: generateId(),
+      id: generateIssueId(),
       ticketId,
       createdAt: Date.now(),
       updatedAt: Date.now(),

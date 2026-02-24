@@ -1,4 +1,4 @@
-use crate::claude::binary::claude_command;
+use crate::claude::binary::run_claude;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -12,7 +12,6 @@ pub async fn ask_insights(
     project_path: String,
     messages: Vec<InsightsMessage>,
 ) -> Result<String, String> {
-    // Build conversation context from prior messages
     let mut context = String::new();
     for msg in &messages {
         let prefix = if msg.role == "user" { "User" } else { "Assistant" };
@@ -30,20 +29,5 @@ Provide a helpful response to the user's latest message."#,
         context
     );
 
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(stdout)
+    run_claude(&prompt, Some(&project_path)).await
 }

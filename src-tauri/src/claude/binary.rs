@@ -43,10 +43,7 @@ pub fn find_claude_binary() -> Option<PathBuf> {
         }
     }
 
-    // Check common npm global locations
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
+    let home = crate::commands::shared::home_dir().unwrap_or_default();
 
     let candidates = vec![
         PathBuf::from(&home).join("AppData/Roaming/npm/claude.cmd"),
@@ -88,25 +85,21 @@ pub fn claude_command() -> Result<tokio::process::Command, String> {
     Ok(cmd)
 }
 
-/// Check if Claude CLI is available and return its version string.
-#[allow(dead_code)]
-pub fn get_claude_version() -> Option<String> {
-    let binary = find_claude_binary()?;
-
-    let mut cmd = std::process::Command::new(binary);
-    cmd.arg("--version");
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
+/// Run a Claude CLI prompt and return stdout as a String.
+/// Optionally sets the working directory to `project_path`.
+pub async fn run_claude(prompt: &str, project_path: Option<&str>) -> Result<String, String> {
+    let mut cmd = claude_command()?;
+    cmd.args(&["-p", prompt, "--output-format", "text"]);
+    if let Some(cwd) = project_path {
+        cmd.current_dir(cwd);
     }
-
-    let output = cmd.output().ok()?;
-
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Claude CLI exited with error: {}", stderr));
     }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }

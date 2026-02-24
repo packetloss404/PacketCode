@@ -1,10 +1,8 @@
 use std::process::Command;
 
-#[tauri::command]
-pub async fn get_git_branch(project_path: String) -> Result<String, String> {
+fn git_command(args: &[&str], cwd: &str) -> Result<std::process::Output, String> {
     let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&project_path);
+    cmd.args(args).current_dir(cwd);
 
     #[cfg(windows)]
     {
@@ -12,10 +10,13 @@ pub async fn get_git_branch(project_path: String) -> Result<String, String> {
         cmd.creation_flags(0x08000000);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
+    cmd.output()
+        .map_err(|e| format!("Failed to run git: {}", e))
+}
 
+#[tauri::command]
+pub async fn get_git_branch(project_path: String) -> Result<String, String> {
+    let output = git_command(&["rev-parse", "--abbrev-ref", "HEAD"], &project_path)?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -25,20 +26,7 @@ pub async fn get_git_branch(project_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn get_git_status(project_path: String) -> Result<String, String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["status", "--short"])
-        .current_dir(&project_path);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
+    let output = git_command(&["status", "--short"], &project_path)?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {

@@ -1,24 +1,9 @@
-use crate::claude::binary::claude_command;
+use crate::claude::binary::run_claude;
 
 #[tauri::command]
 pub async fn scan_codebase_memory(project_path: String) -> Result<String, String> {
     let prompt = r#"List the key files in this project with 1-line summaries. Output ONLY a JSON array with no markdown formatting, like: [{"path": "src/main.ts", "summary": "App entry point"}]. Include the most important 30-50 files."#;
-
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_claude(prompt, Some(&project_path)).await
 }
 
 #[tauri::command]
@@ -30,22 +15,7 @@ Session log:
 {}"#,
         session_log
     );
-
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_claude(&prompt, Some(&project_path)).await
 }
 
 #[tauri::command]
@@ -58,20 +28,5 @@ Session summaries:
 {}"#,
         summaries
     );
-
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_claude(&prompt, Some(&project_path)).await
 }

@@ -7,6 +7,7 @@ import {
   Trash2,
   Play,
 } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import {
   useIssueStore,
   type Issue,
@@ -14,6 +15,7 @@ import {
 } from "@/stores/issueStore";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { getLabelColor, getPriorityColor } from "@/lib/colors";
 
 interface IssueDetailViewProps {
   issueId: string;
@@ -29,23 +31,6 @@ const STATUS_BUTTONS: { key: IssueStatus; label: string }[] = [
   { key: "needs_human", label: "Needs Human" },
 ];
 
-const LABEL_COLORS: Record<string, { bg: string; text: string }> = {
-  api: { bg: "bg-accent-green/20", text: "text-accent-green" },
-  frontend: { bg: "bg-accent-amber/20", text: "text-accent-amber" },
-  working: { bg: "bg-accent-green/20", text: "text-accent-green" },
-  bug: { bg: "bg-accent-red/20", text: "text-accent-red" },
-  feature: { bg: "bg-accent-blue/20", text: "text-accent-blue" },
-  enhancement: { bg: "bg-accent-blue/20", text: "text-accent-blue" },
-  refactor: { bg: "bg-accent-purple/20", text: "text-accent-purple" },
-  docs: { bg: "bg-text-muted/20", text: "text-text-secondary" },
-  devops: { bg: "bg-accent-amber/20", text: "text-accent-amber" },
-  mvp: { bg: "bg-accent-green/20", text: "text-accent-green" },
-};
-
-function getLabelColor(label: string): { bg: string; text: string } {
-  return LABEL_COLORS[label.toLowerCase()] || { bg: "bg-bg-elevated", text: "text-text-muted" };
-}
-
 function getStatusButtonColor(status: IssueStatus, isActive: boolean): string {
   if (!isActive) return "bg-bg-primary border-bg-border text-text-muted hover:bg-bg-hover hover:text-text-secondary";
   switch (status) {
@@ -59,15 +44,6 @@ function getStatusButtonColor(status: IssueStatus, isActive: boolean): string {
   }
 }
 
-function getPriorityLabel(priority: string): { text: string; cls: string } {
-  switch (priority) {
-    case "critical": return { text: "Critical", cls: "text-accent-red" };
-    case "high": return { text: "High", cls: "text-accent-amber" };
-    case "medium": return { text: "Medium", cls: "text-accent-blue" };
-    case "low": return { text: "Low", cls: "text-text-muted" };
-    default: return { text: priority, cls: "text-text-muted" };
-  }
-}
 
 function formatDate(timestamp: number): string {
   const d = new Date(timestamp);
@@ -102,7 +78,7 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
   if (!foundIssue) return null;
   const issue = foundIssue;
 
-  const priorityInfo = getPriorityLabel(issue.priority);
+  const priorityInfo = getPriorityColor(issue.priority);
   const checkedCount = issue.acceptanceCriteria.filter((c) => c.checked).length;
   const totalCriteria = issue.acceptanceCriteria.length;
 
@@ -191,52 +167,45 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
     return lines;
   }
 
+  const titleWithMeta = (
+    <>
+      <span className={issue.status === "done" ? "line-through opacity-60" : ""}>
+        {issue.ticketId}: {issue.title}
+      </span>
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
+        <span className={`text-[11px] font-medium ${priorityInfo.cls}`}>
+          {priorityInfo.text}
+        </span>
+        <span className="text-[10px] text-text-muted">
+          {formatDate(issue.createdAt)}
+        </span>
+        {issue.labels.map((label) => {
+          const color = getLabelColor(label);
+          return (
+            <span key={label} className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${color.bg} ${color.text}`}>
+              {label}
+            </span>
+          );
+        })}
+        {issue.epic && (
+          <span className="text-[9px] px-1.5 py-0.5 bg-accent-purple/15 text-accent-purple rounded font-medium">
+            {issue.epic}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-bg-secondary border border-bg-border rounded-lg w-[560px] max-h-[85vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-bg-border">
-          <div className="flex-1 min-w-0">
-            {/* Title */}
-            <h2 className={`text-sm font-semibold text-text-primary leading-snug ${issue.status === "done" ? "line-through opacity-60" : ""}`}>
-              {issue.ticketId}: {issue.title}
-            </h2>
+    <Modal onClose={onClose} title="" width="w-[560px]">
+      {/* Custom header content since this modal has a complex title */}
+      <div className="px-5 pt-1 pb-3 border-b border-bg-border">
+        <h2 className="text-sm font-semibold text-text-primary leading-snug">
+          {titleWithMeta}
+        </h2>
+      </div>
 
-            {/* Meta row: priority, date, labels */}
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <span className={`text-[11px] font-medium ${priorityInfo.cls}`}>
-                {priorityInfo.text}
-              </span>
-              <span className="text-[10px] text-text-muted">
-                {formatDate(issue.createdAt)}
-              </span>
-              {issue.labels.map((label) => {
-                const color = getLabelColor(label);
-                return (
-                  <span
-                    key={label}
-                    className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${color.bg} ${color.text}`}
-                  >
-                    {label}
-                  </span>
-                );
-              })}
-              {issue.epic && (
-                <span className="text-[9px] px-1.5 py-0.5 bg-accent-purple/15 text-accent-purple rounded font-medium">
-                  {issue.epic}
-                </span>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-text-muted hover:text-text-primary transition-colors flex-shrink-0 ml-3"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="px-5 py-4 flex flex-col gap-4">
+      <div className="px-5 py-4 flex flex-col gap-4">
           {/* Description */}
           {issue.description && (
             <p className="text-xs text-text-secondary leading-relaxed">
@@ -469,7 +438,6 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

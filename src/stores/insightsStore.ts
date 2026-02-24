@@ -2,14 +2,9 @@ import { create } from "zustand";
 import type { InsightsMessage, InsightsSession } from "@/types/insights";
 import { askInsights } from "@/lib/tauri";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { loadFromStorage, saveToStorage, generateId } from "@/lib/storage";
 
-function generateId(): string {
-  return `ins_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function generateMsgId(): string {
-  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
+const STORAGE_KEY = "packetcode:insights-sessions";
 
 interface InsightsStore {
   sessions: InsightsSession[];
@@ -24,17 +19,11 @@ interface InsightsStore {
 }
 
 function loadSessions(): InsightsSession[] {
-  try {
-    const saved = localStorage.getItem("packetcode:insights-sessions");
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return [];
+  return loadFromStorage<InsightsSession[]>(STORAGE_KEY, []);
 }
 
 function saveSessions(sessions: InsightsSession[]) {
-  try {
-    localStorage.setItem("packetcode:insights-sessions", JSON.stringify(sessions));
-  } catch {}
+  saveToStorage(STORAGE_KEY, sessions);
 }
 
 export const useInsightsStore = create<InsightsStore>((set, get) => ({
@@ -44,7 +33,7 @@ export const useInsightsStore = create<InsightsStore>((set, get) => ({
 
   createSession: () => {
     const session: InsightsSession = {
-      id: generateId(),
+      id: generateId("ins"),
       title: "New Chat",
       messages: [],
       createdAt: Date.now(),
@@ -86,7 +75,7 @@ export const useInsightsStore = create<InsightsStore>((set, get) => ({
     }
 
     const userMsg: InsightsMessage = {
-      id: generateMsgId(),
+      id: generateId("msg"),
       role: "user",
       content,
       timestamp: Date.now(),
@@ -118,7 +107,7 @@ export const useInsightsStore = create<InsightsStore>((set, get) => ({
       const response = await askInsights(projectPath, messagesForApi);
 
       const assistantMsg: InsightsMessage = {
-        id: generateMsgId(),
+        id: generateId("msg"),
         role: "assistant",
         content: response,
         timestamp: Date.now(),
@@ -133,7 +122,7 @@ export const useInsightsStore = create<InsightsStore>((set, get) => ({
       saveSessions(sessions);
     } catch (err) {
       const errorMsg: InsightsMessage = {
-        id: generateMsgId(),
+        id: generateId("msg"),
         role: "assistant",
         content: `Error: ${err instanceof Error ? err.message : String(err)}`,
         timestamp: Date.now(),

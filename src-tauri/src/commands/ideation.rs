@@ -1,4 +1,4 @@
-use crate::claude::binary::claude_command;
+use crate::claude::binary::run_claude;
 
 #[tauri::command]
 pub async fn generate_ideas(
@@ -25,20 +25,5 @@ Generate 5-15 ideas across the requested categories. Be specific and actionable.
         types_str
     );
 
-    let mut cmd = claude_command()?;
-    cmd.args(&["-p", &prompt, "--output-format", "text"]);
-    cmd.current_dir(&project_path);
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Claude CLI: {}. Is claude installed and on PATH?", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude CLI exited with error: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(stdout)
+    run_claude(&prompt, Some(&project_path)).await
 }

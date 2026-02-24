@@ -5,6 +5,7 @@ import {
   type IssueStatus,
   type IssuePriority,
 } from "@/stores/issueStore";
+import { generateId } from "@/lib/storage";
 
 interface NewIssueFormProps {
   defaultStatus: IssueStatus;
@@ -47,7 +48,7 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
       epic: epic || null,
       sessionId: null,
       acceptanceCriteria: criteria.map((text) => ({
-        id: `ac_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: generateId("ac", 6),
         text,
         checked: false,
       })),
