@@ -1,15 +1,10 @@
 use std::process::Command;
+use super::shared::hide_window;
 
 fn git_command(args: &[&str], cwd: &str) -> Result<std::process::Output, String> {
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(cwd);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-
+    hide_window(&mut cmd);
     cmd.output()
         .map_err(|e| format!("Failed to run git: {}", e))
 }

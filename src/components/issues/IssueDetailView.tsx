@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  X,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -16,6 +15,7 @@ import {
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { getLabelColor, getPriorityColor } from "@/lib/colors";
+import { IssueDependencyList } from "./IssueDependencyList";
 
 interface IssueDetailViewProps {
   issueId: string;
@@ -71,8 +71,6 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
 
   const [showDepGraph, setShowDepGraph] = useState(false);
   const [newCriterionText, setNewCriterionText] = useState("");
-  const [showAddBlockedBy, setShowAddBlockedBy] = useState(false);
-  const [showAddBlocks, setShowAddBlocks] = useState(false);
 
   const foundIssue = issues.find((i) => i.id === issueId);
   if (!foundIssue) return null;
@@ -240,123 +238,25 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
             Work on this issue
           </button>
 
-          {/* Blocked By */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[10px] text-text-muted uppercase tracking-wider">
-                Blocked By ({blockedByIssues.length} issue{blockedByIssues.length !== 1 ? "s" : ""})
-              </label>
-              <button
-                onClick={() => setShowAddBlockedBy(!showAddBlockedBy)}
-                className="p-0.5 text-text-muted hover:text-accent-green transition-colors"
-              >
-                <Plus size={11} />
-              </button>
-            </div>
-            {blockedByIssues.length > 0 ? (
-              <div className="flex flex-col gap-1">
-                {blockedByIssues.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex items-center gap-2 group"
-                  >
-                    <span
-                      className={`text-[11px] ${b.status === "done" ? "line-through text-text-muted" : "text-text-secondary"}`}
-                    >
-                      {b.ticketId}: {b.title}
-                    </span>
-                    {b.status === "done" && (
-                      <span className="text-[9px] text-accent-green">done</span>
-                    )}
-                    <button
-                      onClick={() => removeBlockedBy(issueId, b.id)}
-                      className="p-0.5 text-text-muted hover:text-accent-red opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[10px] text-text-muted">No blockers</p>
-            )}
-            {showAddBlockedBy && availableForBlockedBy.length > 0 && (
-              <select
-                className="mt-1.5 w-full bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    addBlockedBy(issueId, e.target.value);
-                    setShowAddBlockedBy(false);
-                  }
-                }}
-              >
-                <option value="" disabled>Select blocking issue...</option>
-                {availableForBlockedBy.map((i) => (
-                  <option key={i.id} value={i.id}>{i.ticketId}: {i.title}</option>
-                ))}
-              </select>
-            )}
-          </div>
+          <IssueDependencyList
+            label="Blocked By"
+            emptyText="No blockers"
+            selectPlaceholder="Select blocking issue..."
+            linkedIssues={blockedByIssues}
+            availableIssues={availableForBlockedBy}
+            onAdd={(targetId) => addBlockedBy(issueId, targetId)}
+            onRemove={(targetId) => removeBlockedBy(issueId, targetId)}
+          />
 
-          {/* Blocks */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[10px] text-text-muted uppercase tracking-wider">
-                Blocks ({blocksIssues.length} issue{blocksIssues.length !== 1 ? "s" : ""})
-              </label>
-              <button
-                onClick={() => setShowAddBlocks(!showAddBlocks)}
-                className="p-0.5 text-text-muted hover:text-accent-green transition-colors"
-              >
-                <Plus size={11} />
-              </button>
-            </div>
-            {blocksIssues.length > 0 ? (
-              <div className="flex flex-col gap-1">
-                {blocksIssues.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex items-center gap-2 group"
-                  >
-                    <span
-                      className={`text-[11px] ${b.status === "done" ? "line-through text-text-muted" : "text-text-secondary"}`}
-                    >
-                      {b.ticketId}: {b.title}
-                    </span>
-                    {b.status === "done" && (
-                      <span className="text-[9px] text-accent-green">done</span>
-                    )}
-                    <button
-                      onClick={() => removeBlocks(issueId, b.id)}
-                      className="p-0.5 text-text-muted hover:text-accent-red opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[10px] text-text-muted">No downstream issues</p>
-            )}
-            {showAddBlocks && availableForBlocks.length > 0 && (
-              <select
-                className="mt-1.5 w-full bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    addBlocks(issueId, e.target.value);
-                    setShowAddBlocks(false);
-                  }
-                }}
-              >
-                <option value="" disabled>Select issue to block...</option>
-                {availableForBlocks.map((i) => (
-                  <option key={i.id} value={i.id}>{i.ticketId}: {i.title}</option>
-                ))}
-              </select>
-            )}
-          </div>
+          <IssueDependencyList
+            label="Blocks"
+            emptyText="No downstream issues"
+            selectPlaceholder="Select issue to block..."
+            linkedIssues={blocksIssues}
+            availableIssues={availableForBlocks}
+            onAdd={(targetId) => addBlocks(issueId, targetId)}
+            onRemove={(targetId) => removeBlocks(issueId, targetId)}
+          />
 
           {/* Dependency Graph (collapsible) */}
           {(blockedByIssues.length > 0 || blocksIssues.length > 0) && (

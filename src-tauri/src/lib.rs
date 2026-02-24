@@ -28,8 +28,8 @@ pub fn run() {
             // Filesystem
             commands::fs::list_directory,
             // Status line
-            commands::statusline::read_statusline_states,
-            commands::statusline::read_codex_statusline_states,
+            commands::statusline::claude::read_statusline_states,
+            commands::statusline::codex::read_codex_statusline_states,
             // Spec parsing
             commands::spec::parse_spec_to_tickets,
             // Insights chat

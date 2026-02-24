@@ -38,7 +38,7 @@ export function ClaudeStatusBar({ projectPath }: ClaudeStatusBarProps) {
       className="flex items-center gap-3 px-3 text-[11px] bg-bg-secondary border-t border-bg-border select-none"
       style={{ height: 20, minHeight: 20, opacity: isStale ? 0.5 : 1 }}
     >
-      {/* Model */}
+      {/* Model (backend normalizes "Claude Code for Cursor" → "Claude Code") */}
       <span style={{ color: "#58a6ff" }}>{data.model}</span>
 
       {/* Context % */}

@@ -104,6 +104,9 @@ pub fn create_pty_session(
         cmd.env("PACKETCODE", "1");
     }
 
+    // PTY is a real terminal — set TERM so CLIs (e.g. Claude) start their interactive TUI instead of refusing with "TERM is set to dumb"
+    cmd.env("TERM", "xterm-256color");
+
     // Spawn the child process in the PTY
     let child = pair
         .slave
@@ -160,7 +163,9 @@ pub fn create_pty_session(
                 Ok(0) => break, // EOF — process exited
                 Ok(n) => {
                     // Convert to string, replacing invalid UTF-8
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let mut data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    // CLI may print "Claude Code for Cursor"; PacketCode is for the standalone CLI — never show that in the terminal
+                    data = data.replace("Claude Code for Cursor", "Claude Code");
                     let event = PtyOutput {
                         session_id: sid.clone(),
                         data,

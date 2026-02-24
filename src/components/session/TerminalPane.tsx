@@ -246,12 +246,7 @@ export function TerminalPane({
 
       unlistenersRef.current = [outputUnlisten, exitUnlisten];
 
-      // If there's an initial prompt, send it after the CLI starts
-      if (initialPrompt) {
-        setTimeout(() => {
-          invoke("write_pty", { sessionId, data: initialPrompt + "\n" }).catch(() => {});
-        }, 1200);
-      }
+      // Do not auto-paste any initial prompt here — only the Issues panel ("Work on this issue") should inject text via packetcode:issue-prompt
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -263,7 +258,7 @@ export function TerminalPane({
       useTabStore.getState().updateTabStatus(tabId, "error");
       stopDurationTimer();
     }
-  }, [projectPath, cliCommand, cliArgs, initialPrompt, startDurationTimer, stopDurationTimer]);
+  }, [projectPath, cliCommand, cliArgs, startDurationTimer, stopDurationTimer]);
 
   // Auto-start session on mount
   useEffect(() => {

@@ -1,17 +1,15 @@
 use std::path::PathBuf;
+use crate::commands::shared::{hide_window, hide_window_async, home_dir};
 
 /// Discover the Claude CLI binary path.
 /// Checks PATH first (via `where` on Windows), then common global install locations.
 pub fn find_claude_binary() -> Option<PathBuf> {
-    // Try `where claude` on Windows
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        if let Ok(output) = std::process::Command::new("where")
-            .arg("claude")
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .output()
-        {
+        let mut cmd = std::process::Command::new("where");
+        cmd.arg("claude");
+        hide_window(&mut cmd);
+        if let Ok(output) = cmd.output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(first_line) = stdout.lines().next() {
@@ -24,13 +22,9 @@ pub fn find_claude_binary() -> Option<PathBuf> {
         }
     }
 
-    // Try `which claude` on Unix
     #[cfg(not(windows))]
     {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("claude")
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(first_line) = stdout.lines().next() {
@@ -43,7 +37,7 @@ pub fn find_claude_binary() -> Option<PathBuf> {
         }
     }
 
-    let home = crate::commands::shared::home_dir().unwrap_or_default();
+    let home = home_dir().unwrap_or_default();
 
     let candidates = vec![
         PathBuf::from(&home).join("AppData/Roaming/npm/claude.cmd"),
@@ -59,7 +53,6 @@ pub fn find_claude_binary() -> Option<PathBuf> {
         }
     }
 
-    // Fallback: just try "claude" and let the OS resolve it
     Some(PathBuf::from("claude"))
 }
 
@@ -70,18 +63,9 @@ pub fn claude_command() -> Result<tokio::process::Command, String> {
         .ok_or_else(|| "Failed to run Claude CLI: program not found. Is claude installed and on PATH?".to_string())?;
 
     let mut cmd = tokio::process::Command::new(binary);
-
-    // Prevent "nested session" detection when PacketCode itself runs inside Claude Code
     cmd.env_remove("CLAUDECODE");
     cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
-
-    #[cfg(windows)]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-
+    hide_window_async(&mut cmd);
     Ok(cmd)
 }
 
