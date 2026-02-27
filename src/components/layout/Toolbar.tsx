@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket, Zap, ArrowDown, ArrowUp, GitCommit, Sun, Moon, DollarSign } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket, Zap, ArrowDown, ArrowUp, GitCommit, Sun, Moon, DollarSign, ClipboardList } from "lucide-react";
 import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
@@ -10,6 +10,7 @@ import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CodeQualityModal } from "@/components/quality/CodeQualityModal";
 import { NewSessionModal } from "@/components/session/NewSessionModal";
+import { SpecImportModal } from "@/components/views/SpecImportModal";
 
 const TABS: { key: AppView; label: string }[] = [
   { key: "claude", label: "Claude" },
@@ -25,6 +26,7 @@ export function Toolbar() {
   const [showCodeQuality, setShowCodeQuality] = useState(false);
   const [newSessionCli, setNewSessionCli] = useState<"claude" | "codex" | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [showSpecImport, setShowSpecImport] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const explorerOpen = useLayoutStore((s) => s.explorerOpen);
   const toggleExplorer = useLayoutStore((s) => s.toggleExplorer);
@@ -171,6 +173,8 @@ export function Toolbar() {
                 onClick={() => { setActiveView("analytics"); setShowToolsMenu(false); }} />
               <DropdownItem icon={<DollarSign size={12} className="text-accent-amber" />} label="Cost Dashboard"
                 onClick={() => { setActiveView("cost"); setShowToolsMenu(false); }} />
+              <DropdownItem icon={<ClipboardList size={12} className="text-accent-green" />} label="Import Spec"
+                onClick={() => { setShowSpecImport(true); setShowToolsMenu(false); }} />
               <div className="h-px bg-bg-border my-0.5" />
               <DropdownItem icon={<Wrench size={12} className="text-text-muted" />} label="Settings"
                 onClick={() => { setActiveView("tools"); setShowToolsMenu(false); }} />
@@ -334,6 +338,9 @@ export function Toolbar() {
           defaultCli={newSessionCli}
           onClose={handleNewSessionClose}
         />
+      )}
+      {showSpecImport && (
+        <SpecImportModal onClose={() => setShowSpecImport(false)} />
       )}
 
     </div>

@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Wrench, ClipboardList, FolderOpen, Ticket, User, Puzzle, FileText, Plus, Trash2 } from "lucide-react";
+import { Wrench, FolderOpen, Ticket, User, Puzzle, FileText, Plus, Trash2 } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { useIssueStore } from "@/stores/issueStore";
 import { usePromptStore } from "@/stores/promptStore";
-import { SpecImportModal } from "./SpecImportModal";
 import { ProjectInfoCard } from "./tools/ProjectInfoCard";
 import { IssueSettingsCard } from "./tools/IssueSettingsCard";
 import { TagListCard } from "./tools/TagListCard";
@@ -32,7 +31,6 @@ export function ToolsView() {
   const addLabel = useIssueStore((s) => s.addLabel);
   const epics = useIssueStore((s) => s.epics);
   const labels = useIssueStore((s) => s.labels);
-  const [showSpecImport, setShowSpecImport] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>("project");
 
   return (
@@ -87,23 +85,6 @@ export function ToolsView() {
               tagClassName="bg-bg-elevated text-text-muted"
               placeholder="New label..."
             />
-            {/* Spec2Tick */}
-            <div className="bg-bg-secondary border border-bg-border rounded-lg p-4">
-              <h3 className="text-xs font-semibold text-text-primary mb-3 flex items-center gap-2">
-                <ClipboardList size={12} className="text-accent-green" />
-                Spec2Tick
-              </h3>
-              <p className="text-[10px] text-text-muted mb-3">
-                Paste any project spec and let Claude parse it into structured
-                tickets on the Issues board.
-              </p>
-              <button
-                onClick={() => setShowSpecImport(true)}
-                className="px-3 py-1.5 text-[11px] font-medium rounded bg-accent-green text-bg-primary hover:opacity-90 transition-opacity"
-              >
-                Import Spec
-              </button>
-            </div>
           </div>
         )}
 
@@ -126,9 +107,6 @@ export function ToolsView() {
         )}
       </div>
 
-      {showSpecImport && (
-        <SpecImportModal onClose={() => setShowSpecImport(false)} />
-      )}
     </div>
   );
 }
