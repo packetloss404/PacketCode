@@ -14,6 +14,42 @@
     user-select: none;
   }
 
+  /* Dark theme (default) */
+  :root {
+    --color-bg-primary: #0d1117;
+    --color-bg-secondary: #161b22;
+    --color-bg-tertiary: #1c2333;
+    --color-bg-elevated: #21262d;
+    --color-bg-hover: #30363d;
+    --color-bg-border: #30363d;
+    --color-text-primary: #c9d1d9;
+    --color-text-secondary: #8b949e;
+    --color-text-muted: #484f58;
+    --color-accent-green: #00ff41;
+    --color-accent-amber: #f0b400;
+    --color-accent-blue: #58a6ff;
+    --color-accent-red: #f85149;
+    --color-accent-purple: #bc8cff;
+  }
+
+  /* Light theme overrides */
+  [data-theme="light"] {
+    --color-bg-primary: #ffffff;
+    --color-bg-secondary: #f6f8fa;
+    --color-bg-tertiary: #eaeef2;
+    --color-bg-elevated: #e2e6ea;
+    --color-bg-hover: #d0d7de;
+    --color-bg-border: #d0d7de;
+    --color-text-primary: #1f2328;
+    --color-text-secondary: #656d76;
+    --color-text-muted: #8c959f;
+    --color-accent-green: #1a7f37;
+    --color-accent-amber: #9a6700;
+    --color-accent-blue: #0969da;
+    --color-accent-red: #cf222e;
+    --color-accent-purple: #8250df;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 8px;
@@ -24,13 +60,25 @@
     background: #0d1117;
   }
 
+  [data-theme="light"] ::-webkit-scrollbar-track {
+    background: #f6f8fa;
+  }
+
   ::-webkit-scrollbar-thumb {
     background: #30363d;
     border-radius: 4px;
   }
 
+  [data-theme="light"] ::-webkit-scrollbar-thumb {
+    background: #d0d7de;
+  }
+
   ::-webkit-scrollbar-thumb:hover {
     background: #484f58;
+  }
+
+  [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+    background: #8c959f;
   }
 
   /* Allow text selection in message content */

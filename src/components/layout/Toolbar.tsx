@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket, Zap, ArrowDown, ArrowUp, GitCommit, Sun, Moon, DollarSign } from "lucide-react";
 import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
@@ -10,7 +10,6 @@ import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CodeQualityModal } from "@/components/quality/CodeQualityModal";
 import { NewSessionModal } from "@/components/session/NewSessionModal";
-import { FileExplorer } from "@/components/explorer/FileExplorer";
 
 const TABS: { key: AppView; label: string }[] = [
   { key: "claude", label: "Claude" },
@@ -26,8 +25,11 @@ export function Toolbar() {
   const [showCodeQuality, setShowCodeQuality] = useState(false);
   const [newSessionCli, setNewSessionCli] = useState<"claude" | "codex" | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
-  const [showExplorer, setShowExplorer] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const explorerOpen = useLayoutStore((s) => s.explorerOpen);
+  const toggleExplorer = useLayoutStore((s) => s.toggleExplorer);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +40,7 @@ export function Toolbar() {
 
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
+  const quickStartSession = useAppStore((s) => s.quickStartSession);
   const moduleStates = useModuleStore((s) => s.states);
 
   const projectName = projectPath.split(/[/\\]/).pop() || "PacketCode";
@@ -142,8 +145,8 @@ export function Toolbar() {
               <DropdownItem
                 icon={<FolderTree size={12} className="text-accent-amber" />}
                 label="Explorer"
-                badge={showExplorer ? "open" : undefined}
-                onClick={() => { setShowExplorer(!showExplorer); setShowToolsMenu(false); }}
+                badge={explorerOpen ? "open" : undefined}
+                onClick={() => { toggleExplorer(); setShowToolsMenu(false); }}
               />
               {getModulesSorted()
                 .filter((mod) => moduleStates[mod.id]?.enabled ?? false)
@@ -166,6 +169,8 @@ export function Toolbar() {
                 onClick={() => { setActiveView("memory"); setShowToolsMenu(false); }} />
               <DropdownItem icon={<BarChart3 size={12} className="text-accent-green" />} label="Analytics"
                 onClick={() => { setActiveView("analytics"); setShowToolsMenu(false); }} />
+              <DropdownItem icon={<DollarSign size={12} className="text-accent-amber" />} label="Cost Dashboard"
+                onClick={() => { setActiveView("cost"); setShowToolsMenu(false); }} />
               <div className="h-px bg-bg-border my-0.5" />
               <DropdownItem icon={<Wrench size={12} className="text-text-muted" />} label="Settings"
                 onClick={() => { setActiveView("tools"); setShowToolsMenu(false); }} />
@@ -175,16 +180,26 @@ export function Toolbar() {
 
         <div className="w-px h-4 bg-bg-border ml-1" />
 
-        {/* Split pane button — in Claude or Codex view */}
+        {/* Quick Session + Split pane buttons — in Claude or Codex view */}
         {(activeView === "claude" || activeView === "codex") && (
-          <button
-            onClick={handleSplit}
-            className="flex items-center gap-1.5 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors ml-1"
-            title="New session pane"
-          >
-            <Plus size={12} />
-            <span>Split</span>
-          </button>
+          <>
+            <button
+              onClick={() => quickStartSession(activeView === "codex" ? "codex" : "claude")}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-accent-green hover:bg-accent-green/10 rounded transition-colors ml-1"
+              title="Quick session with profile defaults"
+            >
+              <Zap size={12} />
+              <span>Quick</span>
+            </button>
+            <button
+              onClick={handleSplit}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
+              title="New session pane (with options)"
+            >
+              <Plus size={12} />
+              <span>Split</span>
+            </button>
+          </>
         )}
       </div>
 
@@ -241,7 +256,29 @@ export function Toolbar() {
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        {/* Theme toggle */}
+        <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          className="p-1 text-text-muted hover:text-text-primary transition-colors"
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        >
+          {theme === "dark" ? <Sun size={12} /> : <Moon size={12} />}
+        </button>
+
+        {/* Cost Dashboard */}
+        <button
+          onClick={() => setActiveView("cost")}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+            activeView === "cost"
+              ? "bg-bg-elevated text-accent-amber"
+              : "text-text-muted hover:text-accent-amber"
+          }`}
+          title="Cost Dashboard"
+        >
+          <DollarSign size={11} />
+        </button>
+
         {/* Deploy button */}
         <button
           onClick={() => setActiveView("deploy")}
@@ -263,14 +300,17 @@ export function Toolbar() {
           title="Code Quality"
         >
           <Diamond size={12} className="text-accent-amber" />
-          <span>Code Quality</span>
+          <span>Quality</span>
         </button>
 
-        {/* Git branch */}
+        {/* Git branch + actions */}
         {gitBranch && (
-          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-bg-elevated rounded text-xs">
-            <GitBranch size={12} className="text-accent-purple" />
-            <span className="text-text-secondary">{gitBranch}</span>
+          <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-bg-elevated rounded-l text-xs">
+              <GitBranch size={12} className="text-accent-purple" />
+              <span className="text-text-secondary">{gitBranch}</span>
+            </div>
+            <GitActionButtons />
           </div>
         )}
 
@@ -296,10 +336,63 @@ export function Toolbar() {
         />
       )}
 
-      {/* Floating Explorer panel */}
-      {showExplorer && (
-        <FileExplorer onClose={() => setShowExplorer(false)} />
-      )}
+    </div>
+  );
+}
+
+function GitActionButtons() {
+  const projectPath = useLayoutStore((s) => s.projectPath);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function handleGitAction(action: "pull" | "push" | "commit") {
+    if (busy) return;
+    setBusy(action);
+    try {
+      const { gitPull, gitPush, gitCommit } = await import("@/lib/tauri");
+      if (action === "pull") {
+        await gitPull(projectPath);
+      } else if (action === "push") {
+        await gitPush(projectPath);
+      } else if (action === "commit") {
+        // Quick commit with stage all
+        const message = window.prompt("Commit message:");
+        if (message) {
+          await gitCommit(projectPath, message, true);
+        }
+      }
+    } catch (err) {
+      console.error(`Git ${action} failed:`, err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex items-center bg-bg-elevated rounded-r border-l border-bg-border">
+      <button
+        onClick={() => handleGitAction("pull")}
+        disabled={busy !== null}
+        className="p-1 text-text-muted hover:text-accent-green transition-colors disabled:opacity-40"
+        title="Git Pull"
+      >
+        <ArrowDown size={11} />
+      </button>
+      <button
+        onClick={() => handleGitAction("push")}
+        disabled={busy !== null}
+        className="p-1 text-text-muted hover:text-accent-green transition-colors disabled:opacity-40"
+        title="Git Push"
+      >
+        <ArrowUp size={11} />
+      </button>
+      <button
+        onClick={() => handleGitAction("commit")}
+        disabled={busy !== null}
+        className="p-1 text-text-muted hover:text-accent-green transition-colors disabled:opacity-40"
+        title="Git Commit"
+      >
+        <GitCommit size={11} />
+      </button>
     </div>
   );
 }

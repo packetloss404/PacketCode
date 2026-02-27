@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Bot, User } from "lucide-react";
+import { Bot, User, FileText } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useMemoryStore } from "@/stores/memoryStore";
+import { usePromptStore } from "@/stores/promptStore";
 
 type CliChoice = "claude" | "codex";
 
@@ -113,6 +114,45 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
     onClose();
   }
 
+  function handleDualFire() {
+    // Build shared prompt
+    let finalPrompt = "";
+    const selectedProfile = selectedProfileId
+      ? profiles.find((p) => p.id === selectedProfileId)
+      : null;
+
+    if (selectedProfile?.systemPrompt) {
+      finalPrompt += selectedProfile.systemPrompt + "\n\n";
+    }
+    if (includeMemory) {
+      const memoryContext = getContextForSession();
+      if (memoryContext.trim()) {
+        finalPrompt += memoryContext + "\n\n";
+      }
+    }
+    if (prompt.trim()) {
+      finalPrompt += prompt.trim();
+    }
+
+    if (selectedProfileId) {
+      useProfileStore.getState().setActiveProfile(selectedProfileId);
+    }
+
+    useAppStore.getState().setActiveView("claude");
+
+    // Fire both Claude and Codex with same prompt
+    useLayoutStore.getState().addPane({
+      cliCommand: "claude",
+      initialPrompt: finalPrompt.trim() || undefined,
+    });
+    useLayoutStore.getState().addPane({
+      cliCommand: "codex",
+      initialPrompt: finalPrompt.trim() || undefined,
+    });
+
+    onClose();
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.ctrlKey && e.key === "Enter") {
       e.preventDefault();
@@ -127,6 +167,13 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
         className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
       >
         Cancel
+      </button>
+      <button
+        onClick={handleDualFire}
+        className="px-3 py-1.5 text-xs bg-accent-purple/15 text-accent-purple border border-accent-purple/30 rounded font-medium hover:bg-accent-purple/25 transition-colors"
+        title="Send same prompt to both Claude and Codex"
+      >
+        Compare
       </button>
       <button
         onClick={handleStart}
@@ -241,6 +288,9 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
             </div>
           </div>
 
+          {/* Prompt Template Picker */}
+          <TemplatePicker onSelect={(content) => setPrompt(content)} />
+
           {/* Prompt */}
           <div>
             <label className="block text-[10px] text-text-muted mb-1.5 uppercase tracking-wider">
@@ -260,5 +310,49 @@ export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionMo
           </div>
       </div>
     </Modal>
+  );
+}
+
+function TemplatePicker({ onSelect }: { onSelect: (content: string) => void }) {
+  const templates = usePromptStore((s) => s.templates);
+  const [open, setOpen] = useState(false);
+
+  if (templates.length === 0) return null;
+
+  return (
+    <div>
+      <label className="block text-[10px] text-text-muted mb-1.5 uppercase tracking-wider">
+        Prompt Template
+      </label>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] bg-bg-primary border border-bg-border rounded w-full text-left text-text-secondary hover:border-text-muted/30 transition-colors"
+        >
+          <FileText size={11} className="text-accent-amber flex-shrink-0" />
+          <span className="flex-1 truncate">Select a template...</span>
+        </button>
+        {open && (
+          <div className="absolute top-full left-0 mt-1 w-full bg-bg-secondary border border-bg-border rounded-lg shadow-xl z-50 py-1 max-h-[200px] overflow-y-auto">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => {
+                  onSelect(t.content);
+                  setOpen(false);
+                }}
+                className="flex flex-col w-full px-3 py-2 text-left hover:bg-bg-hover transition-colors"
+              >
+                <span className="text-[11px] text-text-primary">{t.name}</span>
+                <span className="text-[10px] text-text-muted truncate">
+                  {t.content.slice(0, 80)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

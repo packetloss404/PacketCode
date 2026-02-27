@@ -6,9 +6,10 @@ interface IssueCardProps {
   issue: Issue;
   onDragStart: (e: React.DragEvent) => void;
   onClick: () => void;
+  isDragging?: boolean;
 }
 
-export function IssueCard({ issue, onDragStart, onClick }: IssueCardProps) {
+export function IssueCard({ issue, onDragStart, onClick, isDragging }: IssueCardProps) {
   const deleteIssue = useIssueStore((s) => s.deleteIssue);
 
   const timeAgo = getTimeAgo(issue.updatedAt);
@@ -21,7 +22,9 @@ export function IssueCard({ issue, onDragStart, onClick }: IssueCardProps) {
       draggable
       onDragStart={onDragStart}
       onClick={onClick}
-      className="group bg-bg-primary border border-bg-border rounded-md p-2.5 cursor-pointer hover:border-text-muted/30 transition-colors"
+      className={`group bg-bg-primary border border-bg-border rounded-md p-2.5 cursor-pointer hover:border-text-muted/30 transition-all ${
+        isDragging ? "opacity-50 scale-[0.97] shadow-lg ring-1 ring-accent-green/30" : ""
+      }`}
     >
       {/* Header row: ticket ID + priority */}
       <div className="flex items-center justify-between gap-1 mb-1">

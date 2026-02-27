@@ -15,6 +15,7 @@ import { useGitHubStore } from "@/stores/githubStore";
 import { useIssueStore } from "@/stores/issueStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
+import { DiffViewer } from "@/components/views/DiffViewer";
 import { PRModal } from "@/components/views/PRModal";
 import type { GitHubIssue } from "@/types/github";
 
@@ -44,10 +45,20 @@ export function GitHubView() {
   const addIssue = useIssueStore((s) => s.addIssue);
   const projectPath = useLayoutStore((s) => s.projectPath);
 
+  const {
+    prs,
+    prDiff,
+    isPrLoading,
+    fetchPrs,
+    getPrDiff,
+  } = useGitHubStore();
+
   const [tokenInput, setTokenInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
   const [showPRModal, setShowPRModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<"issues" | "prs">("issues");
+  const [selectedPrNumber, setSelectedPrNumber] = useState<number | null>(null);
 
   useEffect(() => {
     initializeAuth();
@@ -62,8 +73,9 @@ export function GitHubView() {
   useEffect(() => {
     if (isConnected && config.selectedRepo) {
       fetchIssues();
+      fetchPrs();
     }
-  }, [isConnected, config.selectedRepo, fetchIssues]);
+  }, [isConnected, config.selectedRepo, fetchIssues, fetchPrs]);
 
   async function handleConnect() {
     if (tokenInput.trim()) {
@@ -212,8 +224,32 @@ export function GitHubView() {
 
       {/* Main content — 2 columns */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Issues list */}
+        {/* Left: Issues/PRs list */}
         <div className="w-[360px] border-r border-bg-border flex flex-col">
+          {/* Tab toggle */}
+          <div className="flex border-b border-bg-border">
+            <button
+              onClick={() => setActiveTab("issues")}
+              className={`flex-1 px-3 py-2 text-[11px] font-medium transition-colors ${
+                activeTab === "issues"
+                  ? "text-accent-green border-b-2 border-accent-green"
+                  : "text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              Issues ({issues.length})
+            </button>
+            <button
+              onClick={() => setActiveTab("prs")}
+              className={`flex-1 px-3 py-2 text-[11px] font-medium transition-colors ${
+                activeTab === "prs"
+                  ? "text-accent-purple border-b-2 border-accent-purple"
+                  : "text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              Pull Requests ({prs.length})
+            </button>
+          </div>
+
           <div className="px-3 py-2 border-b border-bg-border">
             <div className="flex items-center gap-2 bg-bg-secondary border border-bg-border rounded px-2 py-1">
               <Search size={11} className="text-text-muted" />
@@ -221,13 +257,61 @@ export function GitHubView() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search issues..."
+                placeholder={activeTab === "issues" ? "Search issues..." : "Search PRs..."}
                 className="flex-1 bg-transparent text-[11px] text-text-primary placeholder:text-text-muted focus:outline-none"
               />
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
+            {/* PR list */}
+            {activeTab === "prs" && (
+              <>
+                {isPrLoading && prs.length === 0 ? (
+                  <div className="flex items-center justify-center py-12 text-text-muted">
+                    <Loader2 size={16} className="animate-spin" />
+                  </div>
+                ) : prs.length === 0 ? (
+                  <div className="text-center py-12 text-[11px] text-text-muted">
+                    No open pull requests
+                  </div>
+                ) : (
+                  prs
+                    .filter((pr: any) =>
+                      pr.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      String(pr.number).includes(searchQuery)
+                    )
+                    .map((pr: any) => (
+                      <button
+                        key={pr.number}
+                        onClick={() => {
+                          setSelectedPrNumber(pr.number);
+                          getPrDiff(pr.number);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 border-b border-bg-border hover:bg-bg-hover transition-colors ${
+                          selectedPrNumber === pr.number ? "bg-bg-elevated" : ""
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <GitPullRequest size={12} className="text-accent-purple mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-text-primary truncate">
+                              #{pr.number} {pr.title}
+                            </div>
+                            <div className="text-[9px] text-text-muted mt-0.5">
+                              {pr.user?.login} &middot; {pr.head?.ref} → {pr.base?.ref}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                )}
+              </>
+            )}
+
+            {/* Issues list */}
+            {activeTab === "issues" && (
+              <>
             {isLoading && issues.length === 0 ? (
               <div className="flex items-center justify-center py-12 text-text-muted">
                 <Loader2 size={16} className="animate-spin" />
@@ -282,12 +366,32 @@ export function GitHubView() {
                 </button>
               ))
             )}
+              </>
+            )}
           </div>
         </div>
 
-        {/* Right: Issue detail */}
+        {/* Right: Issue detail or PR diff */}
         <div className="flex-1 overflow-y-auto">
-          {selectedIssue ? (
+          {/* PR diff view */}
+          {activeTab === "prs" && selectedPrNumber ? (
+            <div className="p-4">
+              <h3 className="text-sm font-semibold text-text-primary mb-3">
+                PR #{selectedPrNumber} Diff
+              </h3>
+              {isPrLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={16} className="animate-spin text-text-muted" />
+                </div>
+              ) : prDiff ? (
+                <div className="border border-bg-border rounded-lg overflow-hidden">
+                  <DiffViewer diff={prDiff} />
+                </div>
+              ) : (
+                <p className="text-[11px] text-text-muted">Select a PR to view its diff</p>
+              )}
+            </div>
+          ) : selectedIssue ? (
             <div className="p-4">
               <div className="flex items-start justify-between mb-3">
                 <div>

@@ -11,7 +11,10 @@ import { GitHubView } from "@/components/views/GitHubView";
 import { MemoryView } from "@/components/views/MemoryView";
 import { AnalyticsView } from "@/components/views/AnalyticsView";
 import { DeployView } from "@/components/views/DeployView";
+import { CostDashboardView } from "@/components/views/CostDashboardView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
+import { CommandPalette } from "@/components/common/CommandPalette";
+import { FileExplorer } from "@/components/explorer/FileExplorer";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, getModuleId, moduleViewId } from "@/stores/appStore";
@@ -25,11 +28,19 @@ export default function App() {
   const panes = useLayoutStore((s) => s.panes);
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
+  const theme = useAppStore((s) => s.theme);
+  const explorerOpen = useLayoutStore((s) => s.explorerOpen);
+  const toggleExplorer = useLayoutStore((s) => s.toggleExplorer);
 
   // Poll Claude Code status line data
   useStatusLinePoller();
   // Poll Codex status line data
   useCodexStatusLinePoller();
+
+  // Apply theme class to document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   // Persist pane count to localStorage
   useEffect(() => {
@@ -82,9 +93,31 @@ export default function App() {
     };
   }, []);
 
+  const commandPaletteOpen = useAppStore((s) => s.commandPaletteOpen);
+
   // Global keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // Ctrl+K to open command palette
+      if (e.ctrlKey && e.key === "k") {
+        e.preventDefault();
+        useAppStore.getState().setCommandPaletteOpen(
+          !useAppStore.getState().commandPaletteOpen
+        );
+        return;
+      }
+      // Escape to close command palette
+      if (e.key === "Escape" && useAppStore.getState().commandPaletteOpen) {
+        e.preventDefault();
+        useAppStore.getState().setCommandPaletteOpen(false);
+        return;
+      }
+      // Ctrl+B to toggle explorer
+      if (e.ctrlKey && e.key === "b") {
+        e.preventDefault();
+        useLayoutStore.getState().toggleExplorer();
+        return;
+      }
       // Ctrl+\ to split pane
       if (e.ctrlKey && e.key === "\\") {
         e.preventDefault();
@@ -140,24 +173,35 @@ export default function App() {
       <div className="flex flex-col h-screen bg-bg-primary text-text-primary font-mono">
         <TitleBar />
         <Toolbar />
-        <ErrorBoundary fallbackMessage="View error">
-          {/* Welcome screen */}
-          {activeView === "welcome" && (
-            <div className="flex flex-col flex-1 overflow-hidden">
-              <WelcomeScreen />
-            </div>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Docked file explorer sidebar */}
+          {explorerOpen && (
+            <FileExplorer onClose={toggleExplorer} docked />
           )}
-          {/* Unified PaneContainer for both Claude and Codex */}
-          <div
-            className="flex flex-col flex-1 overflow-hidden"
-            style={{ display: isSessionsView ? "flex" : "none" }}
-          >
-            <PaneContainer />
+
+          {/* Main content area */}
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <ErrorBoundary fallbackMessage="View error">
+              {/* Welcome screen */}
+              {activeView === "welcome" && (
+                <div className="flex flex-col flex-1 overflow-hidden">
+                  <WelcomeScreen />
+                </div>
+              )}
+              {/* Unified PaneContainer for both Claude and Codex */}
+              <div
+                className="flex flex-col flex-1 overflow-hidden"
+                style={{ display: isSessionsView ? "flex" : "none" }}
+              >
+                <PaneContainer />
+              </div>
+              {/* Other views render conditionally */}
+              <OtherViewContent activeView={activeView} />
+            </ErrorBoundary>
           </div>
-          {/* Other views render conditionally */}
-          <OtherViewContent activeView={activeView} />
-        </ErrorBoundary>
+        </div>
         <StatusBar />
+        {commandPaletteOpen && <CommandPalette />}
       </div>
     </ErrorBoundary>
   );
@@ -183,6 +227,8 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
       return <AnalyticsView />;
     case "deploy":
       return <DeployView />;
+    case "cost":
+      return <CostDashboardView />;
   }
 
   // Module views — dynamic lookup

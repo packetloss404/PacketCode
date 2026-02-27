@@ -2,6 +2,34 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use tauri::State;
 use tokio::sync::RwLock;
 
+fn token_file_path() -> Option<std::path::PathBuf> {
+    super::shared::home_dir()
+        .map(|h| std::path::PathBuf::from(h).join(".packetcode").join("github-token"))
+}
+
+fn load_persisted_token() -> Option<String> {
+    let path = token_file_path()?;
+    std::fs::read_to_string(&path).ok().and_then(|s| {
+        let trimmed = s.trim().to_string();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    })
+}
+
+fn persist_token(token: &str) {
+    if let Some(path) = token_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, token);
+    }
+}
+
+fn clear_persisted_token() {
+    if let Some(path) = token_file_path() {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 pub struct GitHubAuthState {
     token: RwLock<Option<String>>,
 }
@@ -9,7 +37,7 @@ pub struct GitHubAuthState {
 impl GitHubAuthState {
     pub fn new() -> Self {
         Self {
-            token: RwLock::new(None),
+            token: RwLock::new(load_persisted_token()),
         }
     }
 }
@@ -65,6 +93,7 @@ pub async fn github_set_token(
     if trimmed.is_empty() {
         return Err("GitHub token cannot be empty".to_string());
     }
+    persist_token(trimmed);
     let mut guard = auth.token.write().await;
     *guard = Some(trimmed.to_string());
     Ok(())
@@ -72,6 +101,7 @@ pub async fn github_set_token(
 
 #[tauri::command]
 pub async fn github_clear_token(auth: State<'_, GitHubAuthState>) -> Result<(), String> {
+    clear_persisted_token();
     let mut guard = auth.token.write().await;
     *guard = None;
     Ok(())
@@ -181,6 +211,58 @@ pub async fn github_create_pr(
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
+    github_response_text(resp).await
+}
+
+#[tauri::command]
+#[tauri::command]
+pub async fn github_list_prs(
+    auth: State<'_, GitHubAuthState>,
+    owner: String,
+    repo: String,
+) -> Result<String, String> {
+    let client = github_client_from_state(auth.inner()).await?;
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls?state=open&per_page=30",
+        owner, repo
+    );
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    github_response_text(resp).await
+}
+
+#[tauri::command]
+pub async fn github_get_pr_diff(
+    auth: State<'_, GitHubAuthState>,
+    owner: String,
+    repo: String,
+    pr_number: u32,
+) -> Result<String, String> {
+    let token = auth
+        .token
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "GitHub token not set".to_string())?;
+
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}",
+        owner, repo, pr_number
+    );
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header(AUTHORIZATION, format!("Bearer {}", token))
+        .header(ACCEPT, "application/vnd.github.diff")
+        .header(USER_AGENT, "PacketCode/1.0")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
     github_response_text(resp).await
 }
 

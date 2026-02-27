@@ -19,6 +19,7 @@ export function IssueBoard() {
   const [showNewIssue, setShowNewIssue] = useState(false);
   const [newIssueColumn, setNewIssueColumn] = useState<IssueStatus>("todo");
   const [dragOverColumn, setDragOverColumn] = useState<IssueStatus | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
 
   // Filters
@@ -63,6 +64,12 @@ export function IssueBoard() {
   function handleDragStart(e: React.DragEvent, issueId: string) {
     e.dataTransfer.setData("text/plain", issueId);
     e.dataTransfer.effectAllowed = "move";
+    setDraggingId(issueId);
+  }
+
+  function handleDragEnd() {
+    setDraggingId(null);
+    setDragOverColumn(null);
   }
 
   function handleDragOver(e: React.DragEvent, columnKey: IssueStatus) {
@@ -82,6 +89,7 @@ export function IssueBoard() {
       moveIssue(issueId, columnKey);
     }
     setDragOverColumn(null);
+    setDraggingId(null);
   }
 
   function getIssuesForColumn(status: IssueStatus): Issue[] {
@@ -194,6 +202,7 @@ export function IssueBoard() {
               onDragOver={(e) => handleDragOver(e, col.key)}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, col.key)}
+              onDragEnd={handleDragEnd}
             >
               {/* Column header */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-bg-border">
@@ -221,7 +230,10 @@ export function IssueBoard() {
 
               {/* Cards */}
               <div className="flex flex-col gap-2 p-2 overflow-y-auto flex-1">
-                {columnIssues.length === 0 ? (
+                {isDragOver && draggingId && (
+                  <div className="h-1 rounded-full bg-accent-green/40 mx-1 transition-all" />
+                )}
+                {columnIssues.length === 0 && !isDragOver ? (
                   <div className="text-[10px] text-text-muted text-center py-4">
                     No Issues
                   </div>
@@ -232,6 +244,7 @@ export function IssueBoard() {
                       issue={issue}
                       onDragStart={(e) => handleDragStart(e, issue.id)}
                       onClick={() => setSelectedIssueId(issue.id)}
+                      isDragging={draggingId === issue.id}
                     />
                   ))
                 )}

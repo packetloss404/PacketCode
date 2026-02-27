@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { GitBranch, Database, DollarSign, Clock } from "lucide-react";
 import { useStatusLineForCwd } from "@/hooks/useStatusLine";
 
@@ -7,6 +8,7 @@ interface ClaudeStatusBarProps {
 
 export function ClaudeStatusBar({ projectPath }: ClaudeStatusBarProps) {
   const data = useStatusLineForCwd(projectPath);
+  const [hovered, setHovered] = useState(false);
 
   if (!data) {
     return null;
@@ -37,38 +39,44 @@ export function ClaudeStatusBar({ projectPath }: ClaudeStatusBarProps) {
     <div
       className="flex items-center gap-3 px-3 text-[11px] bg-bg-secondary border-t border-bg-border select-none"
       style={{ height: 20, minHeight: 20, opacity: isStale ? 0.5 : 1 }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {/* Model (backend normalizes "Claude Code for Cursor" → "Claude Code") */}
+      {/* Model — always visible */}
       <span style={{ color: "#58a6ff" }}>{data.model}</span>
 
-      {/* Context % */}
+      {/* Context % — always visible */}
       <span className="flex items-center gap-1">
         <Database size={10} style={{ color: contextColor }} />
         <span style={{ color: contextColor }}>{data.context_percent}%</span>
-        <span className="text-text-muted">
-          ({data.context_current_k}K/{data.context_max_k}K)
-        </span>
       </span>
 
-      {/* Git branch */}
-      {data.git_branch && data.git_branch !== "-" && (
-        <span className="flex items-center gap-1" style={{ color: "#bc8cff" }}>
-          <GitBranch size={10} />
-          {data.git_branch}
-        </span>
-      )}
-
-      {/* Cost */}
+      {/* Cost — always visible */}
       <span className="flex items-center gap-1" style={{ color: "#f0b400" }}>
         <DollarSign size={10} />
         {data.cost_display}
       </span>
 
-      {/* Duration */}
-      <span className="flex items-center gap-1 text-text-muted">
-        <Clock size={10} />
-        {durationDisplay}
-      </span>
+      {/* Secondary info — shown on hover */}
+      {hovered && (
+        <>
+          <span className="text-text-muted">
+            ({data.context_current_k}K/{data.context_max_k}K)
+          </span>
+
+          {data.git_branch && data.git_branch !== "-" && (
+            <span className="flex items-center gap-1" style={{ color: "#bc8cff" }}>
+              <GitBranch size={10} />
+              {data.git_branch}
+            </span>
+          )}
+
+          <span className="flex items-center gap-1 text-text-muted">
+            <Clock size={10} />
+            {durationDisplay}
+          </span>
+        </>
+      )}
     </div>
   );
 }

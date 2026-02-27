@@ -23,6 +23,10 @@ pub fn run() {
             // Git
             commands::git::get_git_branch,
             commands::git::get_git_status,
+            commands::git::git_commit,
+            commands::git::git_push,
+            commands::git::git_pull,
+            commands::git::git_create_branch,
             // Code quality
             commands::code_quality::analyze_code_quality,
             // Filesystem
@@ -34,6 +38,7 @@ pub fn run() {
             commands::spec::parse_spec_to_tickets,
             // Insights chat
             commands::insights::ask_insights,
+            commands::insights::ask_insights_stream,
             // Ideation scanner
             commands::ideation::generate_ideas,
             // GitHub integration
@@ -44,6 +49,8 @@ pub fn run() {
             commands::github::github_list_issues,
             commands::github::github_get_issue,
             commands::github::github_create_pr,
+            commands::github::github_list_prs,
+            commands::github::github_get_pr_diff,
             commands::github::github_investigate_issue,
             // Memory layer
             commands::memory::scan_codebase_memory,

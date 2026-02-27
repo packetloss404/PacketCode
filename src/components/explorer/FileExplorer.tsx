@@ -13,6 +13,7 @@ import {
   Database,
   Settings,
   File,
+  PanelLeftClose,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -27,6 +28,7 @@ interface DirEntry {
 
 interface FileExplorerProps {
   onClose: () => void;
+  docked?: boolean;
 }
 
 function getFileIcon(ext: string | null, size: number) {
@@ -186,12 +188,12 @@ function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
 
 // ─── Main Panel ─────────────────────────────────────────────
 
-export function FileExplorer({ onClose }: FileExplorerProps) {
+export function FileExplorer({ onClose, docked = false }: FileExplorerProps) {
   const projectPath = useLayoutStore((s) => s.projectPath);
   const [rootEntries, setRootEntries] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Dragging state
+  // Dragging state (floating mode only)
   const panelRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 12, y: 80 });
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -210,7 +212,7 @@ export function FileExplorer({ onClose }: FileExplorerProps) {
   }, [projectPath]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only drag from the title bar area
+    if (docked) return;
     if ((e.target as HTMLElement).closest("[data-drag-handle]")) {
       e.preventDefault();
       dragRef.current = {
@@ -220,9 +222,10 @@ export function FileExplorer({ onClose }: FileExplorerProps) {
         origY: position.y,
       };
     }
-  }, [position]);
+  }, [position, docked]);
 
   useEffect(() => {
+    if (docked) return;
     function handleMouseMove(e: MouseEvent) {
       if (!dragRef.current) return;
       const dx = e.clientX - dragRef.current.startX;
@@ -243,10 +246,60 @@ export function FileExplorer({ onClose }: FileExplorerProps) {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, []);
+  }, [docked]);
 
   const projectName = projectPath.split(/[/\\]/).pop() || "Project";
 
+  // Docked sidebar mode
+  if (docked) {
+    return (
+      <div className="w-56 flex-shrink-0 bg-bg-secondary border-r border-bg-border flex flex-col h-full">
+        {/* Title bar */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-bg-border">
+          <div className="flex items-center gap-2">
+            <FolderOpen size={13} className="text-accent-amber" />
+            <span className="text-xs font-medium text-text-primary truncate">
+              {projectName}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-0.5 text-text-muted hover:text-text-primary transition-colors"
+            title="Close explorer"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        </div>
+
+        {/* Tree content */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
+          {loading && (
+            <div className="text-[10px] text-text-muted text-center py-6 animate-pulse">
+              Loading files...
+            </div>
+          )}
+          {rootEntries && rootEntries.length === 0 && !loading && (
+            <div className="text-[10px] text-text-muted text-center py-6">
+              No files found
+            </div>
+          )}
+          {rootEntries &&
+            rootEntries.map((entry) => (
+              <TreeNode key={entry.path} entry={entry} depth={0} />
+            ))}
+        </div>
+
+        {/* Footer */}
+        <div className="px-3 py-1.5 border-t border-bg-border">
+          <span className="text-[9px] text-text-muted truncate block" title={projectPath}>
+            {projectPath}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Floating mode (original behavior)
   return (
     <div
       ref={panelRef}

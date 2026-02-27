@@ -9,6 +9,30 @@ export async function getGitStatus(projectPath: string): Promise<string> {
   return invoke<string>("get_git_status", { projectPath });
 }
 
+export async function gitCommit(
+  projectPath: string,
+  message: string,
+  stageAll: boolean
+): Promise<string> {
+  return invoke<string>("git_commit", { projectPath, message, stageAll });
+}
+
+export async function gitPush(projectPath: string): Promise<string> {
+  return invoke<string>("git_push", { projectPath });
+}
+
+export async function gitPull(projectPath: string): Promise<string> {
+  return invoke<string>("git_pull", { projectPath });
+}
+
+export async function gitCreateBranch(
+  projectPath: string,
+  branchName: string,
+  checkout: boolean
+): Promise<string> {
+  return invoke<string>("git_create_branch", { projectPath, branchName, checkout });
+}
+
 export async function readStatusLineStates(): Promise<StatusLineData[]> {
   return invoke<StatusLineData[]>("read_statusline_states");
 }
@@ -26,6 +50,18 @@ export async function askInsights(
   messages: { role: string; content: string }[]
 ): Promise<string> {
   return invoke<string>("ask_insights", { projectPath, messages });
+}
+
+export async function askInsightsStream(
+  projectPath: string,
+  messages: { role: string; content: string }[],
+  sessionContext?: string
+): Promise<void> {
+  return invoke("ask_insights_stream", {
+    projectPath,
+    messages,
+    sessionContext: sessionContext || null,
+  });
 }
 
 export async function generateIdeas(
@@ -68,6 +104,21 @@ export async function githubCreatePr(
   base: string
 ): Promise<string> {
   return invoke<string>("github_create_pr", { owner, repo, title, body, head, base });
+}
+
+export async function githubListPrs(
+  owner: string,
+  repo: string
+): Promise<string> {
+  return invoke<string>("github_list_prs", { owner, repo });
+}
+
+export async function githubGetPrDiff(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<string> {
+  return invoke<string>("github_get_pr_diff", { owner, repo, prNumber });
 }
 
 export async function githubInvestigateIssue(

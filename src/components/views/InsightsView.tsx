@@ -7,8 +7,13 @@ import {
   Loader2,
   Bot,
   User,
+  Link,
+  Link2Off,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { useInsightsStore } from "@/stores/insightsStore";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { InsightsMessage } from "@/types/insights";
 
@@ -67,21 +72,32 @@ export function InsightsView() {
   const sessions = useInsightsStore((s) => s.sessions);
   const activeSessionId = useInsightsStore((s) => s.activeSessionId);
   const isLoading = useInsightsStore((s) => s.isLoading);
+  const streamingContent = useInsightsStore((s) => s.streamingContent);
+  const includeSessionContext = useInsightsStore((s) => s.includeSessionContext);
   const createSession = useInsightsStore((s) => s.createSession);
   const switchSession = useInsightsStore((s) => s.switchSession);
   const deleteSession = useInsightsStore((s) => s.deleteSession);
   const sendMessage = useInsightsStore((s) => s.sendMessage);
+  const setIncludeSessionContext = useInsightsStore((s) => s.setIncludeSessionContext);
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const voice = useVoiceInput();
+
+  // Sync voice transcript into input
+  useEffect(() => {
+    if (voice.transcript) {
+      setInput((prev) => prev + voice.transcript);
+    }
+  }, [voice.transcript]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages or streaming content
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.messages.length, isLoading]);
+  }, [activeSession?.messages.length, isLoading, streamingContent]);
 
   async function handleSend() {
     const text = input.trim();
@@ -178,11 +194,18 @@ export function InsightsView() {
                   <div className="w-7 h-7 rounded-full flex items-center justify-center bg-accent-purple/20 text-accent-purple">
                     <Bot size={14} />
                   </div>
-                  <div className="bg-bg-secondary border border-bg-border rounded-lg px-4 py-3">
-                    <Loader2
-                      size={16}
-                      className="animate-spin text-accent-purple"
-                    />
+                  <div className="bg-bg-secondary border border-bg-border rounded-lg px-4 py-3 max-w-[80%]">
+                    {streamingContent ? (
+                      <MarkdownRenderer
+                        content={streamingContent}
+                        className="text-sm leading-relaxed space-y-2"
+                      />
+                    ) : (
+                      <Loader2
+                        size={16}
+                        className="animate-spin text-accent-purple"
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -191,6 +214,21 @@ export function InsightsView() {
 
             {/* Input */}
             <div className="p-3 border-t border-bg-border">
+              {/* Context toggle */}
+              <div className="flex items-center gap-2 mb-2">
+                <button
+                  onClick={() => setIncludeSessionContext(!includeSessionContext)}
+                  className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded transition-colors ${
+                    includeSessionContext
+                      ? "text-accent-blue bg-accent-blue/10"
+                      : "text-text-muted hover:text-text-secondary"
+                  }`}
+                  title={includeSessionContext ? "Session context included" : "Session context excluded"}
+                >
+                  {includeSessionContext ? <Link size={10} /> : <Link2Off size={10} />}
+                  Context
+                </button>
+              </div>
               <div className="flex gap-2">
                 <textarea
                   ref={inputRef}
@@ -202,13 +240,28 @@ export function InsightsView() {
                   rows={2}
                   disabled={isLoading}
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isLoading}
-                  className="px-3 bg-accent-green/20 text-accent-green rounded-lg hover:bg-accent-green/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-end"
-                >
-                  <Send size={16} />
-                </button>
+                <div className="flex flex-col gap-1 self-end">
+                  {voice.isSupported && (
+                    <button
+                      onClick={voice.isListening ? voice.stopListening : voice.startListening}
+                      className={`px-2 py-2 rounded-lg transition-colors ${
+                        voice.isListening
+                          ? "bg-accent-red/20 text-accent-red"
+                          : "bg-bg-secondary text-text-muted hover:text-text-primary"
+                      }`}
+                      title={voice.isListening ? "Stop listening" : "Voice input"}
+                    >
+                      {voice.isListening ? <MicOff size={14} /> : <Mic size={14} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() || isLoading}
+                    className="px-3 py-2 bg-accent-green/20 text-accent-green rounded-lg hover:bg-accent-green/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Send size={16} />
+                  </button>
+                </div>
               </div>
             </div>
           </>

@@ -7,6 +7,8 @@ import {
   githubListIssues,
   githubListRepos,
   githubSetToken,
+  githubListPrs,
+  githubGetPrDiff,
 } from "@/lib/tauri";
 import type { GitHubRepo, GitHubIssue, GitHubConfig } from "@/types/github";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
@@ -52,6 +54,9 @@ interface GitHubStore {
   error: string | null;
   investigation: string | null;
   isInvestigating: boolean;
+  prs: any[];
+  prDiff: string | null;
+  isPrLoading: boolean;
 
   initializeAuth: () => Promise<void>;
   connect: (token: string) => Promise<void>;
@@ -66,6 +71,8 @@ interface GitHubStore {
     head: string,
     base: string
   ) => Promise<string>;
+  fetchPrs: () => Promise<void>;
+  getPrDiff: (prNumber: number) => Promise<void>;
   clearError: () => void;
   clearInvestigation: () => void;
 }
@@ -83,6 +90,9 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
   error: null,
   investigation: null,
   isInvestigating: false,
+  prs: [],
+  prDiff: null,
+  isPrLoading: false,
 
   initializeAuth: async () => {
     if (get().isInitializing) return;
@@ -244,6 +254,38 @@ export const useGitHubStore = create<GitHubStore>((set, get) => ({
         isLoading: false,
       });
       throw e;
+    }
+  },
+
+  fetchPrs: async () => {
+    const { config } = get();
+    if (!get().isConnected || !config.selectedRepo) return;
+    set({ isPrLoading: true, error: null });
+    try {
+      const json = await githubListPrs(
+        config.selectedRepo.owner,
+        config.selectedRepo.repo
+      );
+      const prs = JSON.parse(json);
+      set({ prs, isPrLoading: false });
+    } catch (e) {
+      set({ error: String(e), isPrLoading: false });
+    }
+  },
+
+  getPrDiff: async (prNumber) => {
+    const { config } = get();
+    if (!get().isConnected || !config.selectedRepo) return;
+    set({ isPrLoading: true, prDiff: null });
+    try {
+      const diff = await githubGetPrDiff(
+        config.selectedRepo.owner,
+        config.selectedRepo.repo,
+        prNumber
+      );
+      set({ prDiff: diff, isPrLoading: false });
+    } catch (e) {
+      set({ error: String(e), isPrLoading: false });
     }
   },
 

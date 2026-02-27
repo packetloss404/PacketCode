@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Database, Gauge, Zap } from "lucide-react";
 import { useCodexStatusLineForCwd } from "@/hooks/useStatusLine";
 
@@ -7,6 +8,7 @@ interface CodexStatusBarProps {
 
 export function CodexStatusBar({ projectPath }: CodexStatusBarProps) {
   const data = useCodexStatusLineForCwd(projectPath);
+  const [hovered, setHovered] = useState(false);
 
   if (!data) {
     return null;
@@ -39,40 +41,45 @@ export function CodexStatusBar({ projectPath }: CodexStatusBarProps) {
     <div
       className="flex items-center gap-3 px-3 text-[11px] bg-bg-secondary border-t border-bg-border select-none"
       style={{ height: 20, minHeight: 20, opacity: isStale ? 0.5 : 1 }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {/* Model */}
+      {/* Model — always visible */}
       <span style={{ color: "#58a6ff" }}>{data.model}</span>
 
-      {/* Context % */}
+      {/* Context % — always visible */}
       <span className="flex items-center gap-1">
         <Database size={10} style={{ color: contextColor }} />
         <span style={{ color: contextColor }}>{data.context_percent}%</span>
-        <span className="text-text-muted">
-          ({totalK}K/{contextK}K)
-        </span>
       </span>
 
-      {/* Rate limit */}
-      {data.rate_limit_primary_pct > 0 && (
-        <span className="flex items-center gap-1">
-          <Gauge size={10} style={{ color: rateLimitColor }} />
-          <span style={{ color: rateLimitColor }}>
-            {Math.round(data.rate_limit_primary_pct)}%
+      {/* Secondary info — shown on hover */}
+      {hovered && (
+        <>
+          <span className="text-text-muted">
+            ({totalK}K/{contextK}K)
           </span>
-        </span>
-      )}
 
-      {/* Reasoning effort */}
-      {data.reasoning_effort && data.reasoning_effort !== "medium" && (
-        <span className="flex items-center gap-1" style={{ color: "#bc8cff" }}>
-          <Zap size={10} />
-          {data.reasoning_effort}
-        </span>
-      )}
+          {data.rate_limit_primary_pct > 0 && (
+            <span className="flex items-center gap-1">
+              <Gauge size={10} style={{ color: rateLimitColor }} />
+              <span style={{ color: rateLimitColor }}>
+                {Math.round(data.rate_limit_primary_pct)}%
+              </span>
+            </span>
+          )}
 
-      {/* CLI version */}
-      {data.cli_version && (
-        <span className="text-text-muted">v{data.cli_version}</span>
+          {data.reasoning_effort && data.reasoning_effort !== "medium" && (
+            <span className="flex items-center gap-1" style={{ color: "#bc8cff" }}>
+              <Zap size={10} />
+              {data.reasoning_effort}
+            </span>
+          )}
+
+          {data.cli_version && (
+            <span className="text-text-muted">v{data.cli_version}</span>
+          )}
+        </>
       )}
     </div>
   );
