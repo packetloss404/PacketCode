@@ -1,6 +1,6 @@
 # PacketCode
 
-A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.tauri.app/). PacketCode wraps **Claude Code** and **OpenAI Codex CLI** into a unified multi-pane workspace with session management, an issue tracker, GitHub integration, a persistent memory layer, and configurable agent profiles.
+A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.tauri.app/). PacketCode wraps **Claude Code** and **OpenAI Codex CLI** into a unified multi-pane workspace with session management, an issue tracker, GitHub integration, a persistent memory layer, configurable agent profiles, MCP server management, project scaffolding, and a deploy pipeline.
 
 ## Features
 
@@ -46,6 +46,26 @@ A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.
 - **Ideation Scanner**: AI-generated feature ideas, improvements, and suggestions
 - **Code Quality**: on-demand AI code quality analysis
 
+### MCP Server Integration Hub
+- Manage Claude Code's MCP server configurations from within PacketCode
+- View, add, edit, and delete servers across **global** (`~/.claude/settings.json`) and **project** (`.mcp.json`) scopes
+- Server list grouped by scope with inline edit and delete controls
+- Add/Edit modal with name, command, args, environment variables, and scope selector
+
+### Project Template Scaffolding
+- "New Project" wizard with a 3-step flow: template selection → configuration → result
+- 6 built-in templates: **Next.js**, **React+Vite**, **Python FastAPI**, **Rust CLI**, **Node Express**, **Blank**
+- Automatic tool availability detection (node, cargo, python)
+- Directory picker for parent folder selection
+- Auto-switches project path to the newly created project on success
+
+### Deploy Pipeline
+- One-click deploy with live terminal output via PTY
+- Auto-detects deploy configs from `packetcode.deploy.json`, `package.json` scripts, `vercel.json`, `netlify.toml`, and `Dockerfile`
+- Custom deploy config creation and persistence
+- Deploy run history with status tracking (running, success, failed) and duration
+- Toolbar deploy button with Rocket icon
+
 ### UI/UX
 - Custom frameless window with native title bar controls
 - Dark theme with carefully designed color tokens
@@ -79,7 +99,7 @@ A custom desktop IDE for AI-powered development, built on [Tauri v2](https://v2.
 ### Install
 
 ```bash
-git clone https://github.com/yourusername/PacketCode.git
+git clone https://github.com/packetloss404/PacketCode.git
 cd PacketCode
 pnpm install
 ```
