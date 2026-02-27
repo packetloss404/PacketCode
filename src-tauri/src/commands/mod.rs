@@ -1,13 +1,16 @@
 pub mod analytics;
 pub mod code_quality;
+pub mod deploy;
 pub mod fs;
 pub mod git;
 pub mod github;
 pub mod history;
 pub mod ideation;
 pub mod insights;
+pub mod mcp;
 pub mod memory;
 pub mod pty;
+pub mod scaffold;
 pub mod shared;
 pub mod spec;
 pub mod statusline;

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3 } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket } from "lucide-react";
 import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
@@ -242,6 +242,20 @@ export function Toolbar() {
 
       {/* Right section */}
       <div className="flex items-center gap-3">
+        {/* Deploy button */}
+        <button
+          onClick={() => setActiveView("deploy")}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs transition-colors ${
+            activeView === "deploy"
+              ? "bg-bg-elevated text-accent-amber"
+              : "bg-bg-elevated text-text-secondary hover:text-accent-amber"
+          }`}
+          title="Deploy Pipeline"
+        >
+          <Rocket size={12} className="text-accent-amber" />
+          <span>Deploy</span>
+        </button>
+
         {/* Code Quality button */}
         <button
           onClick={() => setShowCodeQuality(true)}

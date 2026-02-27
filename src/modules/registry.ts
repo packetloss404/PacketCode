@@ -1,10 +1,14 @@
 import type { ModuleManifest } from "@/types/modules";
 import { vibeArchitectModule } from "./vibe-architect";
 import { ideationModule } from "./ideation";
+import { mcpHubModule } from "./mcp-hub";
+import { scaffoldModule } from "./scaffold";
 
 export const moduleRegistry: ModuleManifest[] = [
   vibeArchitectModule,
   ideationModule,
+  mcpHubModule,
+  scaffoldModule,
 ];
 
 export function getModule(id: string): ModuleManifest | undefined {

@@ -53,6 +53,16 @@ pub fn run() {
             commands::history::read_prompt_history,
             // Usage analytics
             commands::analytics::read_usage_analytics,
+            // MCP server management
+            commands::mcp::read_mcp_servers,
+            commands::mcp::write_mcp_server,
+            commands::mcp::delete_mcp_server,
+            // Project scaffolding
+            commands::scaffold::scaffold_project,
+            commands::scaffold::check_scaffold_tools,
+            // Deploy pipeline
+            commands::deploy::read_deploy_config,
+            commands::deploy::create_deploy_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

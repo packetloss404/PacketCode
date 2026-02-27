@@ -94,3 +94,62 @@ export async function readUsageAnalytics(): Promise<string> {
   return invoke<string>("read_usage_analytics");
 }
 
+// MCP server management
+import type { McpServerEntry } from "@/types/mcp";
+import type { ScaffoldResult, ToolAvailability } from "@/types/scaffold";
+
+export async function readMcpServers(projectPath: string): Promise<McpServerEntry[]> {
+  return invoke<McpServerEntry[]>("read_mcp_servers", { projectPath });
+}
+
+export async function writeMcpServer(
+  projectPath: string,
+  name: string,
+  command: string,
+  args: string[],
+  env: Record<string, string>,
+  scope: string
+): Promise<void> {
+  return invoke("write_mcp_server", { projectPath, name, command, args, env, scope });
+}
+
+export async function deleteMcpServer(
+  projectPath: string,
+  name: string,
+  scope: string
+): Promise<void> {
+  return invoke("delete_mcp_server", { projectPath, name, scope });
+}
+
+// Project scaffolding
+export async function scaffoldProject(
+  parentDir: string,
+  projectName: string,
+  template: string
+): Promise<ScaffoldResult> {
+  return invoke<ScaffoldResult>("scaffold_project", { parentDir, projectName, template });
+}
+
+export async function checkScaffoldTools(): Promise<ToolAvailability> {
+  return invoke<ToolAvailability>("check_scaffold_tools");
+}
+
+// Deploy pipeline
+import type { DeployConfig } from "@/types/deploy";
+
+interface DeployConfigFile {
+  configs: DeployConfig[];
+  source: string;
+}
+
+export async function readDeployConfig(projectPath: string): Promise<DeployConfigFile> {
+  return invoke<DeployConfigFile>("read_deploy_config", { projectPath });
+}
+
+export async function createDeployConfig(
+  projectPath: string,
+  configs: DeployConfig[]
+): Promise<void> {
+  return invoke("create_deploy_config", { projectPath, configs });
+}
+
