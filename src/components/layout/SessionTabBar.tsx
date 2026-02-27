@@ -1,5 +1,6 @@
 import { Plus, X, Link } from "lucide-react";
 import { useTabStore, type SessionTab } from "@/stores/tabStore";
+import { useActivityStore } from "@/stores/activityStore";
 
 interface SessionTabBarProps {
   cliType?: "claude" | "codex";
@@ -54,6 +55,10 @@ function TabItem({
   closable: boolean;
 }) {
   const statusColor = getStatusColor(tab.status);
+  const activity = useActivityStore((s) => s.activities[tab.id]);
+  const activityTooltip = activity?.currentTool
+    ? `${activity.currentTool}${activity.currentFile ? `: ${activity.currentFile}` : ""}`
+    : undefined;
 
   return (
     <div
@@ -63,13 +68,16 @@ function TabItem({
           : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
       }`}
       onClick={onActivate}
+      title={activityTooltip}
     >
       {/* Status dot */}
       <div
         className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor} ${
           tab.status === "thinking" || tab.status === "running"
             ? "animate-pulse"
-            : ""
+            : tab.status === "waiting_approval"
+              ? "animate-pulse"
+              : ""
         }`}
       />
 
@@ -116,6 +124,10 @@ function getStatusColor(status: SessionTab["status"]): string {
       return "bg-accent-blue";
     case "running":
       return "bg-accent-green";
+    case "waiting_approval":
+      return "bg-accent-amber";
+    case "waiting_input":
+      return "bg-accent-amber";
     case "done":
       return "bg-accent-purple";
     case "error":

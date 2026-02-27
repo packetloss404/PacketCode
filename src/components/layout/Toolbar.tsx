@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3 } from "lucide-react";
 import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
@@ -128,7 +128,7 @@ export function Toolbar() {
           <button
             onClick={() => setShowToolsMenu(!showToolsMenu)}
             className={`px-2.5 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-              activeView === "tools" || activeView === "insights" || activeView === "github" || activeView === "memory" || isModuleView(activeView)
+              activeView === "tools" || activeView === "insights" || activeView === "github" || activeView === "memory" || activeView === "analytics" || isModuleView(activeView)
                 ? "text-accent-green bg-bg-elevated"
                 : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
@@ -164,6 +164,8 @@ export function Toolbar() {
                 onClick={() => { setActiveView("github"); setShowToolsMenu(false); }} />
               <DropdownItem icon={<Brain size={12} className="text-accent-purple" />} label="Memory"
                 onClick={() => { setActiveView("memory"); setShowToolsMenu(false); }} />
+              <DropdownItem icon={<BarChart3 size={12} className="text-accent-green" />} label="Analytics"
+                onClick={() => { setActiveView("analytics"); setShowToolsMenu(false); }} />
               <div className="h-px bg-bg-border my-0.5" />
               <DropdownItem icon={<Wrench size={12} className="text-text-muted" />} label="Settings"
                 onClick={() => { setActiveView("tools"); setShowToolsMenu(false); }} />

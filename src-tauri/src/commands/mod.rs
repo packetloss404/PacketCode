@@ -1,7 +1,9 @@
+pub mod analytics;
 pub mod code_quality;
 pub mod fs;
 pub mod git;
 pub mod github;
+pub mod history;
 pub mod ideation;
 pub mod insights;
 pub mod memory;

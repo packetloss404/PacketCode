@@ -4,9 +4,26 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { X, RotateCcw, Plus } from "lucide-react";
+import {
+  X,
+  RotateCcw,
+  Plus,
+  ShieldCheck,
+  ShieldX,
+  XCircle,
+  FileEdit,
+  Brain,
+  TerminalSquare,
+} from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useTabStore } from "@/stores/tabStore";
+import { useActivityStore } from "@/stores/activityStore";
+import { usePtyStateDetector, type PtyDetectorState } from "@/hooks/usePtyStateDetector";
+import {
+  notifyApprovalNeeded,
+  notifySessionComplete,
+  notifySessionError,
+} from "@/lib/notifications";
 import { ClaudeStatusBar } from "@/components/session/ClaudeStatusBar";
 import { CodexStatusBar } from "@/components/session/CodexStatusBar";
 import "@xterm/xterm/css/xterm.css";
@@ -33,7 +50,7 @@ export function TerminalPane({
   showCloseButton = false,
   cliCommand = "claude",
   cliArgs,
-  initialPrompt,
+  initialPrompt: _initialPrompt,
 }: TerminalPaneProps) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -45,9 +62,68 @@ export function TerminalPane({
 
   const [alive, setAlive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showApproval, setShowApproval] = useState(false);
+  const [activityInfo, setActivityInfo] = useState<{
+    tool: string | null;
+    file: string | null;
+    state: PtyDetectorState["agentState"];
+  }>({ tool: null, file: null, state: "idle" });
 
   const projectPath = useLayoutStore((s) => s.projectPath);
   const setActivePaneId = useLayoutStore((s) => s.setActivePaneId);
+
+  // PTY state detector — handles approval detection, tool use, and activity
+  const handleStateChange = useCallback(
+    (prev: PtyDetectorState, next: PtyDetectorState) => {
+      const tabId = tabIdRef.current;
+      const sessionId = sessionIdRef.current;
+
+      // Update approval overlay
+      setShowApproval(next.needsApproval);
+
+      // Update activity info for the strip
+      setActivityInfo({
+        tool: next.currentTool,
+        file: next.currentFile,
+        state: next.agentState,
+      });
+
+      // Update activity store for tab tooltips
+      if (tabId) {
+        useActivityStore.getState().setActivity(tabId, {
+          currentTool: next.currentTool,
+          currentFile: next.currentFile,
+          agentState: next.agentState,
+          lastActivityAt: next.lastActivityAt,
+        });
+      }
+
+      // Tab status sync
+      if (tabId) {
+        if (next.needsApproval && !prev.needsApproval) {
+          useTabStore.getState().updateTabStatus(tabId, "waiting_approval");
+          // Notify
+          const tab = useTabStore.getState().getTab(tabId);
+          if (sessionId && tab) {
+            notifyApprovalNeeded(sessionId, tab.name);
+          }
+        } else if (!next.needsApproval && prev.needsApproval) {
+          // Restore to running when approval is handled
+          useTabStore.getState().updateTabStatus(tabId, "running");
+        }
+      }
+    },
+    []
+  );
+
+  // We need to re-init detector when session changes. Use a state to force re-render.
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // PTY state detector — subscribes to PTY output and detects approval/tool/thinking states
+  const detectorResult = usePtyStateDetector({
+    sessionId: currentSessionId,
+    onStateChange: handleStateChange,
+  });
 
   // Initialize xterm
   useEffect(() => {
@@ -108,6 +184,8 @@ export function TerminalPane({
       const sid = sessionIdRef.current;
       if (sid) {
         invoke("write_pty", { sessionId: sid, data }).catch(() => {});
+        // Clear approval state on any user input
+        detectorResult.clearApproval();
       }
     });
 
@@ -134,7 +212,7 @@ export function TerminalPane({
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start duration timer for a tab
   const startDurationTimer = useCallback((tabId: string) => {
@@ -171,6 +249,8 @@ export function TerminalPane({
     stopDurationTimer();
 
     setError(null);
+    setShowApproval(false);
+    setActivityInfo({ tool: null, file: null, state: "idle" });
     term.clear();
 
     try {
@@ -208,21 +288,17 @@ export function TerminalPane({
       });
 
       sessionIdRef.current = sessionId;
+      setCurrentSessionId(sessionId);
       setAlive(true);
 
       // Update tab with PTY session ID and set to running
       useTabStore.getState().updateTabStatus(tabId, "running");
-      // Store the ptySessionId on the tab — need a small helper
-      const tabStore = useTabStore.getState();
-      const currentTab = tabStore.tabs.find((t) => t.id === tabId);
-      if (currentTab) {
-        // Update ptySessionId directly
-        useTabStore.setState((s) => ({
-          tabs: s.tabs.map((t) =>
-            t.id === tabId ? { ...t, ptySessionId: sessionId } : t
-          ),
-        }));
-      }
+      // Store the ptySessionId on the tab
+      useTabStore.setState((s) => ({
+        tabs: s.tabs.map((t) =>
+          t.id === tabId ? { ...t, ptySessionId: sessionId } : t
+        ),
+      }));
 
       // Start tracking duration
       startDurationTimer(tabId);
@@ -238,9 +314,20 @@ export function TerminalPane({
       const exitUnlisten = await listen<string>("pty:exit", (event) => {
         if (event.payload === sessionId) {
           setAlive(false);
+          setShowApproval(false);
+          setCurrentSessionId(null);
           term.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
           useTabStore.getState().updateTabStatus(tabId, "done");
           stopDurationTimer();
+
+          // Notify session complete
+          const tab = useTabStore.getState().getTab(tabId);
+          if (tab) {
+            notifySessionComplete(sessionId, tab.name);
+          }
+
+          // Clear activity
+          useActivityStore.getState().clearActivity(tabId);
         }
       });
 
@@ -257,6 +344,9 @@ export function TerminalPane({
       );
       useTabStore.getState().updateTabStatus(tabId, "error");
       stopDurationTimer();
+
+      // Notify session error
+      notifySessionError(tabId, `Session ${sessionCounter}`);
     }
   }, [projectPath, cliCommand, cliArgs, startDurationTimer, stopDurationTimer]);
 
@@ -309,10 +399,11 @@ export function TerminalPane({
       if (sid) {
         invoke("kill_pty", { sessionId: sid }).catch(() => {});
       }
-      // Remove tab
+      // Remove tab and activity
       const tid = tabIdRef.current;
       if (tid) {
         useTabStore.getState().removeTab(tid);
+        useActivityStore.getState().clearActivity(tid);
       }
     };
   }, [stopDurationTimer]);
@@ -323,10 +414,13 @@ export function TerminalPane({
       await invoke("kill_pty", { sessionId: sid }).catch(() => {});
       setAlive(false);
     }
+    setShowApproval(false);
+    setCurrentSessionId(null);
     stopDurationTimer();
     const tid = tabIdRef.current;
     if (tid) {
       useTabStore.getState().updateTabStatus(tid, "done");
+      useActivityStore.getState().clearActivity(tid);
     }
   }, [stopDurationTimer]);
 
@@ -338,18 +432,53 @@ export function TerminalPane({
     }
     sessionIdRef.current = null;
     setAlive(false);
+    setShowApproval(false);
+    setCurrentSessionId(null);
     stopDurationTimer();
 
-    // Remove old tab
+    // Remove old tab and activity
     const tid = tabIdRef.current;
     if (tid) {
       useTabStore.getState().removeTab(tid);
+      useActivityStore.getState().clearActivity(tid);
     }
     tabIdRef.current = null;
 
     // Start fresh
     await startSession();
   }, [startSession, stopDurationTimer]);
+
+  // Quick action handlers
+  const handleApprove = useCallback(() => {
+    const sid = sessionIdRef.current;
+    if (sid) {
+      invoke("write_pty", { sessionId: sid, data: "y\n" }).catch(() => {});
+    }
+    setShowApproval(false);
+    detectorResult.clearApproval();
+  }, [detectorResult]);
+
+  const handleDeny = useCallback(() => {
+    const sid = sessionIdRef.current;
+    if (sid) {
+      invoke("write_pty", { sessionId: sid, data: "n\n" }).catch(() => {});
+    }
+    setShowApproval(false);
+    detectorResult.clearApproval();
+  }, [detectorResult]);
+
+  const handleAbort = useCallback(() => {
+    const sid = sessionIdRef.current;
+    if (sid) {
+      invoke("write_pty", { sessionId: sid, data: "\x03" }).catch(() => {});
+    }
+    setShowApproval(false);
+    detectorResult.clearApproval();
+  }, [detectorResult]);
+
+  // Activity strip visibility — hide when idle for >10s
+  const showActivityStrip =
+    alive && activityInfo.state !== "idle" && activityInfo.tool !== null;
 
   return (
     <div
@@ -361,11 +490,13 @@ export function TerminalPane({
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${
-              alive
-                ? "bg-accent-green animate-pulse"
-                : error
-                  ? "bg-accent-red"
-                  : "bg-text-muted"
+              showApproval
+                ? "bg-accent-amber animate-pulse"
+                : alive
+                  ? "bg-accent-green animate-pulse"
+                  : error
+                    ? "bg-accent-red"
+                    : "bg-text-muted"
             }`}
           />
           <span
@@ -412,11 +543,62 @@ export function TerminalPane({
       </div>
 
       {/* Terminal */}
-      <div
-        ref={termRef}
-        className="flex-1 overflow-hidden"
-        style={{ padding: "4px" }}
-      />
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={termRef}
+          className="h-full overflow-hidden"
+          style={{ padding: "4px" }}
+        />
+
+        {/* Quick Actions overlay — shown when approval needed */}
+        {showApproval && alive && (
+          <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-1.5 bg-accent-amber/10 border-t border-accent-amber/30 backdrop-blur-sm">
+            <ShieldCheck size={12} className="text-accent-amber flex-shrink-0" />
+            <span className="text-[11px] text-accent-amber font-medium flex-1">
+              Approval needed
+            </span>
+            <button
+              onClick={handleApprove}
+              className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded bg-accent-green/20 text-accent-green hover:bg-accent-green/30 transition-colors"
+            >
+              <ShieldCheck size={10} />
+              Allow (y)
+            </button>
+            <button
+              onClick={handleDeny}
+              className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition-colors"
+            >
+              <ShieldX size={10} />
+              Deny (n)
+            </button>
+            <button
+              onClick={handleAbort}
+              className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded bg-text-muted/20 text-text-secondary hover:bg-text-muted/30 transition-colors"
+            >
+              <XCircle size={10} />
+              Abort
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Activity Strip */}
+      {showActivityStrip && (
+        <div className="flex items-center gap-1.5 h-5 px-3 bg-bg-secondary border-t border-bg-border/50 text-[10px] text-text-muted">
+          <ActivityIcon state={activityInfo.state} tool={activityInfo.tool} />
+          <span className="truncate">
+            {getActivityLabel(activityInfo.state, activityInfo.tool, activityInfo.file)}
+          </span>
+        </div>
+      )}
+
+      {/* Thinking indicator (when no specific tool) */}
+      {alive && activityInfo.state === "thinking" && !activityInfo.tool && (
+        <div className="flex items-center gap-1.5 h-5 px-3 bg-bg-secondary border-t border-bg-border/50 text-[10px] text-text-muted">
+          <Brain size={10} className="text-accent-blue animate-pulse" />
+          <span>Thinking...</span>
+        </div>
+      )}
 
       {/* Status Bars */}
       {cliCommand === "claude" && alive && (
@@ -427,4 +609,58 @@ export function TerminalPane({
       )}
     </div>
   );
+}
+
+function ActivityIcon({
+  state,
+  tool,
+}: {
+  state: string;
+  tool: string | null;
+}) {
+  if (state === "thinking") {
+    return <Brain size={10} className="text-accent-blue animate-pulse flex-shrink-0" />;
+  }
+  if (tool === "Edit" || tool === "Write") {
+    return <FileEdit size={10} className="text-accent-amber flex-shrink-0" />;
+  }
+  if (tool === "Bash") {
+    return <TerminalSquare size={10} className="text-accent-green flex-shrink-0" />;
+  }
+  return <FileEdit size={10} className="text-text-muted flex-shrink-0" />;
+}
+
+function getActivityLabel(
+  state: string,
+  tool: string | null,
+  file: string | null
+): string {
+  if (state === "thinking") return "Thinking...";
+
+  if (!tool) return "";
+
+  const shortFile = file
+    ? file.length > 50
+      ? "..." + file.slice(-47)
+      : file
+    : "";
+
+  switch (tool) {
+    case "Edit":
+      return `Editing ${shortFile}`;
+    case "Write":
+      return `Writing ${shortFile}`;
+    case "Read":
+      return `Reading ${shortFile}`;
+    case "Bash":
+      return `Running: ${shortFile}`;
+    case "Glob":
+      return `Searching: ${shortFile}`;
+    case "Grep":
+      return `Searching: ${shortFile}`;
+    case "Task":
+      return `Running task: ${shortFile}`;
+    default:
+      return `${tool} ${shortFile}`;
+  }
 }

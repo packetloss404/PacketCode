@@ -9,6 +9,7 @@ import { IssueSettingsCard } from "./tools/IssueSettingsCard";
 import { TagListCard } from "./tools/TagListCard";
 import { AgentProfilesCard } from "./tools/AgentProfilesCard";
 import { ModulesCard } from "./tools/ModulesCard";
+import { NotificationSettingsCard } from "./tools/NotificationSettingsCard";
 
 export function ToolsView() {
   const projectPath = useLayoutStore((s) => s.projectPath);
@@ -66,6 +67,7 @@ export function ToolsView() {
         </div>
 
         <AgentProfilesCard />
+        <NotificationSettingsCard />
         <ModulesCard />
       </div>
 

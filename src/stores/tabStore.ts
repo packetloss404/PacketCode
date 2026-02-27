@@ -5,6 +5,8 @@ export type SessionStatus =
   | "starting"
   | "thinking"
   | "running"
+  | "waiting_approval"
+  | "waiting_input"
   | "done"
   | "error";
 
@@ -13,6 +15,8 @@ const STATUS_LABELS: Record<SessionStatus, string[]> = {
   starting: ["Warming up..."],
   thinking: ["Crunching...", "Imagining...", "Pondering...", "Brewing...", "Concocting..."],
   running: ["Working...", "Crafting...", "Building..."],
+  waiting_approval: ["Needs approval"],
+  waiting_input: ["Waiting for input"],
   done: ["Cogitated", "Brewed", "Baked", "Crafted"],
   error: ["Error"],
 };

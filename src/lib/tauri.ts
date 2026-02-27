@@ -84,3 +84,13 @@ export async function githubInvestigateIssue(
   });
 }
 
+// Prompt history
+export async function readPromptHistory(): Promise<string> {
+  return invoke<string>("read_prompt_history");
+}
+
+// Usage analytics
+export async function readUsageAnalytics(): Promise<string> {
+  return invoke<string>("read_usage_analytics");
+}
+

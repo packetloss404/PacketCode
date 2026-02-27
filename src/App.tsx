@@ -9,6 +9,7 @@ import { ToolsView } from "@/components/views/ToolsView";
 import { InsightsView } from "@/components/views/InsightsView";
 import { GitHubView } from "@/components/views/GitHubView";
 import { MemoryView } from "@/components/views/MemoryView";
+import { AnalyticsView } from "@/components/views/AnalyticsView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -177,6 +178,8 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
       return <GitHubView />;
     case "memory":
       return <MemoryView />;
+    case "analytics":
+      return <AnalyticsView />;
   }
 
   // Module views — dynamic lookup
