@@ -563,6 +563,7 @@
         <a href="#profiles">Profiles</a>
         <a href="#github-integration">GitHub</a>
         <a href="#memory">Memory</a>
+        <a href="#deploy">Deploy</a>
         <a href="#modules">Modules</a>
         <a href="#stack">Stack</a>
         <a href="https://github.com/yourusername/PacketCode" class="cta">
@@ -614,7 +615,7 @@
   <!-- ═══════════ STATS ═══════════ -->
   <div class="stats-bar">
     <div class="stat">
-      <div class="num gradient-text">11</div>
+      <div class="num gradient-text">14</div>
       <div class="label">Views & Tools</div>
     </div>
     <div class="stat">
@@ -626,7 +627,7 @@
       <div class="label">AI Runtimes</div>
     </div>
     <div class="stat">
-      <div class="num gradient-text">60+</div>
+      <div class="num gradient-text">80+</div>
       <div class="label">Source Files</div>
     </div>
   </div>
@@ -682,6 +683,30 @@
           </div>
           <h3>Spec2Tick</h3>
           <p>Paste any project spec and let Claude parse it into structured kanban tickets automatically.</p>
+        </div>
+
+        <div class="feature-card fade-in">
+          <div class="icon-wrap icon-blue">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8Z"></path></svg>
+          </div>
+          <h3>MCP Server Hub</h3>
+          <p>Manage Claude Code's MCP server configs — add, edit, and toggle servers across global and project scopes.</p>
+        </div>
+
+        <div class="feature-card fade-in">
+          <div class="icon-wrap icon-green">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"></path><path d="M9 13h6"></path><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+          </div>
+          <h3>Project Scaffolding</h3>
+          <p>New Project wizard with 6 templates — Next.js, React+Vite, FastAPI, Rust CLI, Express, and Blank.</p>
+        </div>
+
+        <div class="feature-card large fade-in">
+          <div class="icon-wrap icon-amber">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
+          </div>
+          <h3>Deploy Pipeline</h3>
+          <p>One-click deploy with live terminal output. Auto-detects configs from package.json, Vercel, Netlify, and Docker. Run history tracks every deployment with status and duration.</p>
         </div>
       </div>
     </div>
@@ -932,7 +957,7 @@
           <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 0 1.41l2.83 2.83a1 1 0 0 0 1.41 0l2.4-2.4a1 1 0 0 0 0-1.41L19.2 2a1 1 0 0 0-1.41 0Z"/><path d="m14 7-8.29 8.29a2 2 0 0 0-.59 1.42V19a1 1 0 0 0 1 1h2.29a2 2 0 0 0 1.42-.59L19 11"/><path d="M2 22h4"/><path d="M7 22v-4"/></svg>
             <span style="font-size: 12px; font-weight: 600;">Modules</span>
-            <span style="font-size: 10px; color: var(--text-muted); padding: 2px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">2 of 2 enabled</span>
+            <span style="font-size: 10px; color: var(--text-muted); padding: 2px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">4 of 4 enabled</span>
           </div>
           <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
             <!-- Vibe Architect — enabled -->
@@ -963,18 +988,32 @@
                 <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
               </div>
             </div>
-            <!-- Example disabled module -->
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px; opacity: 0.5;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z"/></svg>
+            <!-- MCP Servers — enabled -->
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8Z"></path></svg>
               <div style="flex: 1; min-width: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Custom Tool</span>
-                  <span style="font-size: 9px; padding: 1px 6px; background: var(--bg-elevated); color: var(--text-muted); border-radius: 3px;">Utility</span>
+                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">MCP Servers</span>
+                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(88,166,255,0.15); color: var(--accent-blue); border-radius: 3px;">Integration</span>
                 </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Register your own tools with a single manifest file</div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Manage Claude Code MCP server configurations</div>
               </div>
-              <div style="width: 32px; height: 16px; background: var(--bg-elevated); border-radius: 8px; position: relative; flex-shrink: 0;">
-                <div style="width: 12px; height: 12px; background: var(--text-muted); border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div>
+              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
+                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
+              </div>
+            </div>
+            <!-- New Project — enabled -->
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"></path><path d="M9 13h6"></path><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">New Project</span>
+                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(63,185,80,0.15); color: var(--accent-green); border-radius: 3px;">Utility</span>
+                </div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Create new projects from built-in templates</div>
+              </div>
+              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
+                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
               </div>
             </div>
             <!-- Code hint -->
@@ -985,6 +1024,86 @@
                 &nbsp;&nbsp;icon: Wrench, component: MyView,<br/>
                 &nbsp;&nbsp;category: <span style="color: var(--accent-amber);">"utility"</span>, enabledByDefault: <span style="color: var(--accent-purple);">true</span>,<br/>
                 };
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ DEPLOY PIPELINE ═══════════ -->
+  <section id="deploy" style="background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+    <div class="container">
+      <div class="big-feature">
+        <div class="big-feature-text fade-in">
+          <div class="section-label" style="color: var(--accent-amber)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
+            Deploy Pipeline
+          </div>
+          <h3>Ship from <span class="gradient-text-amber">one click</span></h3>
+          <p>
+            A built-in deploy view with live terminal output, config auto-detection, and run history. No more switching to a separate terminal to deploy.
+          </p>
+          <ul>
+            <li><span class="check">&#10003;</span> Auto-detects configs from <strong>package.json</strong>, <strong>vercel.json</strong>, <strong>netlify.toml</strong>, and <strong>Dockerfile</strong></li>
+            <li><span class="check">&#10003;</span> Custom deploy configs saved in <strong>packetcode.deploy.json</strong></li>
+            <li><span class="check">&#10003;</span> Live terminal output via PTY — see exactly what's happening</li>
+            <li><span class="check">&#10003;</span> Deploy history tracks status, duration, and commands</li>
+          </ul>
+        </div>
+
+        <div class="big-feature-visual fade-in">
+          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
+            <span style="font-size: 12px; font-weight: 600;">Deploy</span>
+            <span style="font-size: 10px; color: var(--text-muted); padding: 2px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">package.json</span>
+          </div>
+          <div style="display: flex; height: 220px;">
+            <div style="width: 45%; border-right: 1px solid var(--border); padding: 12px;">
+              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Configurations</div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run build</div>
+                    <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">npm run build</div>
+                  </div>
+                  <div style="color: var(--accent-green); font-size: 10px;">&#9654;</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run deploy</div>
+                    <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">npm run deploy</div>
+                  </div>
+                  <div style="color: var(--accent-green); font-size: 10px;">&#9654;</div>
+                </div>
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 6px;">History</div>
+              <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-elevated); border-radius: 6px; margin-bottom: 4px;">
+                <span style="color: var(--accent-green); font-size: 10px;">&#10003;</span>
+                <span style="font-size: 10px; color: var(--text-primary);">npm run build</span>
+                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">12s</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;">
+                <span style="color: var(--accent-red); font-size: 10px;">&#10007;</span>
+                <span style="font-size: 10px; color: var(--text-secondary);">npm run deploy</span>
+                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">8s</span>
+              </div>
+            </div>
+            <div style="width: 55%; padding: 12px;">
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                <span style="color: var(--accent-green); font-size: 10px;">&#10003;</span>
+                <span style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run build</span>
+                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">12s</span>
+              </div>
+              <div class="mono" style="font-size: 10px; line-height: 1.8; color: var(--text-secondary); background: var(--bg-primary); border-radius: 8px; padding: 10px; height: 160px; overflow: hidden;">
+                <div><span style="color: var(--accent-green);">$</span> npm run build</div>
+                <div style="color: var(--text-muted);">> vite build</div>
+                <div><span style="color: var(--accent-blue);">vite</span> v6.4.1 building for production...</div>
+                <div style="color: var(--accent-green);">&#10003;</div> 142 modules transformed.
+                <div><span style="color: var(--accent-green);">dist/</span>index.html &nbsp; 0.46 kB &nbsp; gzip: 0.30 kB</div>
+                <div><span style="color: var(--accent-green);">dist/</span>assets/index.js &nbsp; 284.19 kB &nbsp; gzip: 89.2 kB</div>
+                <div style="color: var(--accent-green);">&#10003; built in 3.21s</div>
               </div>
             </div>
           </div>
