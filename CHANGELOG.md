@@ -2,6 +2,47 @@
 
 All notable changes to PacketCode are documented in this file.
 
+## [0.2.0] - 2026-02-27
+
+### Added
+
+#### MCP Server Integration Hub
+- View, add, edit, and delete MCP server configurations
+- Global scope (`~/.claude/settings.json`) and project scope (`.mcp.json`)
+- Server list grouped by scope with toggle, edit, and delete controls
+- Add/Edit modal with name, command, args, environment variables, and scope selector
+- Registered as a module (category: integration, icon: Plug, enabled by default)
+
+#### Project Template Scaffolding
+- "New Project" wizard with 3-step flow: template selection, configuration, result
+- 6 built-in templates: Next.js, React+Vite, Python FastAPI, Rust CLI, Node Express, Blank
+- Automatic tool availability detection (node, cargo, python)
+- Directory picker for parent folder selection
+- Auto-switches `projectPath` to newly created project on success
+- "New Project" button on Welcome Screen
+- Registered as a module (category: utility, icon: FolderPlus, enabled by default)
+
+#### Deploy Pipeline
+- Core deploy view with toolbar button (Rocket icon)
+- Auto-detects deploy configs from `packetcode.deploy.json`, `package.json` scripts, `vercel.json`, `netlify.toml`, and `Dockerfile`
+- Custom deploy config creation and persistence in `packetcode.deploy.json`
+- Live terminal output via PTY for deploy commands
+- Deploy run history with status tracking (running, success, failed) and duration
+- Config cards with one-click deploy and history sidebar
+
+#### Rust Backend
+- `mcp.rs` — 3 commands: `read_mcp_servers`, `write_mcp_server`, `delete_mcp_server`
+- `scaffold.rs` — 2 commands: `scaffold_project`, `check_scaffold_tools`
+- `deploy.rs` — 2 commands: `read_deploy_config`, `create_deploy_config`
+
+### Changed
+- Added `"deploy"` to `CoreView` union type
+- Updated Toolbar with Deploy button in right section
+- Welcome Screen now shows "New Project" button when scaffold module is enabled
+- Module registry expanded from 2 to 4 modules
+
+---
+
 ## [0.1.0] - 2026-02-22
 
 ### Added

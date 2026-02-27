@@ -2,7 +2,7 @@
 
 ## What is this project?
 
-PacketCode is a custom desktop IDE built on Tauri v2 that wraps Claude Code and OpenAI Codex CLI into a unified multi-pane development environment. It provides session management, an issue tracker, AI-powered tools, GitHub integration, a memory layer, and agent profiles — all in a single native app.
+PacketCode is a custom desktop IDE built on Tauri v2 that wraps Claude Code and OpenAI Codex CLI into a unified multi-pane development environment. It provides session management, an issue tracker, AI-powered tools, GitHub integration, a memory layer, agent profiles, MCP server management, project scaffolding, and a deploy pipeline — all in a single native app.
 
 ## Tech Stack
 
@@ -28,11 +28,11 @@ src/
     quality/CodeQualityModal.tsx   # Code quality analysis modal
     session/                       # TerminalPane, NewSessionModal, ClaudeStatusBar, CodexStatusBar
     ui/                            # Button, Dropdown, ErrorBoundary
-    views/                         # GitHubView, MemoryView, ToolsView, VibeArchitectView, etc.
+    views/                         # GitHubView, MemoryView, ToolsView, VibeArchitectView, McpHubView, ScaffoldView, DeployView, etc.
   hooks/                           # useGitInfo, useStatusLine, useCodexStatusLine, shared poller hooks
   lib/
     tauri.ts                       # All Tauri invoke wrappers
-  stores/                          # Zustand stores (appStore, layoutStore, issueStore, etc.)
+  stores/                          # Zustand stores (appStore, layoutStore, issueStore, mcpStore, scaffoldStore, deployStore, etc.)
   types/                           # TypeScript interfaces
 
 src-tauri/
@@ -49,6 +49,9 @@ src-tauri/
       code_quality.rs              # Code quality analysis
       statusline.rs                # Claude/Codex status line polling
       fs.rs                        # Directory listing
+      mcp.rs                       # MCP server config read/write/delete
+      scaffold.rs                  # Project template scaffolding
+      deploy.rs                    # Deploy config read/write
       mod.rs                       # Module exports
     claude/                        # Claude CLI interaction helpers
 ```
@@ -64,6 +67,8 @@ src-tauri/
 - **Font sizes** — primarily `text-xs` (12px) and `text-[11px]`/`text-[10px]` for compact UI
 - **Icons** — use lucide-react, typically `size={12}` in toolbars, `size={14}` in headers
 - **CLI commands** — PTY session startup resolves `.cmd` wrappers on Windows (e.g., `claude.cmd`, `codex.cmd`)
+- **Modules** — MCP Hub (integration), Scaffold (utility), Vibe Architect (ai), Ideation (analysis); registered in `src/modules/registry.ts`
+- **Deploy view** — core view (`"deploy"` in `CoreView`), not a module; toolbar button with Rocket icon
 
 ## Build & Run
 
