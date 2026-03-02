@@ -21,6 +21,7 @@ import { useAppStore, getModuleId, moduleViewId } from "@/stores/appStore";
 import { useModuleStore } from "@/stores/moduleStore";
 import { getModule } from "@/modules/registry";
 import { useStatusLinePoller, useCodexStatusLinePoller } from "@/hooks/useStatusLine";
+import { getCwd } from "@/lib/tauri";
 import type { AppView } from "@/stores/appStore";
 
 export default function App() {
@@ -47,11 +48,17 @@ export default function App() {
     localStorage.setItem("packetcode:pane-count", String(panes.length));
   }, [panes.length]);
 
-  // Persist project path
+  // Persist project path — resolve from CWD if empty
   useEffect(() => {
     const saved = localStorage.getItem("packetcode:project-path");
     if (saved) {
       useLayoutStore.getState().setProjectPath(saved);
+    } else {
+      getCwd()
+        .then((cwd) => {
+          if (cwd) useLayoutStore.getState().setProjectPath(cwd);
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -208,6 +215,8 @@ export default function App() {
 }
 
 function OtherViewContent({ activeView }: { activeView: AppView }) {
+  const isModuleEnabled = useModuleStore((s) => s.isEnabled);
+
   switch (activeView) {
     case "welcome":
       return null; // rendered above
@@ -235,7 +244,7 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
   const modId = getModuleId(activeView);
   if (!modId) return null;
   const mod = getModule(modId);
-  if (!mod || !useModuleStore.getState().isEnabled(modId)) return null;
+  if (!mod || !isModuleEnabled(modId)) return null;
   const ModComponent = mod.component;
   return (
     <ErrorBoundary fallbackMessage={`${mod.name} encountered an error`}>

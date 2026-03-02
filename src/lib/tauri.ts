@@ -1,6 +1,63 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { StatusLineData, CodexStatusLineData } from "@/types/statusline";
 
+// Filesystem
+export async function getCwd(): Promise<string> {
+  return invoke<string>("get_cwd");
+}
+
+export async function listDirectory(dirPath: string): Promise<{
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  extension: string | null;
+}[]> {
+  return invoke("list_directory", { dirPath });
+}
+
+// PTY session management
+export async function createPtySession(
+  projectPath: string,
+  cols: number,
+  rows: number,
+  command: string,
+  args: string[] | null
+): Promise<string> {
+  return invoke<string>("create_pty_session", { projectPath, cols, rows, command, args });
+}
+
+export async function writePty(sessionId: string, data: string): Promise<void> {
+  return invoke("write_pty", { sessionId, data });
+}
+
+export async function resizePty(sessionId: string, cols: number, rows: number): Promise<void> {
+  return invoke("resize_pty", { sessionId, cols, rows });
+}
+
+export async function killPty(sessionId: string): Promise<void> {
+  return invoke("kill_pty", { sessionId });
+}
+
+// Code quality
+export async function analyzeCodeQuality(projectPath: string): Promise<unknown> {
+  return invoke("analyze_code_quality", { projectPath });
+}
+
+// Memory
+export async function scanCodebaseMemory(projectPath: string): Promise<string> {
+  return invoke<string>("scan_codebase_memory", { projectPath });
+}
+
+export async function summarizeSession(projectPath: string, sessionLog: string): Promise<string> {
+  return invoke<string>("summarize_session", { projectPath, sessionLog });
+}
+
+export async function extractPatterns(projectPath: string, summaries: string): Promise<string> {
+  return invoke<string>("extract_patterns", { projectPath, summaries });
+}
+
+// Git
 export async function getGitBranch(projectPath: string): Promise<string> {
   return invoke<string>("get_git_branch", { projectPath });
 }

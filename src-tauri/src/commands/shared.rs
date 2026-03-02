@@ -32,7 +32,10 @@ pub fn home_dir() -> Option<String> {
 
 /// Lock a Mutex, converting PoisonError to a String for Tauri command returns.
 pub fn lock_mutex<T>(mutex: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
-    mutex.lock().map_err(|e| format!("Lock error: {}", e))
+    mutex.lock().map_err(|e| {
+        tracing::error!("Mutex poisoned: {}", e);
+        format!("Lock error: {}", e)
+    })
 }
 
 /// Directories to always skip when traversing the file tree.

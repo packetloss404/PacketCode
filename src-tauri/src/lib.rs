@@ -4,8 +4,55 @@ mod commands;
 use commands::github::create_github_auth_state;
 use commands::pty::create_shared_pty_manager;
 
+fn init_tracing() {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let log_dir = dirs_log_dir();
+    let file_appender = tracing_appender::rolling::daily(log_dir, "packetcode.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Leak the guard so the writer stays alive for the process lifetime
+    std::mem::forget(_guard);
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    fmt()
+        .with_env_filter(filter)
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+}
+
+fn dirs_log_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let base = std::env::var("XDG_DATA_HOME")
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                format!("{}/.local/share", home)
+            });
+        std::path::PathBuf::from(base).join("PacketCode").join("logs")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        std::path::PathBuf::from(home)
+            .join("Library/Application Support/PacketCode/logs")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        std::path::PathBuf::from(appdata).join("PacketCode").join("logs")
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    init_tracing();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
@@ -31,6 +78,7 @@ pub fn run() {
             commands::code_quality::analyze_code_quality,
             // Filesystem
             commands::fs::list_directory,
+            commands::fs::get_cwd,
             // Status line
             commands::statusline::claude::read_statusline_states,
             commands::statusline::codex::read_codex_statusline_states,

@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; connect-src ipc: http://ipc.localhost http://localhost:1420 https://api.github.com https://specs-gen.vercel.app; frame-src https://specs-gen.vercel.app"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 https://api.github.com https://specs-gen.vercel.app; frame-src https://specs-gen.vercel.app; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {

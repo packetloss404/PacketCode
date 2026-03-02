@@ -15,7 +15,7 @@ import {
   File,
   PanelLeftClose,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { listDirectory } from "@/lib/tauri";
 import { useLayoutStore } from "@/stores/layoutStore";
 
 interface DirEntry {
@@ -97,9 +97,7 @@ function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
     if (!expanded && children === null) {
       setLoading(true);
       try {
-        const entries = await invoke<DirEntry[]>("list_directory", {
-          dirPath: entry.path,
-        });
+        const entries = await listDirectory(entry.path) as DirEntry[];
         setChildren(entries);
       } catch {
         setChildren([]);
@@ -200,7 +198,7 @@ export function FileExplorer({ onClose, docked = false }: FileExplorerProps) {
 
   useEffect(() => {
     setLoading(true);
-    invoke<DirEntry[]>("list_directory", { dirPath: projectPath })
+    (listDirectory(projectPath) as Promise<DirEntry[]>)
       .then((entries) => {
         setRootEntries(entries);
         setLoading(false);

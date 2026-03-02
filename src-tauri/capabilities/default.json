@@ -14,30 +14,9 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-title",
     "shell:default",
-    "shell:allow-spawn",
     "shell:allow-stdin-write",
     "shell:allow-kill",
     "shell:allow-open",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "claude",
-          "cmd": "claude",
-          "args": true
-        },
-        {
-          "name": "git",
-          "cmd": "git",
-          "args": true
-        },
-        {
-          "name": "where-claude",
-          "cmd": "where",
-          "args": ["claude"]
-        }
-      ]
-    },
     "process:default",
     "dialog:default",
     "fs:default"

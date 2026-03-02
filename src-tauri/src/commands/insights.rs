@@ -1,5 +1,6 @@
 use crate::claude::binary::{claude_command, run_claude};
 use serde::Deserialize;
+use tauri::Emitter;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Deserialize)]
@@ -39,6 +40,7 @@ pub async fn ask_insights(
     messages: Vec<InsightsMessage>,
 ) -> Result<String, String> {
     let prompt = build_insights_prompt(&messages, None);
+    super::validate_input_size(&prompt, super::MAX_INPUT_SIZE, "Insights prompt")?;
     run_claude(&prompt, Some(&project_path)).await
 }
 
@@ -50,6 +52,7 @@ pub async fn ask_insights_stream(
     session_context: Option<String>,
 ) -> Result<(), String> {
     let prompt = build_insights_prompt(&messages, session_context.as_deref());
+    super::validate_input_size(&prompt, super::MAX_INPUT_SIZE, "Insights stream prompt")?;
 
     let mut cmd = claude_command()?;
     cmd.args(&["-p", &prompt, "--output-format", "text"]);

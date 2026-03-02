@@ -228,21 +228,43 @@ fn calc_org_score(files: &[(String, String)]) -> u32 {
     score.min(100.0) as u32
 }
 
+const MAX_DEPTH: usize = 20;
+const MAX_FILES: usize = 10_000;
+
 fn walk_dir(dir: &Path, base: &Path, files: &mut Vec<(String, String)>) {
+    walk_dir_inner(dir, base, files, 0);
+}
+
+fn walk_dir_inner(dir: &Path, base: &Path, files: &mut Vec<(String, String)>, depth: usize) {
+    if depth >= MAX_DEPTH || files.len() >= MAX_FILES {
+        return;
+    }
+
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
 
     for entry in entries.flatten() {
+        if files.len() >= MAX_FILES {
+            return;
+        }
+
         let path = entry.path();
         let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip symlinks to prevent traversal attacks
+        if let Ok(metadata) = entry.metadata() {
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+        }
 
         if path.is_dir() {
             if SKIP_DIRS.contains(&file_name.as_str()) || file_name.starts_with('.') {
                 continue;
             }
-            walk_dir(&path, base, files);
+            walk_dir_inner(&path, base, files, depth + 1);
         } else if path.is_file() {
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy().to_lowercase();
@@ -259,11 +281,10 @@ fn walk_dir(dir: &Path, base: &Path, files: &mut Vec<(String, String)>) {
 }
 
 #[tauri::command]
-pub async fn analyze_code_quality(project_path: String) -> Result<CodeQualityReport, String> {
+pub fn analyze_code_quality(project_path: String) -> Result<CodeQualityReport, String> {
+    super::validate_project_path(&project_path)?;
+
     let base = Path::new(&project_path);
-    if !base.is_dir() {
-        return Err(format!("Path is not a directory: {}", project_path));
-    }
 
     // Collect all recognized files
     let mut files: Vec<(String, String)> = Vec::new();
@@ -453,8 +474,8 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
-    #[tokio::test]
-    async fn analyze_code_quality_counts_only_strict_test_files() {
+    #[test]
+    fn analyze_code_quality_counts_only_strict_test_files() {
         let dir = temp_test_dir("code-quality-report-tests");
         fs::create_dir_all(dir.join("src")).expect("failed to create src dir");
         fs::create_dir_all(dir.join("tests")).expect("failed to create tests dir");
@@ -469,7 +490,6 @@ mod tests {
             .expect("failed to write tests/integration.ts");
 
         let report = analyze_code_quality(dir.to_string_lossy().to_string())
-            .await
             .expect("analysis should succeed");
 
         // 4 recognized TypeScript files; only *.test.* and /tests/ should count as test files.

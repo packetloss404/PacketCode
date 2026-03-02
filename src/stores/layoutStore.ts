@@ -26,7 +26,7 @@ function createPaneId(): string {
 export const useLayoutStore = create<LayoutStore>((set, get) => ({
   panes: [],
   activePaneId: "",
-  projectPath: "D:\\projects\\PacketCode",
+  projectPath: "",
   explorerOpen: false,
 
   setProjectPath: (path) => set({ projectPath: path }),

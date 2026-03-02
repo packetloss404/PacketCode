@@ -11,9 +11,23 @@ export function loadFromStorage<T>(key: string, fallback: T): T {
 export function saveToStorage(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* quota exceeded — silently fail */
+  } catch (e) {
+    console.error(`[PacketCode] Failed to save to localStorage key "${key}":`, e);
   }
+}
+
+/** Get approximate localStorage usage in bytes. */
+export function getStorageUsage(): { used: number; keys: number } {
+  let used = 0;
+  let keys = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key) {
+      keys++;
+      used += key.length + (localStorage.getItem(key)?.length ?? 0);
+    }
+  }
+  return { used: used * 2, keys }; // *2 for UTF-16
 }
 
 export function removeFromStorage(key: string): void {

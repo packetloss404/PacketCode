@@ -36,11 +36,12 @@ interface NewSessionModalProps {
 }
 
 export function NewSessionModal({ defaultCli = "claude", onClose }: NewSessionModalProps) {
+  const activeProfileId = useProfileStore((s) => s.activeProfileId);
   const [cli, setCli] = useState<CliChoice>(defaultCli);
   const [model, setModel] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    useProfileStore.getState().activeProfileId
+    activeProfileId
   );
   const [includeMemory, setIncludeMemory] = useState(true);
 

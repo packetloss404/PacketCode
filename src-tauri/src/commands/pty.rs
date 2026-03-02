@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tracing::{info, warn};
 
 use portable_pty::{
     native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize,
@@ -10,6 +11,9 @@ use portable_pty::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
+
+/// Commands allowed to be spawned in a PTY session.
+const ALLOWED_COMMANDS: &[&str] = &["claude", "codex"];
 
 /// Data emitted to the frontend for each chunk of PTY output
 #[derive(Clone, Serialize)]
@@ -65,6 +69,25 @@ pub fn create_pty_session(
     command: String,
     args: Option<Vec<String>>,
 ) -> Result<String, String> {
+    // Validate command against allowlist
+    if !ALLOWED_COMMANDS.iter().any(|&c| c == command) {
+        return Err(format!(
+            "Command '{}' is not allowed. Allowed commands: {:?}",
+            command, ALLOWED_COMMANDS
+        ));
+    }
+
+    // Validate project_path is a real directory
+    let project_dir = std::path::Path::new(&project_path);
+    if !project_dir.is_dir() {
+        return Err(format!(
+            "Project path '{}' is not a valid directory",
+            project_path
+        ));
+    }
+
+    info!(command = %command, project_path = %project_path, "Creating PTY session");
+
     let session_id = Uuid::new_v4().to_string();
 
     let pty_system = native_pty_system();
@@ -170,7 +193,9 @@ pub fn create_pty_session(
                         session_id: sid.clone(),
                         data,
                     };
-                    let _ = app_handle.emit("pty:output", &event);
+                    if let Err(e) = app_handle.emit("pty:output", &event) {
+                        warn!(session_id = %sid, error = %e, "Failed to emit pty:output");
+                    }
                 }
                 Err(e) => {
                     // On Windows, ERROR_BROKEN_PIPE means the child exited
@@ -192,7 +217,10 @@ pub fn create_pty_session(
             mgr.sessions.remove(&sid);
         }
 
-        let _ = app_handle.emit("pty:exit", &sid);
+        info!(session_id = %sid, "PTY session exited");
+        if let Err(e) = app_handle.emit("pty:exit", &sid) {
+            warn!(session_id = %sid, error = %e, "Failed to emit pty:exit");
+        }
     });
 
     Ok(session_id)
@@ -204,6 +232,7 @@ pub fn write_pty(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
+    super::validate_input_size(&data, super::MAX_PTY_WRITE_SIZE, "PTY write data")?;
     let mut mgr = lock_mutex(&manager)?;
     let session = mgr
         .sessions
@@ -255,11 +284,14 @@ pub fn kill_pty(
 ) -> Result<(), String> {
     let mut mgr = lock_mutex(&manager)?;
     if let Some(mut session) = mgr.sessions.remove(&session_id) {
+        info!(session_id = %session_id, "Killing PTY session");
         session
             .kill_flag
             .store(true, std::sync::atomic::Ordering::Relaxed);
         session.info.alive = false;
-        let _ = session.child.kill();
+        if let Err(e) = session.child.kill() {
+            warn!(session_id = %session_id, error = %e, "Failed to kill PTY child process");
+        }
     } else {
         return Err(format!("PTY session {} not found", session_id));
     }

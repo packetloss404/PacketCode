@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { scanCodebaseMemory, summarizeSession, extractPatterns } from "@/lib/tauri";
 import type {
   MemoryState,
   FileMapEntry,
@@ -45,9 +45,7 @@ export const useMemoryStore = create<MemoryStore>((set, get) => ({
   scanCodebase: async (projectPath) => {
     set({ isScanning: true, scanError: null });
     try {
-      const result = await invoke<string>("scan_codebase_memory", {
-        projectPath,
-      });
+      const result = await scanCodebaseMemory(projectPath);
       const parsed = parseJsonFromResponse(result) as {
         path: string;
         summary: string;
@@ -68,10 +66,7 @@ export const useMemoryStore = create<MemoryStore>((set, get) => ({
   addSessionSummary: async (projectPath, sessionTitle, sessionLog) => {
     set({ isScanning: true, scanError: null });
     try {
-      const result = await invoke<string>("summarize_session", {
-        projectPath,
-        sessionLog,
-      });
+      const result = await summarizeSession(projectPath, sessionLog);
       const parsed = parseJsonFromResponse(result) as {
         summary: string;
         keyDecisions: string[];
@@ -104,10 +99,7 @@ export const useMemoryStore = create<MemoryStore>((set, get) => ({
       const summariesText = sessionSummaries
         .map((s) => `[${s.sessionTitle}]: ${s.summary}`)
         .join("\n\n");
-      const result = await invoke<string>("extract_patterns", {
-        projectPath,
-        summaries: summariesText,
-      });
+      const result = await extractPatterns(projectPath, summariesText);
       const parsed = parseJsonFromResponse(result) as {
         pattern: string;
         category: string;

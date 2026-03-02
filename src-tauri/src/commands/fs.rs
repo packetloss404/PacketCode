@@ -13,10 +13,24 @@ pub struct DirEntry {
 }
 
 #[tauri::command]
-pub async fn list_directory(dir_path: String) -> Result<Vec<DirEntry>, String> {
+pub fn get_cwd() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("Failed to get current directory: {}", e))
+}
+
+#[tauri::command]
+pub fn list_directory(dir_path: String) -> Result<Vec<DirEntry>, String> {
     let path = Path::new(&dir_path);
     if !path.is_dir() {
         return Err(format!("Not a directory: {}", dir_path));
+    }
+
+    // Validate against symlink escape
+    let canonical = fs::canonicalize(path)
+        .map_err(|e| format!("Cannot resolve path '{}': {}", dir_path, e))?;
+    if !canonical.is_dir() {
+        return Err(format!("Resolved path is not a directory: {}", dir_path));
     }
 
     let mut entries: Vec<DirEntry> = Vec::new();

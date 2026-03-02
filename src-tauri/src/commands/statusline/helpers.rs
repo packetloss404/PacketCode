@@ -41,6 +41,11 @@ pub fn iso_to_epoch(ts: &str) -> u64 {
     let (year, month, day) = (date_parts[0], date_parts[1], date_parts[2]);
     let (hour, min, sec) = (time_parts[0], time_parts[1], time_parts[2]);
 
+    // Bounds check to prevent index-out-of-range panic on month_days
+    if month < 1 || month > 12 || day < 1 {
+        return 0;
+    }
+
     let mut days: u64 = 0;
     for y in 1970..year {
         days += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };

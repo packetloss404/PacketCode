@@ -2,6 +2,7 @@ use crate::claude::binary::run_claude;
 
 #[tauri::command]
 pub async fn parse_spec_to_tickets(spec_text: String) -> Result<String, String> {
+    super::validate_input_size(&spec_text, super::MAX_INPUT_SIZE, "Spec text")?;
     let prompt = format!(
         r#"You are a project manager. Parse the following project spec into a JSON array of tickets.
 Each ticket must have exactly these fields:

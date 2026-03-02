@@ -24,13 +24,13 @@ fn git_command_result(args: &[&str], cwd: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn get_git_branch(project_path: String) -> Result<String, String> {
+pub fn get_git_branch(project_path: String) -> Result<String, String> {
     git_command_result(&["rev-parse", "--abbrev-ref", "HEAD"], &project_path)
         .map_err(|_| "Not a git repository or git not found".to_string())
 }
 
 #[tauri::command]
-pub async fn get_git_status(project_path: String) -> Result<String, String> {
+pub fn get_git_status(project_path: String) -> Result<String, String> {
     let output = git_command(&["status", "--short"], &project_path)?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -40,7 +40,7 @@ pub async fn get_git_status(project_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn git_commit(
+pub fn git_commit(
     project_path: String,
     message: String,
     stage_all: bool,
@@ -52,17 +52,17 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
-pub async fn git_push(project_path: String) -> Result<String, String> {
+pub fn git_push(project_path: String) -> Result<String, String> {
     git_command_result(&["push"], &project_path)
 }
 
 #[tauri::command]
-pub async fn git_pull(project_path: String) -> Result<String, String> {
+pub fn git_pull(project_path: String) -> Result<String, String> {
     git_command_result(&["pull"], &project_path)
 }
 
 #[tauri::command]
-pub async fn git_create_branch(
+pub fn git_create_branch(
     project_path: String,
     branch_name: String,
     checkout: bool,

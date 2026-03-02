@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { createPtySession, writePty, resizePty, killPty } from "@/lib/tauri";
 import {
   X,
   RotateCcw,
@@ -183,7 +183,7 @@ export function TerminalPane({
     term.onData((data) => {
       const sid = sessionIdRef.current;
       if (sid) {
-        invoke("write_pty", { sessionId: sid, data }).catch(() => {});
+        writePty(sid, data).catch(() => {});
         // Clear approval state on any user input
         detectorResult.clearApproval();
       }
@@ -202,7 +202,7 @@ export function TerminalPane({
     term.onResize(({ cols, rows }) => {
       const sid = sessionIdRef.current;
       if (sid) {
-        invoke("resize_pty", { sessionId: sid, cols, rows }).catch(() => {});
+        resizePty(sid, cols, rows).catch(() => {});
       }
     });
 
@@ -279,13 +279,13 @@ export function TerminalPane({
         projectPath,
       });
 
-      const sessionId = await invoke<string>("create_pty_session", {
+      const sessionId = await createPtySession(
         projectPath,
         cols,
         rows,
-        command: cliCommand,
-        args: cliArgs || null,
-      });
+        cliCommand,
+        cliArgs || null,
+      );
 
       sessionIdRef.current = sessionId;
       setCurrentSessionId(sessionId);
@@ -369,7 +369,7 @@ export function TerminalPane({
 
       // Write the prompt to the PTY session
       const prompt = detail.prompt as string;
-      invoke("write_pty", { sessionId: sid, data: prompt + "\n" }).catch(() => {});
+      writePty(sid, prompt + "\n").catch(() => {});
 
       // Link the issue to this tab
       if (detail.issueId) {
@@ -397,7 +397,7 @@ export function TerminalPane({
       // Kill the PTY session
       const sid = sessionIdRef.current;
       if (sid) {
-        invoke("kill_pty", { sessionId: sid }).catch(() => {});
+        killPty(sid).catch(() => {});
       }
       // Remove tab and activity
       const tid = tabIdRef.current;
@@ -411,7 +411,7 @@ export function TerminalPane({
   const handleKill = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (sid) {
-      await invoke("kill_pty", { sessionId: sid }).catch(() => {});
+      await killPty(sid).catch(() => {});
       setAlive(false);
     }
     setShowApproval(false);
@@ -428,7 +428,7 @@ export function TerminalPane({
     // Kill existing session
     const sid = sessionIdRef.current;
     if (sid) {
-      await invoke("kill_pty", { sessionId: sid }).catch(() => {});
+      await killPty(sid).catch(() => {});
     }
     sessionIdRef.current = null;
     setAlive(false);
@@ -452,7 +452,7 @@ export function TerminalPane({
   const handleApprove = useCallback(() => {
     const sid = sessionIdRef.current;
     if (sid) {
-      invoke("write_pty", { sessionId: sid, data: "y\n" }).catch(() => {});
+      writePty(sid, "y\n").catch(() => {});
     }
     setShowApproval(false);
     detectorResult.clearApproval();
@@ -461,7 +461,7 @@ export function TerminalPane({
   const handleDeny = useCallback(() => {
     const sid = sessionIdRef.current;
     if (sid) {
-      invoke("write_pty", { sessionId: sid, data: "n\n" }).catch(() => {});
+      writePty(sid, "n\n").catch(() => {});
     }
     setShowApproval(false);
     detectorResult.clearApproval();
@@ -470,7 +470,7 @@ export function TerminalPane({
   const handleAbort = useCallback(() => {
     const sid = sessionIdRef.current;
     if (sid) {
-      invoke("write_pty", { sessionId: sid, data: "\x03" }).catch(() => {});
+      writePty(sid, "\x03").catch(() => {});
     }
     setShowApproval(false);
     detectorResult.clearApproval();
