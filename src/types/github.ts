@@ -20,6 +20,17 @@ export interface GitHubIssue {
   created_at: string;
 }
 
+export interface GitHubPr {
+  number: number;
+  title: string;
+  user: { login: string } | null;
+  head: { ref: string } | null;
+  base: { ref: string } | null;
+  html_url: string;
+  state: string;
+  created_at: string;
+}
+
 export interface GitHubConfig {
   selectedRepo: { owner: string; repo: string } | null;
 }

@@ -8,13 +8,26 @@ interface UseVoiceInputReturn {
   isSupported: boolean;
 }
 
-// Web Speech API types are not always available in TypeScript
-type SpeechRecognitionAny = any;
+// Web Speech API types — not in all TS libs
+interface SpeechRecognitionEvent {
+  results: { [index: number]: { [index: number]: { transcript: string } }; length: number };
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
 
 export function useVoiceInput(): UseVoiceInputReturn {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const recognitionRef = useRef<SpeechRecognitionAny>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const isSupported =
     typeof window !== "undefined" &&
@@ -23,14 +36,14 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const startListening = useCallback(() => {
     if (!isSupported) return;
 
-    const SpeechRecognitionCtor =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const w = window as unknown as Record<string, new () => SpeechRecognitionInstance>;
+    const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let finalTranscript = "";
       for (let i = 0; i < event.results.length; i++) {
         finalTranscript += event.results[i][0].transcript;

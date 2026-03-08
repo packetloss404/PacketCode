@@ -277,11 +277,11 @@ export function GitHubView() {
                   </div>
                 ) : (
                   prs
-                    .filter((pr: any) =>
+                    .filter((pr) =>
                       pr.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       String(pr.number).includes(searchQuery)
                     )
-                    .map((pr: any) => (
+                    .map((pr) => (
                       <button
                         key={pr.number}
                         onClick={() => {

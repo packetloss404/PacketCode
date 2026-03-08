@@ -10,7 +10,7 @@ import {
   githubListPrs,
   githubGetPrDiff,
 } from "@/lib/tauri";
-import type { GitHubRepo, GitHubIssue, GitHubConfig } from "@/types/github";
+import type { GitHubRepo, GitHubIssue, GitHubPr, GitHubConfig } from "@/types/github";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
 
 const STORAGE_KEY = "packetcode:github";
@@ -54,7 +54,7 @@ interface GitHubStore {
   error: string | null;
   investigation: string | null;
   isInvestigating: boolean;
-  prs: any[];
+  prs: GitHubPr[];
   prDiff: string | null;
   isPrLoading: boolean;
 
