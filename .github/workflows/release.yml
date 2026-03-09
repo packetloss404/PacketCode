@@ -36,7 +36,7 @@ jobs:
       - name: Build
         run: pnpm tauri build --bundles appimage,deb
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: |
@@ -62,7 +62,7 @@ jobs:
       - name: Build
         run: pnpm tauri build --bundles app,dmg
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos
           path: |
@@ -88,7 +88,7 @@ jobs:
       - name: Build
         run: pnpm tauri build --bundles nsis,msi
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-windows
           path: |
