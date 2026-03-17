@@ -20,6 +20,7 @@ export interface Issue {
   labels: string[];
   epic: string | null;
   sessionId: string | null;
+  missionId: string | null;
   acceptanceCriteria: AcceptanceCriterion[];
   blockedBy: string[]; // issue IDs
   blocks: string[];    // issue IDs
@@ -43,11 +44,12 @@ interface IssueStore {
   epics: string[];
   labels: string[];
 
-  addIssue: (issue: Omit<Issue, "id" | "ticketId" | "createdAt" | "updatedAt">) => Issue;
+  addIssue: (issue: Omit<Issue, "id" | "ticketId" | "createdAt" | "updatedAt" | "missionId"> & { missionId?: string | null }) => Issue;
   updateIssue: (id: string, updates: Partial<Issue>) => void;
   deleteIssue: (id: string) => void;
   moveIssue: (id: string, status: IssueStatus) => void;
   linkSession: (issueId: string, sessionId: string | null) => void;
+  assignToMission: (issueId: string, missionId: string | null) => void;
   addEpic: (epic: string) => void;
   addLabel: (label: string) => void;
   setTicketPrefix: (prefix: string) => void;
@@ -73,6 +75,7 @@ const generateCriterionId = () => genId("ac", 6);
 function migrateIssue(issue: Issue): Issue {
   return {
     ...issue,
+    missionId: issue.missionId ?? null,
     acceptanceCriteria: issue.acceptanceCriteria || [],
     blockedBy: issue.blockedBy || [],
     blocks: issue.blocks || [],
@@ -108,6 +111,7 @@ export const useIssueStore = create<IssueStore>((set, get) => ({
     const ticketId = `${state.ticketPrefix}-${String(state.nextTicketNum).padStart(3, "0")}`;
     const newIssue: Issue = {
       ...issue,
+      missionId: issue.missionId ?? null,
       id: generateIssueId(),
       ticketId,
       createdAt: Date.now(),
@@ -156,6 +160,10 @@ export const useIssueStore = create<IssueStore>((set, get) => ({
 
   linkSession: (issueId, sessionId) => {
     get().updateIssue(issueId, { sessionId });
+  },
+
+  assignToMission: (issueId, missionId) => {
+    get().updateIssue(issueId, { missionId });
   },
 
   addEpic: (epic) => {

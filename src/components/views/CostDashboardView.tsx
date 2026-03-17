@@ -7,7 +7,7 @@ export function CostDashboardView() {
   const clearEntries = useCostStore((s) => s.clearEntries);
   const getSummary = useCostStore((s) => s.getSummary);
 
-  const summary = useMemo(() => getSummary(), [entries]);
+  const summary = useMemo(() => getSummary(), [getSummary]);
 
   // Last 7 days for the chart
   const days = useMemo(() => {
