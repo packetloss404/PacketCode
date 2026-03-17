@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
-import { Target, Plus, Search, Trash2, X, ChevronDown } from "lucide-react";
+import { Target, Plus, Search, Trash2, X, ChevronDown, Play } from "lucide-react";
 import { useMissionStore } from "@/stores/missionStore";
 import { useIssueStore } from "@/stores/issueStore";
+import { useAppStore } from "@/stores/appStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import type { Mission, MissionStatus, MissionPriority } from "@/types/mission";
 import type { IssueStatus } from "@/stores/issueStore";
 
@@ -352,6 +354,7 @@ function MissionDetail({
 }) {
   const deleteMission = useMissionStore((s) => s.deleteMission);
   const computeMissionStatus = useMissionStore((s) => s.computeMissionStatus);
+  const linkSessionToMission = useMissionStore((s) => s.linkSessionToMission);
   const issues = useIssueStore((s) => s.issues);
 
   const linkedIssues = useMemo(
@@ -372,6 +375,62 @@ function MissionDetail({
     }
     return counts;
   }, [linkedIssues]);
+
+  function handleLaunchSession(cli: "claude" | "codex") {
+    // Build context-rich prompt from mission + issues
+    const lines: string[] = [];
+    lines.push(`Work on this mission:`);
+    lines.push(``);
+    lines.push(`## ${mission.title}`);
+    if (mission.objective) {
+      lines.push(``);
+      lines.push(mission.objective);
+    }
+    lines.push(``);
+    lines.push(`Priority: ${mission.priority}`);
+
+    if (linkedIssues.length > 0) {
+      lines.push(``);
+      lines.push(`### Linked Issues (${linkedIssues.length})`);
+      for (const issue of linkedIssues) {
+        const statusStr = issue.status.replace("_", " ");
+        lines.push(``);
+        lines.push(`- **${issue.ticketId}: ${issue.title}** [${statusStr}]`);
+        if (issue.description) {
+          lines.push(`  ${issue.description}`);
+        }
+        const criteria = issue.acceptanceCriteria;
+        if (criteria && criteria.length > 0) {
+          for (const c of criteria) {
+            lines.push(`  - [${c.checked ? "x" : " "}] ${c.text}`);
+          }
+        }
+      }
+    }
+
+    const prompt = lines.join("\n");
+
+    // Switch to session view and open a new pane
+    useAppStore.getState().setActiveView(cli);
+    const paneId = useLayoutStore.getState().addPane({ cliCommand: cli });
+
+    // Link this session to the mission after a short delay
+    // (the pane needs time to create the PTY session)
+    setTimeout(() => {
+      // Find the pane to get its sessionId
+      const pane = useLayoutStore.getState().panes.find((p) => p.id === paneId);
+      if (pane?.sessionId) {
+        linkSessionToMission(mission.id, pane.sessionId);
+      }
+    }, 2000);
+
+    // Inject the prompt via the same custom event pattern used by "Work on this issue"
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("packetcode:issue-prompt", { detail: { prompt } })
+      );
+    }, 1500);
+  }
 
   function handleDelete() {
     deleteMission(mission.id);
@@ -424,6 +483,28 @@ function MissionDetail({
         </div>
       )}
 
+      {/* Launch session */}
+      <div className="px-4 py-2 border-b border-bg-border">
+        <span className="text-[11px] font-medium text-text-secondary mb-1.5 block">Launch Session</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleLaunchSession("claude")}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-accent-green bg-accent-green/10 border border-accent-green/20 rounded hover:bg-accent-green/20 transition-colors"
+          >
+            <Play size={11} />
+            Claude
+          </button>
+          <button
+            onClick={() => handleLaunchSession("codex")}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-accent-blue bg-accent-blue/10 border border-accent-blue/20 rounded hover:bg-accent-blue/20 transition-colors"
+          >
+            <Play size={11} />
+            Codex
+          </button>
+          <span className="text-[10px] text-text-muted ml-1">with mission context</span>
+        </div>
+      </div>
+
       {/* Linked Issues */}
       <div className="px-4 py-3 border-b border-bg-border">
         <div className="flex items-center justify-between mb-2">
@@ -444,18 +525,32 @@ function MissionDetail({
       </div>
 
       {/* Linked Sessions */}
-      {mission.linkedSessionIds.length > 0 && (
-        <div className="px-4 py-3 border-b border-bg-border">
-          <span className="text-[11px] font-medium text-text-secondary">
-            Sessions ({mission.linkedSessionIds.length})
-          </span>
+      <div className="px-4 py-3 border-b border-bg-border">
+        <span className="text-[11px] font-medium text-text-secondary">
+          Sessions ({mission.linkedSessionIds.length})
+        </span>
+        {mission.linkedSessionIds.length === 0 ? (
+          <p className="text-[10px] text-text-muted py-2">No sessions linked yet. Launch a session above.</p>
+        ) : (
           <div className="mt-1.5 space-y-0.5">
             {mission.linkedSessionIds.map((sid) => (
-              <p key={sid} className="text-[10px] text-text-muted font-mono truncate">{sid}</p>
+              <div key={sid} className="flex items-center gap-2 py-1 group">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue shrink-0" />
+                <span className="text-[10px] text-text-secondary font-mono truncate flex-1">{sid}</span>
+                <button
+                  onClick={() => {
+                    useMissionStore.getState().unlinkSessionFromMission(mission.id, sid);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 text-text-muted hover:text-accent-red transition-all"
+                  title="Unlink session"
+                >
+                  <X size={10} />
+                </button>
+              </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Delete */}
       <div className="px-4 py-3 mt-auto">
