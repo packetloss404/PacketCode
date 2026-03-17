@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket, Zap, ArrowDown, ArrowUp, GitCommit, Sun, Moon, DollarSign, ClipboardList } from "lucide-react";
+import { Plus, GitBranch, FolderOpen, Diamond, Wrench, FolderTree, MessageSquare, Github, Brain, User, BarChart3, Rocket, Zap, ArrowDown, ArrowUp, GitCommit, Sun, Moon, DollarSign, ClipboardList, Radio } from "lucide-react";
 import { DropdownItem } from "./DropdownItem";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useAppStore, isModuleView, moduleViewId, type AppView } from "@/stores/appStore";
@@ -8,6 +8,7 @@ import { getModulesSorted } from "@/modules/registry";
 import { useProfileStore } from "@/stores/profileStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useMissionStore } from "@/stores/missionStore";
 import { CodeQualityModal } from "@/components/quality/CodeQualityModal";
 import { NewSessionModal } from "@/components/session/NewSessionModal";
 import { SpecImportModal } from "@/components/views/SpecImportModal";
@@ -45,6 +46,13 @@ export function Toolbar() {
   const setActiveView = useAppStore((s) => s.setActiveView);
   const quickStartSession = useAppStore((s) => s.quickStartSession);
   const moduleStates = useModuleStore((s) => s.states);
+
+  const missions = useMissionStore((s) => s.missions);
+  const computeMissionStatus = useMissionStore((s) => s.computeMissionStatus);
+  const attentionCount = missions.filter((m) => {
+    const status = computeMissionStatus(m.id);
+    return status === "blocked" || status === "needs_human";
+  }).length;
 
   const projectName = projectPath.split(/[/\\]/).pop() || "PacketCode";
 
@@ -262,6 +270,25 @@ export function Toolbar() {
 
       {/* Right section */}
       <div className="flex items-center gap-2">
+        {/* Mission Control */}
+        <button
+          onClick={() => setActiveView("mission_control")}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs transition-colors ${
+            activeView === "mission_control"
+              ? "bg-bg-elevated text-accent-green"
+              : "text-text-muted hover:text-accent-green"
+          }`}
+          title="Mission Control"
+        >
+          <Radio size={11} />
+          <span>Control</span>
+          {attentionCount > 0 && (
+            <span className="ml-0.5 px-1.5 py-0 text-[9px] font-bold rounded-full bg-accent-amber/20 text-accent-amber">
+              {attentionCount}
+            </span>
+          )}
+        </button>
+
         {/* Theme toggle */}
         <button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}

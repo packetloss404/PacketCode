@@ -13,6 +13,7 @@ import { AnalyticsView } from "@/components/views/AnalyticsView";
 import { DeployView } from "@/components/views/DeployView";
 import { CostDashboardView } from "@/components/views/CostDashboardView";
 import { MissionsView } from "@/components/views/MissionsView";
+import { MissionControlView } from "@/components/views/MissionControlView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import { FileExplorer } from "@/components/explorer/FileExplorer";
@@ -225,6 +226,8 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
       return <IssueBoard />;
     case "missions":
       return <MissionsView />;
+    case "mission_control":
+      return <MissionControlView />;
     case "history":
       return <HistoryView />;
     case "tools":
