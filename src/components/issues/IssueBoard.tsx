@@ -5,6 +5,7 @@ import {
   type Issue,
   type IssueStatus,
 } from "@/stores/issueStore";
+import { useMissionStore } from "@/stores/missionStore";
 import { IssueCard } from "./IssueCard";
 import { NewIssueForm } from "./NewIssueForm";
 import { IssueDetailView } from "./IssueDetailView";
@@ -15,6 +16,7 @@ export function IssueBoard() {
   const labels = useIssueStore((s) => s.labels);
   const getColumns = useIssueStore((s) => s.getColumns);
   const moveIssue = useIssueStore((s) => s.moveIssue);
+  const missions = useMissionStore((s) => s.missions);
 
   const [showNewIssue, setShowNewIssue] = useState(false);
   const [newIssueColumn, setNewIssueColumn] = useState<IssueStatus>("todo");
@@ -27,6 +29,7 @@ export function IssueBoard() {
   const [filterEpic, setFilterEpic] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterLabel, setFilterLabel] = useState<string>("all");
+  const [filterMission, setFilterMission] = useState<string>("all");
   const [showCompleted, setShowCompleted] = useState(false);
 
   const columns = getColumns();
@@ -51,11 +54,14 @@ export function IssueBoard() {
       if (filterPriority !== "all" && issue.priority !== filterPriority) return false;
       // Label filter
       if (filterLabel !== "all" && !issue.labels.includes(filterLabel)) return false;
+      // Mission filter
+      if (filterMission === "unassigned" && issue.missionId !== null) return false;
+      if (filterMission !== "all" && filterMission !== "unassigned" && issue.missionId !== filterMission) return false;
       // Show completed
       if (!showCompleted && issue.status === "done") return false;
       return true;
     });
-  }, [issues, searchQuery, filterEpic, filterPriority, filterLabel, showCompleted]);
+  }, [issues, searchQuery, filterEpic, filterPriority, filterLabel, filterMission, showCompleted]);
 
   // Stats
   const activeCount = issues.filter((i) => i.status !== "done").length;
@@ -150,6 +156,19 @@ export function IssueBoard() {
             <option value="all">Add label filter...</option>
             {labels.map((l) => (
               <option key={l} value={l}>{l}</option>
+            ))}
+          </select>
+
+          {/* Mission filter */}
+          <select
+            value={filterMission}
+            onChange={(e) => setFilterMission(e.target.value)}
+            className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
+          >
+            <option value="all">All missions</option>
+            <option value="unassigned">Unassigned</option>
+            {missions.map((m) => (
+              <option key={m.id} value={m.id}>{m.title}</option>
             ))}
           </select>
 

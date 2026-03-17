@@ -5,6 +5,7 @@ import {
   type IssueStatus,
   type IssuePriority,
 } from "@/stores/issueStore";
+import { useMissionStore } from "@/stores/missionStore";
 import { generateId } from "@/lib/storage";
 
 interface NewIssueFormProps {
@@ -20,6 +21,9 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   const addBlockedBy = useIssueStore((s) => s.addBlockedBy);
   const addBlocks = useIssueStore((s) => s.addBlocks);
 
+  const missions = useMissionStore((s) => s.missions);
+  const addIssueToMission = useMissionStore((s) => s.addIssueToMission);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<IssuePriority>("medium");
@@ -30,6 +34,9 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   // Acceptance criteria
   const [criteria, setCriteria] = useState<string[]>([]);
   const [newCriterion, setNewCriterion] = useState("");
+
+  // Mission
+  const [missionId, setMissionId] = useState<string>("");
 
   // Dependencies
   const [blockedByIds, setBlockedByIds] = useState<string[]>([]);
@@ -62,6 +69,12 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
     }
     for (const id of blocksIds) {
       addBlocks(newIssue.id, id);
+    }
+
+    // Assign to mission if selected
+    if (missionId) {
+      addIssueToMission(missionId, newIssue.id);
+      useIssueStore.getState().assignToMission(newIssue.id, missionId);
     }
 
     onClose();
@@ -208,6 +221,25 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
                   <option key={e} value={e}>
                     {e}
                   </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Mission */}
+          {missions.length > 0 && (
+            <div>
+              <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wider">
+                Mission
+              </label>
+              <select
+                value={missionId}
+                onChange={(e) => setMissionId(e.target.value)}
+                className="w-full bg-bg-primary border border-bg-border rounded px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent-green"
+              >
+                <option value="">None</option>
+                {missions.map((m) => (
+                  <option key={m.id} value={m.id}>{m.title}</option>
                 ))}
               </select>
             </div>

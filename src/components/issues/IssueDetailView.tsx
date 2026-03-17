@@ -5,6 +5,8 @@ import {
   Plus,
   Trash2,
   Play,
+  Target,
+  X,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -12,6 +14,7 @@ import {
   type Issue,
   type IssueStatus,
 } from "@/stores/issueStore";
+import { useMissionStore } from "@/stores/missionStore";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { getLabelColor, getPriorityColor } from "@/lib/colors";
@@ -68,6 +71,11 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
   const removeBlockedBy = useIssueStore((s) => s.removeBlockedBy);
   const addBlocks = useIssueStore((s) => s.addBlocks);
   const removeBlocks = useIssueStore((s) => s.removeBlocks);
+  const assignToMission = useIssueStore((s) => s.assignToMission);
+
+  const missions = useMissionStore((s) => s.missions);
+  const addIssueToMission = useMissionStore((s) => s.addIssueToMission);
+  const removeIssueFromMission = useMissionStore((s) => s.removeIssueFromMission);
 
   const [showDepGraph, setShowDepGraph] = useState(false);
   const [newCriterionText, setNewCriterionText] = useState("");
@@ -237,6 +245,49 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
             <Play size={14} />
             Work on this issue
           </button>
+
+          {/* Mission assignment */}
+          <div>
+            <label className="block text-[10px] text-text-muted mb-1.5 uppercase tracking-wider">
+              Mission
+            </label>
+            {issue.missionId ? (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-primary border border-bg-border rounded">
+                <Target size={12} className="text-accent-green flex-shrink-0" />
+                <span className="text-[11px] text-text-primary flex-1 truncate">
+                  {missions.find((m) => m.id === issue.missionId)?.title || "Unknown mission"}
+                </span>
+                <button
+                  onClick={() => {
+                    if (issue.missionId) {
+                      removeIssueFromMission(issue.missionId, issue.id);
+                      assignToMission(issue.id, null);
+                    }
+                  }}
+                  className="p-0.5 text-text-muted hover:text-accent-red transition-colors flex-shrink-0"
+                  title="Remove from mission"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <select
+                className="w-full bg-bg-primary border border-bg-border rounded px-2 py-1.5 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    addIssueToMission(e.target.value, issue.id);
+                    assignToMission(issue.id, e.target.value);
+                  }
+                }}
+              >
+                <option value="">Assign to mission...</option>
+                {missions.map((m) => (
+                  <option key={m.id} value={m.id}>{m.title}</option>
+                ))}
+              </select>
+            )}
+          </div>
 
           <IssueDependencyList
             label="Blocked By"
