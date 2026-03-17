@@ -2,6 +2,44 @@
 
 All notable changes to PacketCode are documented in this file.
 
+## [0.3.0] - 2026-03-16
+
+### Added
+
+#### Missions System
+- Mission domain model with types, Zustand store, and localStorage persistence
+- `missionStore` with CRUD operations, issue/session linking, and status rollup computation
+- `missionId` field on issues with backward-compatible migration for existing data
+- Dedicated **Missions** view: master-detail layout with mission list, search, status filter, inline create form, and full detail panel
+- Inline editing of mission title, objective, status, and priority
+- Mission status rollup computed from linked issue states (needs_human > blocked > done > active > draft)
+- **Mission Control** supervision view: status strip with counts, attention queue for blocked/needs_human missions, active missions section, collapsible all-missions groups
+- Mission Control toolbar button with live attention badge (amber count of blocked + needs_human)
+- Launch Claude or Codex sessions from mission detail with context-rich prompts (mission objective + linked issues with descriptions and acceptance criteria)
+- Auto-link launched sessions to the originating mission
+- Mission badges on issue cards (green Target icon + truncated title)
+- Mission assignment in issue detail modal (assign/remove dropdown)
+- Mission filter dropdown on issue board (all / unassigned / specific mission)
+- Mission selector when creating new issues
+- Delete confirmation dialog for missions
+
+#### Shared Utilities
+- `src/lib/time.ts` — shared `relativeTime()` function (consolidated from 3 duplicate implementations)
+- `src/lib/mission-colors.ts` — shared mission status, priority, and issue status color/label constants
+
+### Fixed
+- `useMemo` dependency array in CostDashboardView (pre-existing lint error)
+- MissionControl → MissionsView navigation now syncs selected mission via store
+- Consistent naming: "New Mission" / "Create Mission" labels, capitalized priorities, proper issue status labels
+
+### Changed
+- `CoreView` type expanded with `"missions"` and `"mission_control"`
+- Toolbar gains Missions tab (top-level) and Control button (right section)
+- Issue interface gains `missionId: string | null` with migration
+- `addIssue` signature makes `missionId` optional for backward compatibility
+
+---
+
 ## [0.2.0] - 2026-02-27
 
 ### Added
