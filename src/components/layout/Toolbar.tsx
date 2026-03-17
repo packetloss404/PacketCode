@@ -16,6 +16,7 @@ const TABS: { key: AppView; label: string }[] = [
   { key: "claude", label: "Claude" },
   { key: "codex", label: "Codex" },
   { key: "issues", label: "Issues" },
+  { key: "missions", label: "Missions" },
   { key: "history", label: "History" },
 ];
 
