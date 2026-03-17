@@ -2,6 +2,7 @@ import { Trash2, Link, CheckSquare, Target } from "lucide-react";
 import { useIssueStore, type Issue } from "@/stores/issueStore";
 import { useMissionStore } from "@/stores/missionStore";
 import { getLabelColor } from "@/lib/colors";
+import { relativeTime } from "@/lib/time";
 
 interface IssueCardProps {
   issue: Issue;
@@ -15,7 +16,7 @@ export function IssueCard({ issue, onDragStart, onClick, isDragging }: IssueCard
   const getMissionForIssue = useMissionStore((s) => s.getMissionForIssue);
   const mission = getMissionForIssue(issue.id);
 
-  const timeAgo = getTimeAgo(issue.updatedAt);
+  const timeAgo = relativeTime(issue.updatedAt);
   const checkedCount = issue.acceptanceCriteria.filter((c) => c.checked).length;
   const totalCriteria = issue.acceptanceCriteria.length;
   const depCount = issue.blockedBy.length + issue.blocks.length;
@@ -135,16 +136,4 @@ function PriorityBadge({ priority }: { priority: Issue["priority"] }) {
   );
 }
 
-function getTimeAgo(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
 
-  if (seconds < 60) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
-}

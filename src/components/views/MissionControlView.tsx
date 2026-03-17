@@ -3,36 +3,9 @@ import { Radio, ChevronDown, ChevronRight, Target, AlertTriangle } from "lucide-
 import { useMissionStore } from "@/stores/missionStore";
 import { useIssueStore } from "@/stores/issueStore";
 import { useAppStore } from "@/stores/appStore";
+import { relativeTime } from "@/lib/time";
+import { MISSION_STATUS_CONFIG, MISSION_PRIORITY_COLORS } from "@/lib/mission-colors";
 import type { Mission, MissionStatus } from "@/types/mission";
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-const STATUS_CONFIG: Record<MissionStatus, { dot: string; bg: string; text: string; label: string }> = {
-  draft: { dot: "bg-text-muted", bg: "bg-text-muted/10", text: "text-text-muted", label: "Draft" },
-  active: { dot: "bg-accent-blue", bg: "bg-accent-blue/10", text: "text-accent-blue", label: "Active" },
-  blocked: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red", label: "Blocked" },
-  needs_human: { dot: "bg-accent-amber", bg: "bg-accent-amber/10", text: "text-accent-amber", label: "Needs Human" },
-  done: { dot: "bg-accent-green", bg: "bg-accent-green/10", text: "text-accent-green", label: "Done" },
-  failed: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red", label: "Failed" },
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: "text-accent-red",
-  high: "text-accent-amber",
-  medium: "text-accent-blue",
-  low: "text-text-muted",
-};
 
 function handleMissionClick(missionId: string) {
   useMissionStore.getState().setActiveMission(missionId);
@@ -50,7 +23,7 @@ function StatusStrip({ statusCounts, total }: { statusCounts: Record<MissionStat
       </span>
       <div className="w-px h-4 bg-bg-border" />
       {statuses.map((s) => {
-        const cfg = STATUS_CONFIG[s];
+        const cfg = MISSION_STATUS_CONFIG[s];
         if (statusCounts[s] === 0) return null;
         return (
           <span key={s} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${cfg.bg} ${cfg.text}`}>
@@ -69,7 +42,7 @@ function AttentionCard({ mission, status }: { mission: Mission; status: MissionS
   const issues = useIssueStore((s) => s.issues);
   const linkedIssues = issues.filter((i) => mission.issueIds.includes(i.id));
   const concerningIssues = linkedIssues.filter((i) => i.status === "blocked" || i.status === "needs_human");
-  const cfg = STATUS_CONFIG[status];
+  const cfg = MISSION_STATUS_CONFIG[status];
   const borderColor = status === "blocked" ? "border-accent-red" : "border-accent-amber";
 
   return (
@@ -80,7 +53,7 @@ function AttentionCard({ mission, status }: { mission: Mission; status: MissionS
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
         <span className="text-xs font-medium text-text-primary truncate flex-1">{mission.title}</span>
-        <span className={`text-[10px] font-medium ${PRIORITY_COLORS[mission.priority] || "text-text-muted"}`}>
+        <span className={`text-[10px] font-medium ${MISSION_PRIORITY_COLORS[mission.priority] || "text-text-muted"}`}>
           {mission.priority}
         </span>
       </div>
@@ -165,7 +138,7 @@ function ActiveMissionsSection({ activeMissions }: { activeMissions: { mission: 
                 <span className="text-xs font-medium text-text-primary truncate flex-1">{mission.title}</span>
               </div>
               <div className="flex items-center gap-3 text-[10px] text-text-muted">
-                <span className={PRIORITY_COLORS[mission.priority] || "text-text-muted"}>{mission.priority}</span>
+                <span className={MISSION_PRIORITY_COLORS[mission.priority] || "text-text-muted"}>{mission.priority}</span>
                 <span>{doneCount}/{linkedIssues.length} issues done</span>
                 <span>{mission.linkedSessionIds.length} session{mission.linkedSessionIds.length !== 1 ? "s" : ""}</span>
                 <span className="ml-auto">{relativeTime(mission.updatedAt)}</span>
@@ -181,7 +154,7 @@ function ActiveMissionsSection({ activeMissions }: { activeMissions: { mission: 
 // ── MissionRow ───────────────────────────────────────────────────────
 
 function MissionRow({ mission, status }: { mission: Mission; status: MissionStatus }) {
-  const cfg = STATUS_CONFIG[status];
+  const cfg = MISSION_STATUS_CONFIG[status];
   return (
     <button
       onClick={() => handleMissionClick(mission.id)}
@@ -189,9 +162,9 @@ function MissionRow({ mission, status }: { mission: Mission; status: MissionStat
     >
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
       <span className="text-text-primary truncate flex-1 min-w-0">{mission.title}</span>
-      <span className={`flex-shrink-0 ${PRIORITY_COLORS[mission.priority] || "text-text-muted"}`}>{mission.priority}</span>
+      <span className={`flex-shrink-0 ${MISSION_PRIORITY_COLORS[mission.priority] || "text-text-muted"}`}>{mission.priority}</span>
       <span className="flex-shrink-0 text-text-muted w-16 text-right">{mission.issueIds.length} issue{mission.issueIds.length !== 1 ? "s" : ""}</span>
-      <span className="flex-shrink-0 text-text-muted w-16 text-right">{mission.linkedSessionIds.length} sess</span>
+      <span className="flex-shrink-0 text-text-muted w-20 text-right">{mission.linkedSessionIds.length} {mission.linkedSessionIds.length === 1 ? "session" : "sessions"}</span>
       <span className="flex-shrink-0 text-text-muted w-14 text-right">{relativeTime(mission.updatedAt)}</span>
     </button>
   );
@@ -201,7 +174,7 @@ function MissionRow({ mission, status }: { mission: Mission; status: MissionStat
 
 function MissionGroupSection({ statusKey, missions }: { statusKey: MissionStatus; missions: Mission[] }) {
   const [open, setOpen] = useState(true);
-  const cfg = STATUS_CONFIG[statusKey];
+  const cfg = MISSION_STATUS_CONFIG[statusKey];
 
   if (missions.length === 0) return null;
 

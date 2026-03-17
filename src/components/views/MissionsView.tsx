@@ -1,64 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Target, Plus, Search, Trash2, X, ChevronDown, Play } from "lucide-react";
 import { useMissionStore } from "@/stores/missionStore";
 import { useIssueStore } from "@/stores/issueStore";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { relativeTime } from "@/lib/time";
+import { MISSION_STATUS_CONFIG, MISSION_PRIORITY_COLORS, ISSUE_STATUS_COLORS, ISSUE_STATUS_LABELS } from "@/lib/mission-colors";
 import type { Mission, MissionStatus, MissionPriority } from "@/types/mission";
 import type { IssueStatus } from "@/stores/issueStore";
-
-// ---------------------------------------------------------------------------
-// Color mappings
-// ---------------------------------------------------------------------------
-
-const STATUS_COLORS: Record<MissionStatus, { dot: string; bg: string; text: string }> = {
-  draft: { dot: "bg-text-muted", bg: "bg-text-muted/10", text: "text-text-muted" },
-  active: { dot: "bg-accent-blue", bg: "bg-accent-blue/10", text: "text-accent-blue" },
-  blocked: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red" },
-  needs_human: { dot: "bg-accent-amber", bg: "bg-accent-amber/10", text: "text-accent-amber" },
-  done: { dot: "bg-accent-green", bg: "bg-accent-green/10", text: "text-accent-green" },
-  failed: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red" },
-};
-
-const PRIORITY_COLORS: Record<MissionPriority, string> = {
-  critical: "text-accent-red",
-  high: "text-accent-amber",
-  medium: "text-accent-blue",
-  low: "text-text-muted",
-};
-
-const ISSUE_STATUS_COLORS: Record<IssueStatus, string> = {
-  todo: "bg-text-muted",
-  in_progress: "bg-accent-blue",
-  qa: "bg-accent-purple",
-  done: "bg-accent-green",
-  blocked: "bg-accent-red",
-  needs_human: "bg-accent-amber",
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-const STATUS_LABEL: Record<MissionStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-  blocked: "Blocked",
-  needs_human: "Needs Human",
-  done: "Done",
-  failed: "Failed",
-};
 
 const ALL_STATUSES: MissionStatus[] = ["draft", "active", "blocked", "needs_human", "done", "failed"];
 const ALL_PRIORITIES: MissionPriority[] = ["low", "medium", "high", "critical"];
@@ -69,8 +18,15 @@ const ALL_PRIORITIES: MissionPriority[] = ["low", "medium", "high", "critical"];
 
 export function MissionsView() {
   const missions = useMissionStore((s) => s.missions);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeMissionId = useMissionStore((s) => s.activeMissionId);
+  const [selectedId, setSelectedId] = useState<string | null>(activeMissionId);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (activeMissionId) {
+      setSelectedId(activeMissionId);
+    }
+  }, [activeMissionId]);
   const [statusFilter, setStatusFilter] = useState<MissionStatus | "all">("all");
   const [showCreate, setShowCreate] = useState(false);
 
@@ -118,7 +74,7 @@ export function MissionsView() {
             className="flex items-center gap-1 px-2 py-1 text-[11px] text-accent-green hover:bg-accent-green/10 rounded transition-colors"
           >
             <Plus size={12} />
-            New
+            New Mission
           </button>
         </div>
 
@@ -149,7 +105,7 @@ export function MissionsView() {
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
           {filtered.length === 0 && (
             <p className="text-[11px] text-text-muted px-2 py-4 text-center">
-              No missions match your filters.
+              No missions match your filters. Try clearing the search or status filter.
             </p>
           )}
           {filtered.map((m) => (
@@ -198,7 +154,7 @@ function StatusFilterDropdown({
         className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors w-full"
       >
         <ChevronDown size={10} className="text-text-muted" />
-        <span>{value === "all" ? "All statuses" : STATUS_LABEL[value]}</span>
+        <span>{value === "all" ? "All statuses" : MISSION_STATUS_CONFIG[value].label}</span>
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-0.5 w-full bg-bg-elevated border border-bg-border rounded shadow-lg z-20 py-0.5">
@@ -218,7 +174,7 @@ function StatusFilterDropdown({
                 value === s ? "text-accent-green" : "text-text-secondary"
               }`}
             >
-              {STATUS_LABEL[s]}
+              {MISSION_STATUS_CONFIG[s].label}
             </button>
           ))}
         </div>
@@ -240,8 +196,8 @@ function MissionCard({
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const sc = STATUS_COLORS[mission.status];
-  const pc = PRIORITY_COLORS[mission.priority];
+  const sc = MISSION_STATUS_CONFIG[mission.status];
+  const pc = MISSION_PRIORITY_COLORS[mission.priority];
 
   return (
     <button
@@ -256,7 +212,7 @@ function MissionCard({
       <div className="flex items-center gap-2 mt-1">
         <span className={`inline-flex items-center gap-1 text-[10px] ${sc.text}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-          {STATUS_LABEL[mission.status]}
+          {MISSION_STATUS_CONFIG[mission.status].label}
         </span>
         <span className={`text-[10px] ${pc}`}>{mission.priority}</span>
         <span className="text-[10px] text-text-muted">{mission.issueIds.length} issues</span>
@@ -319,7 +275,7 @@ function CreateMissionForm({
           className="bg-bg-primary text-xs text-text-primary border border-bg-border rounded px-1.5 py-0.5 outline-none"
         >
           {ALL_PRIORITIES.map((p) => (
-            <option key={p} value={p}>{p}</option>
+            <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
           ))}
         </select>
         <div className="flex-1" />
@@ -334,7 +290,7 @@ function CreateMissionForm({
           disabled={!title.trim()}
           className="px-2 py-0.5 text-[11px] text-accent-green hover:bg-accent-green/10 rounded transition-colors disabled:opacity-40"
         >
-          Create
+          Create Mission
         </button>
       </div>
     </div>
@@ -353,6 +309,7 @@ function MissionDetail({
   onDeleted: () => void;
 }) {
   const deleteMission = useMissionStore((s) => s.deleteMission);
+  const updateMission = useMissionStore((s) => s.updateMission);
   const computeMissionStatus = useMissionStore((s) => s.computeMissionStatus);
   const linkSessionToMission = useMissionStore((s) => s.linkSessionToMission);
   const issues = useIssueStore((s) => s.issues);
@@ -363,9 +320,7 @@ function MissionDetail({
   );
 
   const computedStatus = computeMissionStatus(mission.id);
-  const sc = STATUS_COLORS[mission.status];
-  const pc = PRIORITY_COLORS[mission.priority];
-  const csc = STATUS_COLORS[computedStatus];
+  const csc = MISSION_STATUS_CONFIG[computedStatus];
 
   // Issue rollup counts
   const rollup = useMemo(() => {
@@ -393,7 +348,7 @@ function MissionDetail({
       lines.push(``);
       lines.push(`### Linked Issues (${linkedIssues.length})`);
       for (const issue of linkedIssues) {
-        const statusStr = issue.status.replace("_", " ");
+        const statusStr = ISSUE_STATUS_LABELS[issue.status];
         lines.push(``);
         lines.push(`- **${issue.ticketId}: ${issue.title}** [${statusStr}]`);
         if (issue.description) {
@@ -433,30 +388,54 @@ function MissionDetail({
   }
 
   function handleDelete() {
+    if (!window.confirm(`Delete mission "${mission.title}"? This cannot be undone.`)) return;
     deleteMission(mission.id);
     onDeleted();
   }
 
   return (
     <div className="flex flex-col flex-1 overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-bg-border">
-        <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-text-primary truncate">
-            {mission.title}
-          </h2>
-          {mission.objective && (
-            <p className="text-xs text-text-secondary mt-1 line-clamp-3">
-              {mission.objective}
-            </p>
+      {/* Header — editable */}
+      <div className="px-4 pt-4 pb-3 border-b border-bg-border space-y-2">
+        <input
+          type="text"
+          value={mission.title}
+          onChange={(e) => updateMission(mission.id, { title: e.target.value })}
+          className="w-full text-sm font-semibold text-text-primary bg-transparent border-b border-transparent hover:border-bg-border focus:border-accent-green focus:outline-none truncate"
+          placeholder="Mission title"
+        />
+        <textarea
+          value={mission.objective}
+          onChange={(e) => updateMission(mission.id, { objective: e.target.value })}
+          rows={2}
+          className="w-full text-xs text-text-secondary bg-transparent border border-transparent hover:border-bg-border focus:border-accent-green focus:outline-none resize-none rounded px-1 py-0.5"
+          placeholder="Objective (optional)"
+        />
+        <div className="flex items-center gap-2">
+          <select
+            value={mission.status}
+            onChange={(e) => updateMission(mission.id, { status: e.target.value as MissionStatus })}
+            className="bg-bg-primary text-[11px] text-text-secondary border border-bg-border rounded px-1.5 py-0.5 outline-none focus:border-accent-green"
+          >
+            {ALL_STATUSES.map((s) => (
+              <option key={s} value={s}>{MISSION_STATUS_CONFIG[s].label}</option>
+            ))}
+          </select>
+          <select
+            value={mission.priority}
+            onChange={(e) => updateMission(mission.id, { priority: e.target.value as MissionPriority })}
+            className="bg-bg-primary text-[11px] text-text-secondary border border-bg-border rounded px-1.5 py-0.5 outline-none focus:border-accent-green"
+          >
+            {ALL_PRIORITIES.map((p) => (
+              <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+            ))}
+          </select>
+          {linkedIssues.length > 0 && (
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${csc.bg} ${csc.text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${csc.dot}`} />
+              Rollup: {MISSION_STATUS_CONFIG[computedStatus].label}
+            </span>
           )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] ${sc.bg} ${sc.text}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-            {STATUS_LABEL[mission.status]}
-          </span>
-          <span className={`text-[10px] ${pc}`}>{mission.priority}</span>
         </div>
       </div>
 
@@ -467,7 +446,7 @@ function MissionDetail({
             <span className="text-[11px] font-medium text-text-secondary">Status Rollup</span>
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${csc.bg} ${csc.text}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${csc.dot}`} />
-              {STATUS_LABEL[computedStatus]}
+              {MISSION_STATUS_CONFIG[computedStatus].label}
             </span>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -475,7 +454,7 @@ function MissionDetail({
               rollup[s] ? (
                 <span key={s} className="inline-flex items-center gap-1 text-[10px] text-text-muted">
                   <span className={`w-1.5 h-1.5 rounded-full ${ISSUE_STATUS_COLORS[s]}`} />
-                  {s.replace("_", " ")} {rollup[s]}
+                  {ISSUE_STATUS_LABELS[s]} {rollup[s]}
                 </span>
               ) : null
             )}
@@ -581,7 +560,7 @@ function IssueRow({
   const assignToMission = useIssueStore((s) => s.assignToMission);
 
   const statusColor = ISSUE_STATUS_COLORS[issue.status] ?? "bg-text-muted";
-  const pc = PRIORITY_COLORS[issue.priority as MissionPriority] ?? "text-text-muted";
+  const pc = MISSION_PRIORITY_COLORS[issue.priority as MissionPriority] ?? "text-text-muted";
 
   function handleRemove() {
     removeIssueFromMission(missionId, issue.id);
