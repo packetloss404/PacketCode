@@ -5,7 +5,7 @@ import {
   type IssueStatus,
   type IssuePriority,
 } from "@/stores/issueStore";
-import { useMissionStore } from "@/stores/missionStore";
+import { useFlightStore } from "@/stores/flightStore";
 import { generateId } from "@/lib/storage";
 
 interface NewIssueFormProps {
@@ -21,8 +21,8 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   const addBlockedBy = useIssueStore((s) => s.addBlockedBy);
   const addBlocks = useIssueStore((s) => s.addBlocks);
 
-  const missions = useMissionStore((s) => s.missions);
-  const addIssueToMission = useMissionStore((s) => s.addIssueToMission);
+  const flights = useFlightStore((s) => s.flights);
+  const addIssueToFlight = useFlightStore((s) => s.addIssueToFlight);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -35,8 +35,8 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
   const [criteria, setCriteria] = useState<string[]>([]);
   const [newCriterion, setNewCriterion] = useState("");
 
-  // Mission
-  const [missionId, setMissionId] = useState<string>("");
+  // Flight
+  const [flightId, setFlightId] = useState<string>("");
 
   // Dependencies
   const [blockedByIds, setBlockedByIds] = useState<string[]>([]);
@@ -71,10 +71,10 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
       addBlocks(newIssue.id, id);
     }
 
-    // Assign to mission if selected
-    if (missionId) {
-      addIssueToMission(missionId, newIssue.id);
-      useIssueStore.getState().assignToMission(newIssue.id, missionId);
+    // Assign to flight if selected
+    if (flightId) {
+      addIssueToFlight(flightId, newIssue.id);
+      useIssueStore.getState().assignToFlight(newIssue.id, flightId);
     }
 
     onClose();
@@ -226,20 +226,20 @@ export function NewIssueForm({ defaultStatus, onClose }: NewIssueFormProps) {
             </div>
           )}
 
-          {/* Mission */}
-          {missions.length > 0 && (
+          {/* Flight */}
+          {flights.length > 0 && (
             <div>
               <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wider">
-                Mission
+                Flight
               </label>
               <select
-                value={missionId}
-                onChange={(e) => setMissionId(e.target.value)}
+                value={flightId}
+                onChange={(e) => setFlightId(e.target.value)}
                 className="w-full bg-bg-primary border border-bg-border rounded px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent-green"
               >
                 <option value="">None</option>
-                {missions.map((m) => (
-                  <option key={m.id} value={m.id}>{m.title}</option>
+                {flights.map((f) => (
+                  <option key={f.id} value={f.id}>{f.title}</option>
                 ))}
               </select>
             </div>

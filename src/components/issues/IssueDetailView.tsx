@@ -14,7 +14,7 @@ import {
   type Issue,
   type IssueStatus,
 } from "@/stores/issueStore";
-import { useMissionStore } from "@/stores/missionStore";
+import { useFlightStore } from "@/stores/flightStore";
 import { useAppStore } from "@/stores/appStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { getLabelColor, getPriorityColor } from "@/lib/colors";
@@ -71,11 +71,11 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
   const removeBlockedBy = useIssueStore((s) => s.removeBlockedBy);
   const addBlocks = useIssueStore((s) => s.addBlocks);
   const removeBlocks = useIssueStore((s) => s.removeBlocks);
-  const assignToMission = useIssueStore((s) => s.assignToMission);
+  const assignToFlight = useIssueStore((s) => s.assignToFlight);
 
-  const missions = useMissionStore((s) => s.missions);
-  const addIssueToMission = useMissionStore((s) => s.addIssueToMission);
-  const removeIssueFromMission = useMissionStore((s) => s.removeIssueFromMission);
+  const flights = useFlightStore((s) => s.flights);
+  const addIssueToFlight = useFlightStore((s) => s.addIssueToFlight);
+  const removeIssueFromFlight = useFlightStore((s) => s.removeIssueFromFlight);
 
   const [showDepGraph, setShowDepGraph] = useState(false);
   const [newCriterionText, setNewCriterionText] = useState("");
@@ -246,26 +246,26 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
             Work on this issue
           </button>
 
-          {/* Mission assignment */}
+          {/* Flight assignment */}
           <div>
             <label className="block text-[10px] text-text-muted mb-1.5 uppercase tracking-wider">
-              Mission
+              Flight
             </label>
-            {issue.missionId ? (
+            {issue.flightId ? (
               <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-primary border border-bg-border rounded">
                 <Target size={12} className="text-accent-green flex-shrink-0" />
                 <span className="text-[11px] text-text-primary flex-1 truncate">
-                  {missions.find((m) => m.id === issue.missionId)?.title || "Unknown mission"}
+                  {flights.find((f) => f.id === issue.flightId)?.title || "Unknown flight"}
                 </span>
                 <button
                   onClick={() => {
-                    if (issue.missionId) {
-                      removeIssueFromMission(issue.missionId, issue.id);
-                      assignToMission(issue.id, null);
+                    if (issue.flightId) {
+                      removeIssueFromFlight(issue.flightId, issue.id);
+                      assignToFlight(issue.id, null);
                     }
                   }}
                   className="p-0.5 text-text-muted hover:text-accent-red transition-colors flex-shrink-0"
-                  title="Remove from mission"
+                  title="Remove from flight"
                 >
                   <X size={10} />
                 </button>
@@ -276,14 +276,14 @@ export function IssueDetailView({ issueId, onClose }: IssueDetailViewProps) {
                 value=""
                 onChange={(e) => {
                   if (e.target.value) {
-                    addIssueToMission(e.target.value, issue.id);
-                    assignToMission(issue.id, e.target.value);
+                    addIssueToFlight(e.target.value, issue.id);
+                    assignToFlight(issue.id, e.target.value);
                   }
                 }}
               >
-                <option value="">Assign to mission...</option>
-                {missions.map((m) => (
-                  <option key={m.id} value={m.id}>{m.title}</option>
+                <option value="">Assign to flight...</option>
+                {flights.map((f) => (
+                  <option key={f.id} value={f.id}>{f.title}</option>
                 ))}
               </select>
             )}

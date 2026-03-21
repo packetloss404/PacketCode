@@ -8,7 +8,7 @@ import { getModulesSorted } from "@/modules/registry";
 import { useProfileStore } from "@/stores/profileStore";
 import { useGitInfo } from "@/hooks/useGitInfo";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useMissionStore } from "@/stores/missionStore";
+import { useFlightStore } from "@/stores/flightStore";
 import { CodeQualityModal } from "@/components/quality/CodeQualityModal";
 import { NewSessionModal } from "@/components/session/NewSessionModal";
 import { SpecImportModal } from "@/components/views/SpecImportModal";
@@ -17,7 +17,7 @@ const TABS: { key: AppView; label: string }[] = [
   { key: "claude", label: "Claude" },
   { key: "codex", label: "Codex" },
   { key: "issues", label: "Issues" },
-  { key: "missions", label: "Missions" },
+  { key: "flights", label: "Flights" },
   { key: "history", label: "History" },
 ];
 
@@ -47,10 +47,10 @@ export function Toolbar() {
   const quickStartSession = useAppStore((s) => s.quickStartSession);
   const moduleStates = useModuleStore((s) => s.states);
 
-  const missions = useMissionStore((s) => s.missions);
-  const computeMissionStatus = useMissionStore((s) => s.computeMissionStatus);
-  const attentionCount = missions.filter((m) => {
-    const status = computeMissionStatus(m.id);
+  const flights = useFlightStore((s) => s.flights);
+  const computeFlightStatus = useFlightStore((s) => s.computeFlightStatus);
+  const attentionCount = flights.filter((f) => {
+    const status = computeFlightStatus(f.id);
     return status === "blocked" || status === "needs_human";
   }).length;
 
@@ -270,18 +270,18 @@ export function Toolbar() {
 
       {/* Right section */}
       <div className="flex items-center gap-2">
-        {/* Mission Control */}
+        {/* Flight Deck */}
         <button
-          onClick={() => setActiveView("mission_control")}
+          onClick={() => setActiveView("flight_deck")}
           className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs transition-colors ${
-            activeView === "mission_control"
+            activeView === "flight_deck"
               ? "bg-bg-elevated text-accent-green"
               : "text-text-muted hover:text-accent-green"
           }`}
-          title="Mission Control"
+          title="Flight Deck"
         >
           <Radio size={11} />
-          <span>Control</span>
+          <span>Flight Deck</span>
           {attentionCount > 0 && (
             <span className="ml-0.5 px-1.5 py-0 text-[9px] font-bold rounded-full bg-accent-amber/20 text-accent-amber">
               {attentionCount}

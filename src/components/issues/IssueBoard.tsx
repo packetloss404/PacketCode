@@ -5,7 +5,7 @@ import {
   type Issue,
   type IssueStatus,
 } from "@/stores/issueStore";
-import { useMissionStore } from "@/stores/missionStore";
+import { useFlightStore } from "@/stores/flightStore";
 import { IssueCard } from "./IssueCard";
 import { NewIssueForm } from "./NewIssueForm";
 import { IssueDetailView } from "./IssueDetailView";
@@ -16,7 +16,7 @@ export function IssueBoard() {
   const labels = useIssueStore((s) => s.labels);
   const getColumns = useIssueStore((s) => s.getColumns);
   const moveIssue = useIssueStore((s) => s.moveIssue);
-  const missions = useMissionStore((s) => s.missions);
+  const flights = useFlightStore((s) => s.flights);
 
   const [showNewIssue, setShowNewIssue] = useState(false);
   const [newIssueColumn, setNewIssueColumn] = useState<IssueStatus>("todo");
@@ -29,7 +29,7 @@ export function IssueBoard() {
   const [filterEpic, setFilterEpic] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterLabel, setFilterLabel] = useState<string>("all");
-  const [filterMission, setFilterMission] = useState<string>("all");
+  const [filterFlight, setFilterFlight] = useState<string>("all");
   const [showCompleted, setShowCompleted] = useState(false);
 
   const columns = getColumns();
@@ -54,14 +54,14 @@ export function IssueBoard() {
       if (filterPriority !== "all" && issue.priority !== filterPriority) return false;
       // Label filter
       if (filterLabel !== "all" && !issue.labels.includes(filterLabel)) return false;
-      // Mission filter
-      if (filterMission === "unassigned" && issue.missionId !== null) return false;
-      if (filterMission !== "all" && filterMission !== "unassigned" && issue.missionId !== filterMission) return false;
+      // Flight filter
+      if (filterFlight === "unassigned" && issue.flightId !== null) return false;
+      if (filterFlight !== "all" && filterFlight !== "unassigned" && issue.flightId !== filterFlight) return false;
       // Show completed
       if (!showCompleted && issue.status === "done") return false;
       return true;
     });
-  }, [issues, searchQuery, filterEpic, filterPriority, filterLabel, filterMission, showCompleted]);
+  }, [issues, searchQuery, filterEpic, filterPriority, filterLabel, filterFlight, showCompleted]);
 
   // Stats
   const activeCount = issues.filter((i) => i.status !== "done").length;
@@ -159,16 +159,16 @@ export function IssueBoard() {
             ))}
           </select>
 
-          {/* Mission filter */}
+          {/* Flight filter */}
           <select
-            value={filterMission}
-            onChange={(e) => setFilterMission(e.target.value)}
+            value={filterFlight}
+            onChange={(e) => setFilterFlight(e.target.value)}
             className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-[11px] text-text-secondary focus:outline-none focus:border-accent-green"
           >
-            <option value="all">All missions</option>
+            <option value="all">All flights</option>
             <option value="unassigned">Unassigned</option>
-            {missions.map((m) => (
-              <option key={m.id} value={m.id}>{m.title}</option>
+            {flights.map((f) => (
+              <option key={f.id} value={f.id}>{f.title}</option>
             ))}
           </select>
 

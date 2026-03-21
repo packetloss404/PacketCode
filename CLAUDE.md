@@ -28,17 +28,17 @@ src/
     quality/CodeQualityModal.tsx   # Code quality analysis modal
     session/                       # TerminalPane, NewSessionModal, ClaudeStatusBar, CodexStatusBar
     ui/                            # Button, Dropdown, ErrorBoundary
-    views/                         # GitHubView, MemoryView, ToolsView, VibeArchitectView, McpHubView, ScaffoldView, DeployView, MissionsView, MissionControlView, etc.
+    views/                         # GitHubView, MemoryView, ToolsView, VibeArchitectView, McpHubView, ScaffoldView, DeployView, FlightsView, FlightDeckView, etc.
   hooks/                           # useGitInfo, useStatusLine, useCodexStatusLine, shared poller hooks
   lib/
     tauri.ts                       # All Tauri invoke wrappers
     time.ts                        # Shared time formatting utilities
-    mission-colors.ts              # Shared mission/issue color and label constants
+    flight-colors.ts               # Shared flight/issue color and label constants
     colors.ts                      # Label and priority color helpers
   stores/                          # Zustand stores (appStore, layoutStore, issueStore, mcpStore, scaffoldStore, deployStore, etc.)
-    missionStore.ts                # Mission CRUD, status rollup, issue/session linking
+    flightStore.ts                 # Flight CRUD, status rollup, issue/session linking
   types/                           # TypeScript interfaces
-    mission.ts                     # Mission, MissionStatus, MissionPriority types
+    flight.ts                      # Flight, FlightStatus, FlightPriority types
 
 src-tauri/
   src/
@@ -74,11 +74,11 @@ src-tauri/
 - **CLI commands** — PTY session startup resolves `.cmd` wrappers on Windows (e.g., `claude.cmd`, `codex.cmd`)
 - **Modules** — MCP Hub (integration), Scaffold (utility), Vibe Architect (ai), Ideation (analysis); registered in `src/modules/registry.ts`
 - **Deploy view** — core view (`"deploy"` in `CoreView`), not a module; toolbar button with Rocket icon
-- **Missions** are the top-level work organizer above issues and sessions; `missionStore.ts` manages them
-- **Mission views** — `"missions"` and `"mission_control"` are core views in `appStore.ts`
-- **Mission ↔ Issue linkage** — always call both `missionStore.addIssueToMission` and `issueStore.assignToMission` to keep bidirectional references in sync
-- **Session launches** — use `packetcode:issue-prompt` custom event to inject prompts into PTY sessions (same pattern for both issues and missions)
-- **Shared constants** — mission status/priority colors in `src/lib/mission-colors.ts`, time formatting in `src/lib/time.ts`
+- **Flights** are the top-level work organizer above issues and sessions; `flightStore.ts` manages them
+- **Flight views** — `"flights"` and `"flight_deck"` are core views in `appStore.ts`
+- **Flight ↔ Issue linkage** — always call both `flightStore.addIssueToFlight` and `issueStore.assignToFlight` to keep bidirectional references in sync
+- **Session launches** — use `packetcode:issue-prompt` custom event to inject prompts into PTY sessions (same pattern for both issues and flights)
+- **Shared constants** — flight status/priority colors in `src/lib/flight-colors.ts`, time formatting in `src/lib/time.ts`
 
 ## Build & Run
 

@@ -12,8 +12,8 @@ import { MemoryView } from "@/components/views/MemoryView";
 import { AnalyticsView } from "@/components/views/AnalyticsView";
 import { DeployView } from "@/components/views/DeployView";
 import { CostDashboardView } from "@/components/views/CostDashboardView";
-import { MissionsView } from "@/components/views/MissionsView";
-import { MissionControlView } from "@/components/views/MissionControlView";
+import { FlightsView } from "@/components/views/FlightsView";
+import { FlightDeckView } from "@/components/views/FlightDeckView";
 import { WelcomeScreen } from "@/components/views/WelcomeScreen";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import { FileExplorer } from "@/components/explorer/FileExplorer";
@@ -224,10 +224,10 @@ function OtherViewContent({ activeView }: { activeView: AppView }) {
       return null; // rendered above
     case "issues":
       return <IssueBoard />;
-    case "missions":
-      return <MissionsView />;
-    case "mission_control":
-      return <MissionControlView />;
+    case "flights":
+      return <FlightsView />;
+    case "flight_deck":
+      return <FlightDeckView />;
     case "history":
       return <HistoryView />;
     case "tools":

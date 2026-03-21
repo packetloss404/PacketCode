@@ -1,7 +1,7 @@
-import type { MissionStatus, MissionPriority } from "@/types/mission";
+import type { FlightStatus, FlightPriority } from "@/types/flight";
 import type { IssueStatus } from "@/stores/issueStore";
 
-export const MISSION_STATUS_CONFIG: Record<MissionStatus, { dot: string; bg: string; text: string; label: string }> = {
+export const FLIGHT_STATUS_CONFIG: Record<FlightStatus, { dot: string; bg: string; text: string; label: string }> = {
   draft: { dot: "bg-text-muted", bg: "bg-text-muted/10", text: "text-text-muted", label: "Draft" },
   active: { dot: "bg-accent-blue", bg: "bg-accent-blue/10", text: "text-accent-blue", label: "Active" },
   blocked: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red", label: "Blocked" },
@@ -10,7 +10,7 @@ export const MISSION_STATUS_CONFIG: Record<MissionStatus, { dot: string; bg: str
   failed: { dot: "bg-accent-red", bg: "bg-accent-red/10", text: "text-accent-red", label: "Failed" },
 };
 
-export const MISSION_PRIORITY_COLORS: Record<MissionPriority, string> = {
+export const FLIGHT_PRIORITY_COLORS: Record<FlightPriority, string> = {
   critical: "text-accent-red",
   high: "text-accent-amber",
   medium: "text-accent-blue",

@@ -291,6 +291,9 @@ export function TerminalPane({
       setCurrentSessionId(sessionId);
       setAlive(true);
 
+      // Propagate sessionId to the layout store so other views can find it
+      useLayoutStore.getState().setPaneSession(paneId, sessionId);
+
       // Update tab with PTY session ID and set to running
       useTabStore.getState().updateTabStatus(tabId, "running");
       // Store the ptySessionId on the tab

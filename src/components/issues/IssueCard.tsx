@@ -1,6 +1,6 @@
 import { Trash2, Link, CheckSquare, Target } from "lucide-react";
 import { useIssueStore, type Issue } from "@/stores/issueStore";
-import { useMissionStore } from "@/stores/missionStore";
+import { useFlightStore } from "@/stores/flightStore";
 import { getLabelColor } from "@/lib/colors";
 import { relativeTime } from "@/lib/time";
 
@@ -13,8 +13,8 @@ interface IssueCardProps {
 
 export function IssueCard({ issue, onDragStart, onClick, isDragging }: IssueCardProps) {
   const deleteIssue = useIssueStore((s) => s.deleteIssue);
-  const getMissionForIssue = useMissionStore((s) => s.getMissionForIssue);
-  const mission = getMissionForIssue(issue.id);
+  const getFlightForIssue = useFlightStore((s) => s.getFlightForIssue);
+  const flight = getFlightForIssue(issue.id);
 
   const timeAgo = relativeTime(issue.updatedAt);
   const checkedCount = issue.acceptanceCriteria.filter((c) => c.checked).length;
@@ -95,10 +95,10 @@ export function IssueCard({ issue, onDragStart, onClick, isDragging }: IssueCard
               linked
             </span>
           )}
-          {mission && (
-            <span className="flex items-center gap-0.5 text-[9px] text-accent-green truncate max-w-[80px]" title={mission.title}>
+          {flight && (
+            <span className="flex items-center gap-0.5 text-[9px] text-accent-green truncate max-w-[80px]" title={flight.title}>
               <Target size={8} />
-              {mission.title}
+              {flight.title}
             </span>
           )}
           {totalCriteria > 0 && (
