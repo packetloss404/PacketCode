@@ -2,23 +2,23 @@
 
 **A local-first desktop command center for orchestrating AI software work.**
 
-PacketCode is a native desktop IDE built on Tauri v2 that unifies Claude Code and OpenAI Codex CLI into a multi-pane development environment with mission planning, issue tracking, session management, GitHub integration, a persistent memory layer, and a deploy pipeline. It's not a wrapper — it's the cockpit.
+PacketCode is a native desktop IDE built on Tauri v2 that unifies Claude Code and OpenAI Codex CLI into a multi-pane development environment with flight planning, issue tracking, session management, GitHub integration, a persistent memory layer, and a deploy pipeline. It's not a wrapper — it's the cockpit.
 
 ---
 
 ## Features
 
-### Missions & Mission Control *(NEW)*
+### Flights & Flight Deck *(NEW)*
 
 Plan, track, and supervise AI-driven work at a higher level than individual sessions or tickets.
 
-- **Planning surface** — create, browse, search, and edit missions from a dedicated view with status and priority filters
-- **Issue linking** — assign issues to missions; status automatically rolls up from linked issues (draft → active → blocked → done)
-- **Session launch** — start Claude or Codex sessions directly from a mission with context-rich prompts that include the objective, priority, and all linked issue details with acceptance criteria
-- **Mission Control** — fleet-style supervision dashboard with a status strip showing mission counts by state, an attention queue that surfaces blocked and needs-human missions, and an active missions grid with progress tracking
-- **Board integration** — mission badges on issue cards, mission filter on the kanban board, mission assignment from issue detail and issue creation views
-- **Inline editing** — edit mission title, objective, status, and priority directly in the detail panel
-- **Session auto-linking** — sessions launched from a mission are automatically linked back for traceability
+- **Planning surface** — create, browse, search, and edit flights from a dedicated view with status and priority filters
+- **Issue linking** — assign issues to flights; status automatically rolls up from linked issues (draft → active → blocked → done)
+- **Session launch** — start Claude or Codex sessions directly from a flight with context-rich prompts that include the objective, priority, and all linked issue details with acceptance criteria
+- **Flight Deck** — fleet-style supervision dashboard with a status strip showing flight counts by state, an attention queue that surfaces blocked and needs-human flights, and an active flights grid with progress tracking
+- **Board integration** — flight badges on issue cards, flight filter on the kanban board, flight assignment from issue detail and issue creation views
+- **Inline editing** — edit flight title, objective, status, and priority directly in the detail panel
+- **Session auto-linking** — sessions launched from a flight are automatically linked back for traceability
 
 ### Multi-Pane AI Sessions
 
@@ -170,8 +170,8 @@ PacketCode/
       session/                     # TerminalPane, NewSessionModal, status bars
       ui/                          # Button, Dropdown, ErrorBoundary
       views/
-        MissionsView.tsx           # Mission planning surface
-        MissionControlView.tsx     # Fleet supervision dashboard
+        FlightsView.tsx            # Flight planning surface
+        FlightDeckView.tsx         # Fleet supervision dashboard
         GitHubView.tsx             # GitHub integration
         MemoryView.tsx             # Memory layer
         ToolsView.tsx              # AI tools hub
@@ -182,18 +182,18 @@ PacketCode/
     hooks/                         # useGitInfo, useStatusLine, useCodexStatusLine
     lib/
       tauri.ts                     # All Tauri invoke wrappers
-      mission-colors.ts            # Mission/issue status color config
+      flight-colors.ts             # Flight/issue status color config
       time.ts                      # Relative time formatting
     stores/
       appStore.ts                  # View routing, app state
       layoutStore.ts               # Pane layout
       issueStore.ts                # Kanban issues
-      missionStore.ts              # Mission state and operations
+      flightStore.ts               # Flight state and operations
       mcpStore.ts                  # MCP server config
       scaffoldStore.ts             # Scaffolding state
       deployStore.ts               # Deploy pipeline state
     types/
-      mission.ts                   # Mission, MissionStatus, MissionPriority
+      flight.ts                    # Flight, FlightStatus, FlightPriority
     modules/
       registry.ts                  # Module registration
 
