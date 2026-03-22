@@ -1,1230 +1,997 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PacketCode — AI-Powered Desktop IDE</title>
-  <meta name="description" content="A custom desktop IDE that wraps Claude Code and Codex CLI into a unified multi-pane workspace with agent profiles, GitHub integration, and a persistent memory layer." />
-  <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PacketCode | Open-Source AI Desktop IDE</title>
+<meta name="description" content="PacketCode is a 100% open-source desktop IDE that wraps Claude Code and Codex CLI into one multi-pane workspace with autonomous Flight Deck orchestration, GitHub integration, and deploy tools." />
+<meta property="og:title" content="PacketCode — One cockpit. Every AI agent." />
+<meta property="og:description" content="Open-source AI desktop IDE with Flight Deck autonomous orchestration, multi-pane sessions, and deploy pipeline." />
+<meta property="og:image" content="https://packetcode.app/screenshot.png" />
+<meta property="og:url" content="https://packetcode.app" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="canonical" href="https://packetcode.app" />
+<link rel="icon" type="image/png" href="favicon.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+/* ===== RESET & BASE ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#0d1117;--bg-secondary:#161b22;--bg-tertiary:#1c2333;--bg-elevated:#21283b;
+  --border:#30363d;--text-primary:#e6edf3;--text-secondary:#8b949e;--text-muted:#484f58;
+  --green:#3fb950;--neon:#00ff41;--blue:#58a6ff;--purple:#bc8cff;--amber:#d29922;--red:#f85149;--cyan:#39d2c0;
+  --font-sans:'Sora',system-ui,sans-serif;--font-mono:'JetBrains Mono',monospace;
+  --nav-h:64px;
+}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:var(--font-sans);background:var(--bg-primary);color:var(--text-primary);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+ul{list-style:none}
+section{position:relative}
 
-    :root {
-      --bg-primary: #0d1117;
-      --bg-secondary: #161b22;
-      --bg-tertiary: #1c2333;
-      --bg-elevated: #21283b;
-      --border: #30363d;
-      --text-primary: #e6edf3;
-      --text-secondary: #8b949e;
-      --text-muted: #484f58;
-      --accent-green: #3fb950;
-      --accent-blue: #58a6ff;
-      --accent-purple: #bc8cff;
-      --accent-amber: #d29922;
-      --accent-red: #f85149;
-      --accent-cyan: #39d2c0;
-    }
+/* ===== CANVAS ===== */
+#particles-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
 
-    html { scroll-behavior: smooth; }
+/* ===== AURORA ===== */
+.aurora{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden}
+.aurora::before,.aurora::after,.aurora .aurora-layer{content:'';position:absolute;border-radius:50%;filter:blur(120px);animation:aurora-drift 20s ease-in-out infinite alternate}
+.aurora::before{width:800px;height:800px;top:-20%;left:-10%;background:radial-gradient(circle,rgba(63,185,80,0.07) 0%,transparent 70%)}
+.aurora::after{width:600px;height:600px;bottom:-10%;right:-5%;background:radial-gradient(circle,rgba(57,210,192,0.05) 0%,transparent 70%);animation-delay:-7s;animation-duration:25s}
+.aurora .aurora-layer{width:700px;height:700px;top:30%;left:40%;background:radial-gradient(circle,rgba(88,166,255,0.04) 0%,transparent 70%);animation-delay:-13s;animation-duration:22s}
+@keyframes aurora-drift{0%{transform:translate(0,0) scale(1)}33%{transform:translate(60px,-40px) scale(1.1)}66%{transform:translate(-40px,50px) scale(0.95)}100%{transform:translate(30px,-20px) scale(1.05)}}
 
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
+.grid-bg{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(63,185,80,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(63,185,80,0.03) 1px,transparent 1px);
+  background-size:64px 64px}
 
-    /* ─── Scrollbar ─── */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg-primary); }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* ===== LAYOUT ===== */
+.container{max-width:1200px;margin:0 auto;padding:0 24px;position:relative;z-index:1}
 
-    /* ─── Utility ─── */
-    .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    .gradient-text {
-      background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .gradient-text-purple {
-      background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .gradient-text-amber {
-      background: linear-gradient(135deg, var(--accent-amber), var(--accent-red));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
+/* ===== NAV ===== */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--nav-h);display:flex;align-items:center;
+  background:rgba(13,17,23,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(48,54,61,0.5);transition:all 0.3s ease}
+nav.scrolled{height:52px;background:rgba(13,17,23,0.95);box-shadow:0 4px 30px rgba(0,0,0,0.3)}
+nav .container{display:flex;align-items:center;justify-content:space-between;width:100%}
+.nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.1rem;letter-spacing:-0.02em}
+.nav-brand img{width:32px;height:32px;border-radius:8px}
+.nav-links{display:flex;align-items:center;gap:32px}
+.nav-links a{font-size:0.85rem;color:var(--text-secondary);transition:color 0.2s;font-weight:500}
+.nav-links a:hover{color:var(--text-primary)}
+.nav-actions{display:flex;align-items:center;gap:12px}
+.btn-github{display:flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;font-size:0.8rem;font-weight:500;transition:all 0.2s;color:var(--text-secondary)}
+.btn-github:hover{border-color:var(--text-muted);color:var(--text-primary)}
+.btn-github svg{width:16px;height:16px}
+.btn-download-nav{padding:7px 18px;border-radius:999px;font-size:0.8rem;font-weight:600;
+  background:linear-gradient(135deg,var(--green),#2ea043);color:#fff;transition:all 0.25s;box-shadow:0 0 20px rgba(63,185,80,0.15)}
+.btn-download-nav:hover{box-shadow:0 0 30px rgba(63,185,80,0.3);transform:translateY(-1px)}
+.hamburger{display:none;flex-direction:column;gap:5px;padding:4px}
+.hamburger span{display:block;width:22px;height:2px;background:var(--text-secondary);border-radius:2px;transition:all 0.3s}
 
-    /* ─── Animated background ─── */
-    .bg-grid {
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      background-image:
-        linear-gradient(rgba(63, 185, 80, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(63, 185, 80, 0.03) 1px, transparent 1px);
-      background-size: 64px 64px;
-    }
-    .bg-glow {
-      position: fixed;
-      top: -40%;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 800px;
-      height: 800px;
-      background: radial-gradient(circle, rgba(63, 185, 80, 0.08) 0%, transparent 70%);
-      z-index: -1;
-      pointer-events: none;
-    }
+/* ===== HERO ===== */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:calc(var(--nav-h) + 40px) 24px 80px;position:relative}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border:1px solid var(--border);border-radius:999px;font-size:0.78rem;font-weight:500;color:var(--text-secondary);margin-bottom:28px;background:rgba(22,27,34,0.6);backdrop-filter:blur(10px)}
+.hero-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse-dot 2s ease-in-out infinite;box-shadow:0 0 8px var(--green)}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.6;transform:scale(0.85)}}
+.hero h1{font-size:clamp(2.5rem,7vw,5rem);font-weight:800;letter-spacing:-0.04em;line-height:1.08;margin-bottom:24px}
+.gradient-text{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-lead{font-size:clamp(1rem,2vw,1.2rem);color:var(--text-secondary);max-width:640px;margin:0 auto 12px;line-height:1.7}
+.typed-line{font-size:clamp(0.95rem,1.8vw,1.1rem);color:var(--text-secondary);margin-bottom:36px;min-height:1.8em}
+.typed-cursor{display:inline-block;width:2px;height:1.1em;background:var(--green);vertical-align:text-bottom;margin-left:2px;animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+.hero-buttons{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:32px}
+.btn-primary{padding:14px 32px;border-radius:999px;font-size:0.95rem;font-weight:600;
+  background:linear-gradient(135deg,var(--green),#2ea043);color:#fff;transition:all 0.3s;
+  box-shadow:0 0 30px rgba(63,185,80,0.2),0 4px 20px rgba(0,0,0,0.3)}
+.btn-primary:hover{box-shadow:0 0 50px rgba(63,185,80,0.35),0 8px 30px rgba(0,0,0,0.4);transform:translateY(-2px)}
+.btn-outline{padding:14px 32px;border-radius:999px;font-size:0.95rem;font-weight:600;
+  border:1px solid var(--border);color:var(--text-primary);transition:all 0.3s}
+.btn-outline:hover{border-color:var(--text-muted);background:rgba(255,255,255,0.03);transform:translateY(-2px)}
+.tag-chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:48px}
+.tag-chip{padding:4px 12px;border:1px solid var(--border);border-radius:999px;font-family:var(--font-mono);font-size:0.7rem;color:var(--text-muted);font-weight:500}
+.hero-screenshot{position:relative;max-width:960px;width:100%;margin:0 auto}
+.window-frame{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);box-shadow:0 25px 80px rgba(0,0,0,0.5)}
+.window-titlebar{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--bg-tertiary);border-bottom:1px solid var(--border)}
+.window-dot{width:12px;height:12px;border-radius:50%}
+.window-dot.r{background:#f85149}.window-dot.y{background:#d29922}.window-dot.g{background:#3fb950}
+.window-title{margin-left:8px;font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)}
+.window-frame img{width:100%;display:block}
+.hero-glow{position:absolute;top:50%;left:50%;width:700px;height:700px;transform:translate(-50%,-50%);
+  background:radial-gradient(circle,rgba(63,185,80,0.08) 0%,transparent 65%);pointer-events:none;z-index:-1}
 
-    /* ─── Nav ─── */
-    nav {
-      position: fixed;
-      top: 0;
-      width: 100%;
-      z-index: 100;
-      backdrop-filter: blur(20px);
-      background: rgba(13, 17, 23, 0.85);
-      border-bottom: 1px solid var(--border);
-    }
-    nav .inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 60px;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
-    nav .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 18px;
-      text-decoration: none;
-      color: var(--text-primary);
-    }
-    nav .logo-icon {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 800;
-      color: var(--bg-primary);
-    }
-    nav .links { display: flex; gap: 32px; align-items: center; }
-    nav .links a {
-      font-size: 14px;
-      color: var(--text-secondary);
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-    nav .links a:hover { color: var(--text-primary); }
-    nav .cta {
-      padding: 8px 20px;
-      background: var(--accent-green);
-      color: var(--bg-primary);
-      font-weight: 600;
-      font-size: 13px;
-      border-radius: 8px;
-      text-decoration: none;
-      transition: opacity 0.2s;
-    }
-    nav .cta:hover { opacity: 0.9; color: var(--bg-primary); }
+/* ===== REVEAL SYSTEM ===== */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity 0.7s ease,transform 0.7s ease;transition-delay:var(--delay,0s)}
+.reveal.show{opacity:1;transform:translateY(0)}
 
-    /* ─── Hero ─── */
-    .hero {
-      padding: 160px 0 100px;
-      text-align: center;
-      position: relative;
-    }
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 16px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 100px;
-      font-size: 12px;
-      color: var(--accent-green);
-      margin-bottom: 32px;
-      font-weight: 500;
-    }
-    .hero-badge .dot {
-      width: 6px;
-      height: 6px;
-      background: var(--accent-green);
-      border-radius: 50%;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    .hero h1 {
-      font-size: clamp(40px, 6vw, 72px);
-      font-weight: 900;
-      line-height: 1.05;
-      letter-spacing: -0.03em;
-      margin-bottom: 24px;
-    }
-    .hero p {
-      font-size: 18px;
-      color: var(--text-secondary);
-      max-width: 640px;
-      margin: 0 auto 48px;
-      line-height: 1.7;
-    }
-    .hero-buttons {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 32px;
-      background: linear-gradient(135deg, var(--accent-green), #2ea043);
-      color: #fff;
-      font-weight: 600;
-      font-size: 15px;
-      border-radius: 12px;
-      text-decoration: none;
-      transition: transform 0.2s, box-shadow 0.2s;
-      box-shadow: 0 0 30px rgba(63, 185, 80, 0.2);
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 40px rgba(63, 185, 80, 0.35);
-    }
-    .btn-secondary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 32px;
-      background: var(--bg-secondary);
-      color: var(--text-primary);
-      font-weight: 600;
-      font-size: 15px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      text-decoration: none;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .btn-secondary:hover {
-      border-color: var(--text-muted);
-      background: var(--bg-tertiary);
-    }
+/* ===== SECTION HEADERS ===== */
+.section-header{text-align:center;margin-bottom:56px}
+.section-header h2{font-size:clamp(1.8rem,4vw,2.8rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:12px}
+.section-header p{color:var(--text-secondary);font-size:clamp(0.95rem,1.5vw,1.1rem);max-width:560px;margin:0 auto}
 
-    /* ─── Terminal mockup ─── */
-    .terminal-mockup {
-      max-width: 900px;
-      margin: 80px auto 0;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow:
-        0 0 0 1px rgba(63, 185, 80, 0.05),
-        0 25px 80px rgba(0, 0, 0, 0.5),
-        0 0 120px rgba(63, 185, 80, 0.06);
-    }
+/* ===== STATS ===== */
+.stats{padding:40px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:0 auto;max-width:1200px}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;text-align:center}
+.stat-number{font-size:clamp(2rem,4vw,3.2rem);font-weight:800;letter-spacing:-0.03em;line-height:1.1;margin-bottom:4px}
+.stat-number.green{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-number.purple{background:linear-gradient(135deg,var(--purple),#d2a8ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-number.blue{background:linear-gradient(135deg,var(--blue),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-number.amber{background:linear-gradient(135deg,var(--amber),#e3b341);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-label{font-size:0.85rem;color:var(--text-secondary);font-weight:500}
 
-    /* ─── Section ─── */
-    section { padding: 120px 0; }
-    .section-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 12px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 16px;
-    }
-    .section-title {
-      font-size: clamp(28px, 4vw, 44px);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-      line-height: 1.15;
-    }
-    .section-desc {
-      font-size: 17px;
-      color: var(--text-secondary);
-      max-width: 600px;
-      line-height: 1.7;
-    }
+/* ===== FEATURES ===== */
+.features{padding:100px 0}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.feature-card{position:relative;padding:32px 28px;background:rgba(22,27,34,0.6);border:1px solid var(--border);border-radius:20px;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.35s ease;overflow:hidden}
+.feature-card:hover{transform:translateY(-4px);border-color:var(--text-muted);box-shadow:0 12px 40px rgba(0,0,0,0.25)}
+.feature-card.wide{grid-column:span 2}
+.feature-card.wide::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,var(--cyan),var(--blue));border-radius:20px 20px 0 0}
+.feature-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:18px;flex-shrink:0}
+.feature-icon.green{background:rgba(63,185,80,0.12);color:var(--green)}
+.feature-icon.purple{background:rgba(188,140,255,0.12);color:var(--purple)}
+.feature-icon.cyan{background:rgba(57,210,192,0.12);color:var(--cyan)}
+.feature-icon.amber{background:rgba(210,153,34,0.12);color:var(--amber)}
+.feature-icon.blue{background:rgba(88,166,255,0.12);color:var(--blue)}
+.feature-icon.red{background:rgba(248,81,73,0.12);color:var(--red)}
+.feature-icon svg{width:24px;height:24px}
+.feature-card h3{font-size:1.05rem;font-weight:700;margin-bottom:8px;letter-spacing:-0.01em}
+.feature-card p{font-size:0.85rem;color:var(--text-secondary);line-height:1.65}
 
-    /* ─── Feature grid ─── */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      margin-top: 64px;
-    }
-    .feature-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 32px;
-      transition: border-color 0.3s, transform 0.2s;
-      position: relative;
-      overflow: hidden;
-    }
-    .feature-card:hover {
-      border-color: var(--text-muted);
-      transform: translateY(-4px);
-    }
-    .feature-card .icon-wrap {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 20px;
-      font-size: 22px;
-    }
-    .feature-card h3 {
-      font-size: 17px;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-    .feature-card p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.65;
-    }
-    .feature-card.large {
-      grid-column: span 2;
-    }
+/* ===== FLIGHT DECK SPOTLIGHT ===== */
+.flight-deck{padding:100px 0;position:relative}
+.flight-deck::before{content:'';position:absolute;top:50%;left:50%;width:900px;height:900px;transform:translate(-50%,-50%);
+  background:radial-gradient(circle,rgba(57,210,192,0.06) 0%,transparent 60%);pointer-events:none}
+.flight-deck .section-header{margin-bottom:48px}
+.flight-deck-body{font-size:0.95rem;color:var(--text-secondary);max-width:680px;margin:0 auto 56px;text-align:center;line-height:1.75}
 
-    /* icon wrap colors */
-    .icon-green { background: rgba(63, 185, 80, 0.12); color: var(--accent-green); }
-    .icon-blue { background: rgba(88, 166, 255, 0.12); color: var(--accent-blue); }
-    .icon-purple { background: rgba(188, 140, 255, 0.12); color: var(--accent-purple); }
-    .icon-amber { background: rgba(210, 153, 34, 0.12); color: var(--accent-amber); }
-    .icon-red { background: rgba(248, 81, 73, 0.12); color: var(--accent-red); }
-    .icon-cyan { background: rgba(57, 210, 192, 0.12); color: var(--accent-cyan); }
+.pipeline{display:flex;align-items:flex-start;justify-content:center;gap:0;margin-bottom:64px;position:relative}
+.pipeline-step{flex:1;max-width:220px;text-align:center;position:relative;padding:0 16px}
+.pipeline-num{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:1.1rem;margin:0 auto 14px;
+  background:linear-gradient(135deg,var(--cyan),var(--blue));color:var(--bg-primary)}
+.pipeline-step h4{font-size:0.95rem;font-weight:700;margin-bottom:6px}
+.pipeline-step p{font-size:0.78rem;color:var(--text-muted);line-height:1.6}
+.pipeline-connector{width:60px;height:2px;margin-top:24px;flex-shrink:0;position:relative;overflow:hidden}
+.pipeline-connector::after{content:'';position:absolute;top:0;left:0;width:100%;height:100%;
+  background:repeating-linear-gradient(90deg,rgba(57,210,192,0.3) 0,rgba(57,210,192,0.3) 6px,transparent 6px,transparent 12px);
+  background-size:200% 100%;animation:march 1s linear infinite}
+@keyframes march{to{background-position:-24px 0}}
 
-    /* ─── Big features (alternating) ─── */
-    .big-feature {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 80px;
-      align-items: center;
-      padding: 80px 0;
-    }
-    .big-feature.reverse { direction: rtl; }
-    .big-feature.reverse > * { direction: ltr; }
-    .big-feature-text h3 {
-      font-size: clamp(24px, 3vw, 36px);
-      font-weight: 800;
-      margin-bottom: 16px;
-      letter-spacing: -0.02em;
-    }
-    .big-feature-text p {
-      font-size: 15px;
-      color: var(--text-secondary);
-      line-height: 1.7;
-      margin-bottom: 24px;
-    }
-    .big-feature-text ul {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .big-feature-text ul li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 14px;
-      color: var(--text-secondary);
-    }
-    .big-feature-text ul li .check {
-      color: var(--accent-green);
-      font-weight: 700;
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-    .big-feature-visual {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      overflow: hidden;
-    }
+.fd-mockup{max-width:700px;margin:0 auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.fd-status-strip{display:flex;gap:20px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg-tertiary)}
+.fd-status{display:flex;align-items:center;gap:6px;font-size:0.75rem;font-weight:500}
+.fd-dot{width:8px;height:8px;border-radius:50%}
+.fd-dot.active{background:var(--blue)}.fd-dot.blocked{background:var(--red)}.fd-dot.human{background:var(--amber)}
+.fd-cards{padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.fd-card{padding:14px 18px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:10px}
+.fd-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.fd-card-title{font-size:0.82rem;font-weight:600}
+.fd-card-badge{font-size:0.65rem;font-weight:600;padding:2px 8px;border-radius:999px}
+.fd-card-badge.active{background:rgba(88,166,255,0.15);color:var(--blue)}
+.fd-card-badge.blocked{background:rgba(248,81,73,0.15);color:var(--red)}
+.fd-card-meta{font-size:0.7rem;color:var(--text-muted);display:flex;gap:14px}
 
-    /* ─── Profile cards ─── */
-    .profiles-row {
-      display: flex;
-      gap: 12px;
-      margin-top: 32px;
-      flex-wrap: wrap;
-    }
-    .profile-chip {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 18px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 600;
-      transition: border-color 0.2s;
-    }
-    .profile-chip:hover { border-color: var(--text-muted); }
-    .profile-chip .emoji { font-size: 16px; }
+/* ===== MODULE SYSTEM ===== */
+.modules{padding:100px 0}
+.modules-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.module-card{position:relative;padding:28px 24px 28px 28px;background:rgba(22,27,34,0.5);border:1px solid var(--border);border-radius:16px;transition:all 0.3s}
+.module-card:hover{transform:translateY(-3px);border-color:var(--text-muted)}
+.module-card::before{content:'';position:absolute;left:0;top:20px;bottom:20px;width:3px;border-radius:3px}
+.module-card.purple-border::before{background:var(--purple)}
+.module-card.amber-border::before{background:var(--amber)}
+.module-card.blue-border::before{background:var(--blue)}
+.module-card.green-border::before{background:var(--green)}
+.module-tag{position:absolute;top:16px;right:16px;font-family:var(--font-mono);font-size:0.6rem;font-weight:600;
+  text-transform:uppercase;padding:3px 8px;border:1px solid var(--border);border-radius:999px;color:var(--text-muted);letter-spacing:0.05em}
+.module-card h3{font-size:0.95rem;font-weight:700;margin-bottom:8px}
+.module-card p{font-size:0.82rem;color:var(--text-secondary);line-height:1.65;padding-right:60px}
 
-    /* ─── Stats ─── */
-    .stats-bar {
-      display: flex;
-      justify-content: center;
-      gap: 64px;
-      padding: 80px 0;
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .stat { text-align: center; }
-    .stat .num {
-      font-size: 48px;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-    }
-    .stat .label {
-      font-size: 14px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-    }
+/* ===== AGENT PROFILES ===== */
+.profiles{padding:100px 0}
+.profiles-row{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding-bottom:8px}
+.profiles-row::-webkit-scrollbar{height:4px}
+.profiles-row::-webkit-scrollbar-track{background:var(--bg-secondary);border-radius:4px}
+.profiles-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+.profile-card{min-width:210px;flex:1;padding:24px 20px;background:rgba(22,27,34,0.5);border:1px solid var(--border);
+  border-radius:16px;scroll-snap-align:start;transition:all 0.3s;position:relative;overflow:hidden}
+.profile-card:hover{transform:translateY(-3px);border-color:var(--text-muted)}
+.profile-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px}
+.profile-card.green-top::before{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.profile-card.amber-top::before{background:linear-gradient(90deg,var(--amber),#e3b341)}
+.profile-card.blue-top::before{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+.profile-card.red-top::before{background:linear-gradient(90deg,var(--red),#ff6e6e)}
+.profile-card.purple-top::before{background:linear-gradient(90deg,var(--purple),#d2a8ff)}
+.profile-icon{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.profile-icon.green-bg{background:rgba(63,185,80,0.12);color:var(--green)}
+.profile-icon.amber-bg{background:rgba(210,153,34,0.12);color:var(--amber)}
+.profile-icon.blue-bg{background:rgba(88,166,255,0.12);color:var(--blue)}
+.profile-icon.red-bg{background:rgba(248,81,73,0.12);color:var(--red)}
+.profile-icon.purple-bg{background:rgba(188,140,255,0.12);color:var(--purple)}
+.profile-icon svg{width:20px;height:20px}
+.profile-card h3{font-size:0.88rem;font-weight:700;margin-bottom:4px}
+.profile-card .profile-desc{font-size:0.78rem;color:var(--text-secondary);margin-bottom:12px;line-height:1.5}
+.profile-card .profile-prompt{font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);line-height:1.5;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-style:italic}
 
-    /* ─── Tech stack ─── */
-    .tech-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-top: 48px;
-    }
-    .tech-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 24px;
-      text-align: center;
-      transition: border-color 0.2s;
-    }
-    .tech-card:hover { border-color: var(--text-muted); }
-    .tech-card .tech-icon { font-size: 28px; margin-bottom: 12px; }
-    .tech-card .tech-name { font-size: 14px; font-weight: 600; }
-    .tech-card .tech-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+/* ===== MEMORY ===== */
+.memory{padding:100px 0}
+.memory-panel{max-width:700px;margin:0 auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:14px;
+  overflow:hidden;perspective:1000px;transform:rotateY(-2deg) rotateX(1deg);transition:transform 0.5s ease;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+.memory-panel:hover{transform:rotateY(0) rotateX(0)}
+.memory-section{padding:20px 24px;border-bottom:1px solid var(--border)}
+.memory-section:last-child{border-bottom:none}
+.memory-section-title{font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:14px}
+.memory-entry{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(48,54,61,0.4)}
+.memory-entry:last-child{border-bottom:none}
+.memory-file{font-family:var(--font-mono);font-size:0.78rem;color:var(--green);font-weight:500}
+.memory-desc{font-size:0.78rem;color:var(--text-secondary);flex:1;margin:0 16px}
+.memory-time{font-size:0.7rem;color:var(--text-muted);white-space:nowrap}
+.pattern-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(48,54,61,0.3)}
+.pattern-row:last-child{border-bottom:none}
+.pattern-text{font-size:0.78rem;color:var(--text-primary);flex:1}
+.pattern-tag{font-family:var(--font-mono);font-size:0.6rem;font-weight:600;padding:2px 8px;border-radius:999px;text-transform:uppercase;flex-shrink:0}
+.pattern-tag.arch{background:rgba(57,210,192,0.12);color:var(--cyan)}
+.pattern-tag.conv{background:rgba(63,185,80,0.12);color:var(--green)}
+.pattern-tag.pitfall{background:rgba(210,153,34,0.12);color:var(--amber)}
+.confidence-bar{width:60px;height:4px;background:var(--bg-elevated);border-radius:4px;overflow:hidden;flex-shrink:0}
+.confidence-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--green),var(--cyan))}
 
-    /* ─── CTA section ─── */
-    .cta-section {
-      text-align: center;
-      padding: 120px 0;
-      position: relative;
-    }
-    .cta-section::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(63, 185, 80, 0.06) 0%, transparent 70%);
-      pointer-events: none;
-    }
-    .cta-section h2 {
-      font-size: clamp(32px, 5vw, 52px);
-      font-weight: 900;
-      letter-spacing: -0.03em;
-      margin-bottom: 16px;
-    }
-    .cta-section p {
-      font-size: 17px;
-      color: var(--text-secondary);
-      margin-bottom: 40px;
-    }
+/* ===== WORKFLOW ===== */
+.workflow{padding:100px 0}
+.workflow-steps{display:flex;gap:24px;justify-content:center;align-items:flex-start;position:relative}
+.workflow-step{flex:1;max-width:320px;text-align:center;position:relative}
+.workflow-num{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:1.3rem;margin:0 auto 18px;
+  background:linear-gradient(135deg,var(--green),var(--cyan));color:var(--bg-primary)}
+.workflow-step h3{font-size:1.05rem;font-weight:700;margin-bottom:8px}
+.workflow-step p{font-size:0.82rem;color:var(--text-secondary);line-height:1.65}
+.workflow-arrow{width:48px;margin-top:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted)}
+.workflow-arrow svg{width:24px;height:24px}
 
-    /* ─── Footer ─── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 0;
-    }
-    footer .inner {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
-    footer .copy { font-size: 13px; color: var(--text-muted); }
-    footer .footer-links { display: flex; gap: 24px; }
-    footer .footer-links a {
-      font-size: 13px;
-      color: var(--text-secondary);
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-    footer .footer-links a:hover { color: var(--text-primary); }
+/* ===== DOWNLOAD ===== */
+.download{padding:100px 0}
+.download-buttons{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:40px}
+.btn-win{padding:14px 32px;border-radius:14px;font-weight:600;font-size:0.92rem;
+  background:linear-gradient(135deg,var(--green),#2ea043);color:#fff;transition:all 0.3s;
+  display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(63,185,80,0.2)}
+.btn-win:hover{box-shadow:0 8px 30px rgba(63,185,80,0.35);transform:translateY(-2px)}
+.btn-mac{padding:14px 32px;border-radius:14px;font-weight:600;font-size:0.92rem;
+  background:linear-gradient(135deg,var(--blue),var(--purple));color:#fff;transition:all 0.3s;
+  display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(88,166,255,0.15)}
+.btn-mac:hover{box-shadow:0 8px 30px rgba(88,166,255,0.3);transform:translateY(-2px)}
+.btn-linux{padding:14px 32px;border-radius:14px;font-weight:600;font-size:0.92rem;
+  border:1px solid var(--border);color:var(--text-primary);transition:all 0.3s;
+  display:flex;align-items:center;gap:8px}
+.btn-linux:hover{border-color:var(--text-muted);transform:translateY(-2px)}
+.code-block{max-width:600px;margin:0 auto;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;
+  position:relative;overflow:hidden}
+.code-block pre{padding:20px 24px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-secondary);
+  overflow-x:auto;line-height:1.7;white-space:pre}
+.btn-copy{position:absolute;top:10px;right:10px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;
+  font-size:0.7rem;color:var(--text-muted);transition:all 0.2s;display:flex;align-items:center;gap:4px;background:var(--bg-tertiary)}
+.btn-copy:hover{border-color:var(--text-muted);color:var(--text-secondary)}
+.btn-copy svg{width:14px;height:14px}
 
-    /* ─── Keyboard shortcut pills ─── */
-    .kbd-row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 24px;
-    }
-    .kbd-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-    kbd {
-      display: inline-block;
-      padding: 3px 8px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text-primary);
-    }
+/* ===== OPEN SOURCE CTA ===== */
+.oss-cta{padding:100px 0;position:relative;text-align:center}
+.oss-cta::before{content:'';position:absolute;top:50%;left:50%;width:800px;height:800px;transform:translate(-50%,-50%);
+  background:radial-gradient(circle,rgba(63,185,80,0.06) 0%,transparent 55%);pointer-events:none}
+.oss-cta .section-header{margin-bottom:24px}
+.oss-body{font-size:0.95rem;color:var(--text-secondary);max-width:580px;margin:0 auto 36px;line-height:1.75}
+.oss-buttons{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 
-    /* ─── Responsive ─── */
-    @media (max-width: 900px) {
-      .features-grid { grid-template-columns: 1fr; }
-      .feature-card.large { grid-column: span 1; }
-      .big-feature { grid-template-columns: 1fr; gap: 40px; }
-      .big-feature.reverse { direction: ltr; }
-      .tech-grid { grid-template-columns: repeat(2, 1fr); }
-      .stats-bar { gap: 32px; flex-wrap: wrap; }
-      nav .links { display: none; }
-    }
-    @media (max-width: 600px) {
-      .hero { padding: 120px 0 60px; }
-      .terminal-mockup { margin: 40px auto 0; }
-      section { padding: 80px 0; }
-      .tech-grid { grid-template-columns: 1fr 1fr; }
-    }
+/* ===== FOOTER ===== */
+footer{border-top:1px solid var(--border);padding:32px 0;position:relative;z-index:1}
+footer .container{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.footer-brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:0.9rem;color:var(--text-secondary)}
+.footer-brand img{width:24px;height:24px;border-radius:6px}
+.footer-links{display:flex;gap:24px}
+.footer-links a{font-size:0.8rem;color:var(--text-muted);transition:color 0.2s}
+.footer-links a:hover{color:var(--text-secondary)}
+.footer-domains{font-size:0.78rem;color:var(--text-muted)}
 
-    /* ─── Animations ─── */
-    .fade-in {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
-    .fade-in.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  </style>
+/* ===== FOCUS STYLES ===== */
+a:focus-visible,button:focus-visible{outline:2px solid var(--green);outline-offset:2px;border-radius:4px}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:1024px){
+  .features-grid{grid-template-columns:repeat(2,1fr)}
+  .feature-card.wide{grid-column:span 2}
+  .pipeline{flex-wrap:wrap;gap:16px}
+  .pipeline-connector{display:none}
+  .workflow-steps{flex-direction:column;align-items:center}
+  .workflow-arrow{transform:rotate(90deg);width:auto;margin:0}
+}
+@media(max-width:768px){
+  .nav-links{position:fixed;top:var(--nav-h);left:0;right:0;background:rgba(13,17,23,0.97);backdrop-filter:blur(20px);
+    flex-direction:column;padding:24px;gap:20px;border-bottom:1px solid var(--border);
+    transform:translateY(-100%);opacity:0;pointer-events:none;transition:all 0.3s}
+  .nav-links.open{transform:translateY(0);opacity:1;pointer-events:all}
+  .hamburger{display:flex}
+  .features-grid{grid-template-columns:1fr}
+  .feature-card.wide{grid-column:span 1}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .modules-grid{grid-template-columns:1fr}
+  .pipeline{flex-direction:column;align-items:center}
+  .pipeline-connector{width:2px;height:32px;margin:0}
+  .pipeline-connector::after{background:repeating-linear-gradient(180deg,rgba(57,210,192,0.3) 0,rgba(57,210,192,0.3) 6px,transparent 6px,transparent 12px)}
+  .memory-panel{transform:none}
+  .memory-panel:hover{transform:none}
+  .memory-entry{flex-direction:column;align-items:flex-start;gap:4px}
+  .memory-desc{margin:0}
+  .download-buttons{flex-direction:column;align-items:center}
+  footer .container{flex-direction:column;text-align:center}
+}
+@media(max-width:480px){
+  .hero h1{font-size:2.2rem}
+  .hero-buttons{flex-direction:column;align-items:center}
+  .btn-primary,.btn-outline{width:100%;text-align:center;justify-content:center}
+  .stats-grid{grid-template-columns:1fr 1fr;gap:16px}
+  .workflow-steps{gap:16px}
+  .profiles-row{gap:12px}
+  .profile-card{min-width:180px}
+}
+
+/* ===== REDUCED MOTION ===== */
+@media(prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none;transition:none}
+  .aurora::before,.aurora::after,.aurora .aurora-layer{animation:none}
+  .pipeline-connector::after{animation:none}
+  .hero-badge .dot{animation:none}
+  .typed-cursor{animation:none}
+  #particles-canvas{display:none}
+  *{transition-duration:0.01ms !important;animation-duration:0.01ms !important}
+}
+</style>
 </head>
 <body>
-  <div class="bg-grid"></div>
-  <div class="bg-glow"></div>
 
-  <!-- ═══════════ NAV ═══════════ -->
-  <nav>
-    <div class="inner">
-      <a href="#" class="logo">
-        <img class="logo-icon" src="icon-192.png" alt="PacketCode" />
-        PacketCode
+<!-- Particle Canvas -->
+<canvas id="particles-canvas" aria-hidden="true"></canvas>
+
+<!-- Aurora Background -->
+<div class="aurora" aria-hidden="true"><div class="aurora-layer"></div></div>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<!-- ===== NAV ===== -->
+<nav role="navigation" aria-label="Main navigation">
+  <div class="container">
+    <a href="#" class="nav-brand" aria-label="PacketCode Home">
+      <img src="icon-192.png" alt="PacketCode logo" width="32" height="32" />
+      PacketCode
+    </a>
+    <div class="nav-links" id="nav-links">
+      <a href="#features">Features</a>
+      <a href="#flight-deck">Flight Deck</a>
+      <a href="#modules">Modules</a>
+      <a href="#download">Download</a>
+    </div>
+    <div class="nav-actions">
+      <a href="https://github.com/packetloss404/PacketCode" class="btn-github" target="_blank" rel="noopener" aria-label="View on GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Star
       </a>
-      <div class="links">
-        <a href="#features">Features</a>
-        <a href="#profiles">Profiles</a>
-        <a href="#github-integration">GitHub</a>
-        <a href="#memory">Memory</a>
-        <a href="#deploy">Deploy</a>
-        <a href="#modules">Modules</a>
-        <a href="#stack">Stack</a>
-        <a href="https://github.com/packetloss404/PacketCode" class="cta">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
-          GitHub
-        </a>
-      </div>
+      <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-download-nav">Download</a>
     </div>
-  </nav>
+    <button class="hamburger" id="hamburger" aria-label="Toggle menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
 
-  <!-- ═══════════ HERO ═══════════ -->
-  <section class="hero">
-    <div class="container">
-      <div class="hero-badge">
-        <span class="dot"></span>
-        Built with Tauri v2 + React + Rust
-      </div>
-      <h1>
-        The IDE that<br />
-        <span class="gradient-text">thinks with you</span>
-      </h1>
-      <p>
-        PacketCode wraps Claude Code and Codex CLI into a native multi-pane workspace
-        with agent profiles, GitHub integration, and persistent memory — so your AI
-        sessions get smarter over time.
-      </p>
-      <div class="hero-buttons">
-        <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-primary">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          Download for Windows
-        </a>
-        <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-primary" style="background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); box-shadow: 0 0 30px rgba(88, 166, 255, 0.2);">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg>
-          Download for Mac
-        </a>
-        <a href="https://github.com/packetloss404/PacketCode" class="btn-secondary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
-          View Source
-        </a>
-      </div>
+<main>
 
-      <!-- App screenshot -->
-      <div class="terminal-mockup fade-in" style="padding: 0; overflow: hidden;">
-        <img src="screenshot.png" alt="PacketCode — Claude Code and Codex CLI running side-by-side" style="width: 100%; height: auto; display: block;" />
+<!-- ===== HERO ===== -->
+<section class="hero" id="hero">
+  <div class="hero-badge reveal">
+    <span class="dot"></span>
+    Open Source &mdash; 100% Free
+  </div>
+  <h1 class="reveal" style="--delay:0.1s">One cockpit.<br><span class="gradient-text">Every AI agent.</span><br>Ship faster.</h1>
+  <p class="hero-lead reveal" style="--delay:0.2s">PacketCode wraps Claude Code and Codex CLI into a unified multi-pane desktop IDE with autonomous Flight Deck orchestration, GitHub integration, and deploy tools.</p>
+  <div class="typed-line reveal" style="--delay:0.3s">Built to <span id="typed-target"></span><span class="typed-cursor"></span></div>
+  <div class="hero-buttons reveal" style="--delay:0.35s">
+    <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-primary">Download for Free</a>
+    <a href="https://github.com/packetloss404/PacketCode" class="btn-outline" target="_blank" rel="noopener">View Source</a>
+  </div>
+  <div class="tag-chips reveal" style="--delay:0.4s">
+    <span class="tag-chip">Tauri v2</span>
+    <span class="tag-chip">React + Rust</span>
+    <span class="tag-chip">Apache 2.0</span>
+    <span class="tag-chip">Local-First</span>
+  </div>
+  <div class="hero-screenshot reveal" style="--delay:0.5s">
+    <div class="hero-glow"></div>
+    <div class="window-frame">
+      <div class="window-titlebar">
+        <span class="window-dot r"></span>
+        <span class="window-dot y"></span>
+        <span class="window-dot g"></span>
+        <span class="window-title">PacketCode</span>
       </div>
-    </div>
-  </section>
-
-  <!-- ═══════════ STATS ═══════════ -->
-  <div class="stats-bar">
-    <div class="stat">
-      <div class="num gradient-text">14</div>
-      <div class="label">Views & Tools</div>
-    </div>
-    <div class="stat">
-      <div class="num gradient-text-purple">5</div>
-      <div class="label">Agent Profiles</div>
-    </div>
-    <div class="stat">
-      <div class="num gradient-text-amber">2</div>
-      <div class="label">AI Runtimes</div>
-    </div>
-    <div class="stat">
-      <div class="num gradient-text">80+</div>
-      <div class="label">Source Files</div>
+      <img src="screenshot.png" alt="PacketCode desktop IDE showing multi-pane AI sessions, kanban board, and Flight Deck orchestration" loading="lazy" />
     </div>
   </div>
+</section>
 
-  <!-- ═══════════ FEATURES GRID ═══════════ -->
-  <section id="features">
-    <div class="container">
-      <div class="section-label" style="color: var(--accent-green)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-        Features
+<!-- ===== STATS ===== -->
+<section class="stats reveal" id="stats">
+  <div class="container">
+    <div class="stats-grid">
+      <div>
+        <div class="stat-number green" data-target="14">0</div>
+        <div class="stat-label">Views & Tools</div>
       </div>
-      <h2 class="section-title">Everything you need.<br /><span class="gradient-text">Nothing you don't.</span></h2>
-      <p class="section-desc">
-        A full-featured IDE experience designed from the ground up for AI-first development workflows.
-      </p>
-
-      <div class="features-grid">
-        <div class="feature-card large fade-in">
-          <div class="icon-wrap icon-green">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-          </div>
-          <h3>Multi-Pane AI Sessions</h3>
-          <p>Run Claude Code and Codex CLI side-by-side in full PTY terminals with real-time status monitoring. Split, resize, and manage as many sessions as you need.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-purple">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          </div>
-          <h3>Kanban Issue Tracker</h3>
-          <p>Built-in board with drag-and-drop, priorities, labels, epics, and acceptance criteria. Link issues directly to AI sessions.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-blue">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-          </div>
-          <h3>Insights Chat</h3>
-          <p>Conversational Q&A against your full codebase. Ask about architecture, find bugs, or explore patterns.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-red">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          </div>
-          <h3>Code Quality</h3>
-          <p>On-demand quality analysis with AI-powered feedback on security, patterns, and best practices.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-green">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          </div>
-          <h3>Spec2Tick</h3>
-          <p>Paste any project spec and let Claude parse it into structured kanban tickets automatically.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-blue">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8Z"></path></svg>
-          </div>
-          <h3>MCP Server Hub</h3>
-          <p>Manage Claude Code's MCP server configs — add, edit, and toggle servers across global and project scopes.</p>
-        </div>
-
-        <div class="feature-card fade-in">
-          <div class="icon-wrap icon-green">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"></path><path d="M9 13h6"></path><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
-          </div>
-          <h3>Project Scaffolding</h3>
-          <p>New Project wizard with 6 templates — Next.js, React+Vite, FastAPI, Rust CLI, Express, and Blank.</p>
-        </div>
-
-        <div class="feature-card large fade-in">
-          <div class="icon-wrap icon-amber">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
-          </div>
-          <h3>Deploy Pipeline</h3>
-          <p>One-click deploy with live terminal output. Auto-detects configs from package.json, Vercel, Netlify, and Docker. Run history tracks every deployment with status and duration.</p>
-        </div>
+      <div>
+        <div class="stat-number purple" data-target="5">0</div>
+        <div class="stat-label">Agent Profiles</div>
+      </div>
+      <div>
+        <div class="stat-number blue" data-target="2">0</div>
+        <div class="stat-label">AI Runtimes</div>
+      </div>
+      <div>
+        <div class="stat-number amber" data-target="80" data-suffix="+">0</div>
+        <div class="stat-label">Source Files</div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ AGENT PROFILES ═══════════ -->
-  <section id="profiles" style="background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-    <div class="container">
-      <div class="big-feature">
-        <div class="big-feature-text fade-in">
-          <div class="section-label" style="color: var(--accent-purple)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-            Agent Profiles
+<!-- ===== FEATURES ===== -->
+<section class="features" id="features">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Everything you need. Nothing you don't.</h2>
+      <p>Six core capabilities designed to keep you in flow.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal" style="--delay:0s">
+        <div class="feature-icon green">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="12" y1="3" x2="12" y2="17"/></svg>
+        </div>
+        <h3>Multi-Pane Sessions</h3>
+        <p>Run Claude Code and Codex CLI side-by-side in real PTY terminals. Split, resize, and monitor in real time.</p>
+      </div>
+      <div class="feature-card reveal" style="--delay:0.08s">
+        <div class="feature-icon purple">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        </div>
+        <h3>Kanban Issue Tracker</h3>
+        <p>Drag-and-drop board with priorities, labels, epics, and acceptance criteria. Link issues directly to AI sessions.</p>
+      </div>
+      <div class="feature-card wide reveal" style="--delay:0.16s">
+        <div class="feature-icon cyan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <h3>Flight Deck</h3>
+        <p>Autonomous orchestration layer. Create flights, link issues, and let agents build while you review. Status rolls up automatically.</p>
+      </div>
+      <div class="feature-card reveal" style="--delay:0.24s">
+        <div class="feature-icon amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <h3>Agent Profiles</h3>
+        <p>Switch between 5 built-in personalities or create your own. Each injects custom prompts and model defaults.</p>
+      </div>
+      <div class="feature-card reveal" style="--delay:0.32s">
+        <div class="feature-icon blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+        </div>
+        <h3>GitHub Integration</h3>
+        <p>Connect repos, browse issues, create PRs, and import tickets &mdash; without leaving the cockpit.</p>
+      </div>
+      <div class="feature-card reveal" style="--delay:0.4s">
+        <div class="feature-icon red">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+        </div>
+        <h3>Deploy Pipeline</h3>
+        <p>Configure and trigger deployments from a single panel. Run history, environment variables, live terminal output.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FLIGHT DECK SPOTLIGHT ===== -->
+<section class="flight-deck" id="flight-deck">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Flight Deck</h2>
+      <p>Autonomous AI Orchestration</p>
+    </div>
+    <p class="flight-deck-body reveal" style="--delay:0.1s">Define an objective. Link your issues. Flight Deck coordinates agents across sessions, tracks blockers, and surfaces what needs your attention &mdash; so you steer instead of type.</p>
+
+    <div class="pipeline reveal" style="--delay:0.15s">
+      <div class="pipeline-step">
+        <div class="pipeline-num">1</div>
+        <h4>Ideate</h4>
+        <p>Surface ideas and opportunities from your codebase</p>
+      </div>
+      <div class="pipeline-connector" aria-hidden="true"></div>
+      <div class="pipeline-step">
+        <div class="pipeline-num">2</div>
+        <h4>Plan</h4>
+        <p>Structure into issues with priorities and acceptance criteria</p>
+      </div>
+      <div class="pipeline-connector" aria-hidden="true"></div>
+      <div class="pipeline-step">
+        <div class="pipeline-num">3</div>
+        <h4>Build</h4>
+        <p>Agents execute. Flight Deck tracks progress in real time</p>
+      </div>
+      <div class="pipeline-connector" aria-hidden="true"></div>
+      <div class="pipeline-step">
+        <div class="pipeline-num">4</div>
+        <h4>Ship</h4>
+        <p>Review blockers, approve, deploy. All from one view</p>
+      </div>
+    </div>
+
+    <div class="fd-mockup reveal" style="--delay:0.2s">
+      <div class="fd-status-strip">
+        <div class="fd-status"><span class="fd-dot active"></span> 2 Active</div>
+        <div class="fd-status"><span class="fd-dot blocked"></span> 1 Blocked</div>
+        <div class="fd-status"><span class="fd-dot human"></span> 1 Needs Human</div>
+      </div>
+      <div class="fd-cards">
+        <div class="fd-card">
+          <div class="fd-card-top">
+            <span class="fd-card-title">Implement auth flow</span>
+            <span class="fd-card-badge active">Active</span>
           </div>
-          <h3>Give your AI a <span class="gradient-text-purple">personality</span></h3>
-          <p>
-            Preconfigured agent personalities that change how your sessions behave. Each profile injects a system prompt, sets a default model, and gives visual identity.
-          </p>
-          <ul>
-            <li><span class="check">&#10003;</span> 5 built-in profiles tuned for different workflows</li>
-            <li><span class="check">&#10003;</span> Create unlimited custom profiles</li>
-            <li><span class="check">&#10003;</span> Quick-switch from the toolbar without opening settings</li>
-            <li><span class="check">&#10003;</span> Profiles auto-fill model selection in new sessions</li>
-          </ul>
-
-          <div class="profiles-row">
-            <div class="profile-chip"><span class="emoji">&#9889;</span> <span style="color: var(--accent-green)">Auto</span></div>
-            <div class="profile-chip"><span class="emoji">&#128640;</span> <span style="color: var(--accent-amber)">Speed Runner</span></div>
-            <div class="profile-chip"><span class="emoji">&#128269;</span> <span style="color: var(--accent-blue)">Thorough Reviewer</span></div>
-            <div class="profile-chip"><span class="emoji">&#128737;</span> <span style="color: var(--accent-red)">Security Auditor</span></div>
-            <div class="profile-chip"><span class="emoji">&#9851;&#65039;</span> <span style="color: var(--accent-purple)">Refactor Pro</span></div>
+          <div class="fd-card-meta">
+            <span>P1 &middot; High</span>
+            <span>3 issues linked</span>
+            <span>Updated 12m ago</span>
           </div>
         </div>
-
-        <div class="big-feature-visual fade-in">
-          <div style="padding: 24px;">
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(63,185,80,0.08); border: 1px solid rgba(63,185,80,0.2); border-radius: 10px;">
-                <span style="font-size: 20px;">&#9889;</span>
-                <div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-green);">Auto (Optimized)</div>
-                  <div style="font-size: 11px; color: var(--text-muted);">Balanced default, no extra prompt</div>
-                </div>
-                <div style="margin-left: auto; font-size: 10px; color: var(--accent-green); background: rgba(63,185,80,0.15); padding: 2px 8px; border-radius: 4px;">active</div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-                <span style="font-size: 20px;">&#128640;</span>
-                <div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-amber);">Speed Runner</div>
-                  <div style="font-size: 11px; color: var(--text-muted);">Be concise. Code-first. Skip confirmations.</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-                <span style="font-size: 20px;">&#128269;</span>
-                <div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-blue);">Thorough Reviewer</div>
-                  <div style="font-size: 11px; color: var(--text-muted);">Step-by-step reasoning. Edge case analysis.</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-                <span style="font-size: 20px;">&#128737;</span>
-                <div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-red);">Security Auditor</div>
-                  <div style="font-size: 11px; color: var(--text-muted);">OWASP top 10. Injection risks. Auth issues.</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-                <span style="font-size: 20px;">&#9851;&#65039;</span>
-                <div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-purple);">Refactor Pro</div>
-                  <div style="font-size: 11px; color: var(--text-muted);">DRY, SOLID. Clean code advocate.</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-muted); font-size: 12px; cursor: pointer;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                Create Custom Profile
-              </div>
-            </div>
+        <div class="fd-card">
+          <div class="fd-card-top">
+            <span class="fd-card-title">Refactor store layer</span>
+            <span class="fd-card-badge blocked">Blocked</span>
+          </div>
+          <div class="fd-card-meta">
+            <span>P2 &middot; Medium</span>
+            <span>5 issues linked</span>
+            <span>Updated 1h ago</span>
           </div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ GITHUB INTEGRATION ═══════════ -->
-  <section id="github-integration">
-    <div class="container">
-      <div class="big-feature reverse">
-        <div class="big-feature-text fade-in">
-          <div class="section-label" style="color: var(--text-primary)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
-            GitHub Integration
-          </div>
-          <h3>GitHub, <span class="gradient-text">built right in</span></h3>
-          <p>
-            Browse repos, import issues, investigate with AI, and create pull requests — all without leaving PacketCode.
-          </p>
-          <ul>
-            <li><span class="check">&#10003;</span> Connect with personal access token</li>
-            <li><span class="check">&#10003;</span> Browse all your repositories</li>
-            <li><span class="check">&#10003;</span> View and search open issues with labels</li>
-            <li><span class="check">&#10003;</span> One-click import issues to your kanban board</li>
-            <li><span class="check">&#10003;</span> <strong>Investigate with AI</strong> — Claude analyzes issues against your codebase</li>
-            <li><span class="check">&#10003;</span> Create pull requests directly from the app</li>
-          </ul>
+<!-- ===== MODULES ===== -->
+<section class="modules" id="modules">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Extensible by Design</h2>
+      <p>A modular architecture that grows with your workflow</p>
+    </div>
+    <div class="modules-grid">
+      <div class="module-card purple-border reveal" style="--delay:0s">
+        <span class="module-tag">AI</span>
+        <h3>Vibe Architect</h3>
+        <p>AI project spec generator. Describe what you want to build, get structured specs, import as kanban issues.</p>
+      </div>
+      <div class="module-card amber-border reveal" style="--delay:0.08s">
+        <span class="module-tag">Analysis</span>
+        <h3>Ideation Scanner</h3>
+        <p>Scans your codebase and surfaces improvement ideas, refactoring opportunities, and security concerns.</p>
+      </div>
+      <div class="module-card blue-border reveal" style="--delay:0.16s">
+        <span class="module-tag">Integration</span>
+        <h3>MCP Servers</h3>
+        <p>Manage Claude Code MCP server configurations. Add, edit, and toggle servers across scopes.</p>
+      </div>
+      <div class="module-card green-border reveal" style="--delay:0.24s">
+        <span class="module-tag">Utility</span>
+        <h3>New Project</h3>
+        <p>Create new projects from built-in templates. Next.js, React, FastAPI, Rust CLI, and more.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== AGENT PROFILES ===== -->
+<section class="profiles" id="profiles">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Five personalities. One keystroke.</h2>
+      <p>Switch agent behavior on the fly &mdash; from rapid-fire code to thorough security audits.</p>
+    </div>
+    <div class="profiles-row reveal" style="--delay:0.1s">
+      <div class="profile-card green-top">
+        <div class="profile-icon green-bg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </div>
+        <h3>Auto (Optimized)</h3>
+        <p class="profile-desc">Balanced default with no extra system prompt</p>
+        <p class="profile-prompt">&nbsp;</p>
+      </div>
+      <div class="profile-card amber-top">
+        <div class="profile-icon amber-bg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/></svg>
+        </div>
+        <h3>Speed Runner</h3>
+        <p class="profile-desc">Fast, code-first responses with minimal explanation</p>
+        <p class="profile-prompt">Be concise. Code-first. Skip confirmations...</p>
+      </div>
+      <div class="profile-card blue-top">
+        <div class="profile-icon blue-bg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <h3>Thorough Reviewer</h3>
+        <p class="profile-desc">Step-by-step reasoning with edge case analysis</p>
+        <p class="profile-prompt">Think step-by-step. Consider edge cases...</p>
+      </div>
+      <div class="profile-card red-top">
+        <div class="profile-icon red-bg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Security Auditor</h3>
+        <p class="profile-desc">Focus on vulnerabilities and security best practices</p>
+        <p class="profile-prompt">Focus on OWASP top 10. Flag XSS, CSRF...</p>
+      </div>
+      <div class="profile-card purple-top">
+        <div class="profile-icon purple-bg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </div>
+        <h3>Refactor Pro</h3>
+        <p class="profile-desc">Clean code advocate with DRY/SOLID focus</p>
+        <p class="profile-prompt">DRY, SOLID principles. Improve readability...</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-        <div class="big-feature-visual fade-in">
-          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
-            <span style="font-size: 12px; font-weight: 600;">GitHub</span>
-            <span class="mono" style="font-size: 11px; color: var(--text-muted); padding: 3px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">acme/my-project</span>
-            <div style="margin-left: auto; font-size: 10px; padding: 4px 10px; background: rgba(188,140,255,0.12); color: var(--accent-purple); border-radius: 6px; border: 1px solid rgba(188,140,255,0.25);">New PR</div>
-          </div>
-          <div style="display: flex; height: 240px;">
-            <div style="width: 50%; border-right: 1px solid var(--border); overflow: hidden;">
-              <div style="padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <span style="display: inline-block; padding: 2px 6px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; margin-right: 4px;">&#128269;</span> Search issues...
-              </div>
-              <div style="padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-elevated);">
-                <div style="font-size: 11px;"><span style="color: var(--text-muted)">#42</span> <span style="color: var(--text-primary)">OAuth token refresh fails silently</span></div>
-                <div style="display: flex; gap: 4px; margin-top: 4px;"><span style="font-size: 9px; padding: 1px 6px; background: rgba(248,81,73,0.15); color: var(--accent-red); border-radius: 3px;">bug</span><span style="font-size: 9px; padding: 1px 6px; background: rgba(88,166,255,0.15); color: var(--accent-blue); border-radius: 3px;">auth</span></div>
-              </div>
-              <div style="padding: 10px 14px; border-bottom: 1px solid var(--border);">
-                <div style="font-size: 11px;"><span style="color: var(--text-muted)">#41</span> <span style="color: var(--text-primary)">Add dark mode toggle to settings</span></div>
-                <div style="display: flex; gap: 4px; margin-top: 4px;"><span style="font-size: 9px; padding: 1px 6px; background: rgba(63,185,80,0.15); color: var(--accent-green); border-radius: 3px;">enhancement</span></div>
-              </div>
-              <div style="padding: 10px 14px; border-bottom: 1px solid var(--border);">
-                <div style="font-size: 11px;"><span style="color: var(--text-muted)">#39</span> <span style="color: var(--text-primary)">Rate limiter returns 500 instead of 429</span></div>
-                <div style="display: flex; gap: 4px; margin-top: 4px;"><span style="font-size: 9px; padding: 1px 6px; background: rgba(248,81,73,0.15); color: var(--accent-red); border-radius: 3px;">bug</span><span style="font-size: 9px; padding: 1px 6px; background: rgba(210,153,34,0.15); color: var(--accent-amber); border-radius: 3px;">priority</span></div>
-              </div>
-            </div>
-            <div style="width: 50%; padding: 14px;">
-              <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">#42 OAuth token refresh fails silently</div>
-              <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 12px;">by @devuser &middot; 2 days ago</div>
-              <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">When the OAuth access token expires, the refresh flow fails without any user-facing error. The app just stops making authenticated requests...</div>
-              <div style="display: flex; gap: 6px;">
-                <div style="font-size: 10px; padding: 5px 10px; background: rgba(63,185,80,0.12); color: var(--accent-green); border: 1px solid rgba(63,185,80,0.25); border-radius: 6px;">Import to Board</div>
-                <div style="font-size: 10px; padding: 5px 10px; background: rgba(88,166,255,0.12); color: var(--accent-blue); border: 1px solid rgba(88,166,255,0.25); border-radius: 6px;">&#129504; Investigate</div>
-              </div>
-            </div>
-          </div>
+<!-- ===== MEMORY ===== -->
+<section class="memory" id="memory">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Your AI remembers everything</h2>
+      <p>Persistent memory that learns your patterns, conventions, and architecture across sessions.</p>
+    </div>
+    <div class="memory-panel reveal" style="--delay:0.1s">
+      <div class="memory-section">
+        <div class="memory-section-title">File Map</div>
+        <div class="memory-entry">
+          <span class="memory-file">src/App.tsx</span>
+          <span class="memory-desc">Root component, view routing</span>
+          <span class="memory-time">2h ago</span>
+        </div>
+        <div class="memory-entry">
+          <span class="memory-file">src/stores/flightStore.ts</span>
+          <span class="memory-desc">Flight state management</span>
+          <span class="memory-time">4h ago</span>
+        </div>
+        <div class="memory-entry">
+          <span class="memory-file">src-tauri/src/commands/pty.rs</span>
+          <span class="memory-desc">PTY session lifecycle</span>
+          <span class="memory-time">1d ago</span>
+        </div>
+      </div>
+      <div class="memory-section">
+        <div class="memory-section-title">Learned Patterns</div>
+        <div class="pattern-row">
+          <span class="pattern-text">Uses Zustand for all state management</span>
+          <span class="pattern-tag arch">architecture</span>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:92%"></div></div>
+        </div>
+        <div class="pattern-row">
+          <span class="pattern-text">Prefers text-xs for compact UI</span>
+          <span class="pattern-tag conv">convention</span>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:87%"></div></div>
+        </div>
+        <div class="pattern-row">
+          <span class="pattern-text">Never use raw Tailwind colors</span>
+          <span class="pattern-tag conv">convention</span>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:95%"></div></div>
+        </div>
+        <div class="pattern-row">
+          <span class="pattern-text">PTY sessions resolve .cmd on Windows</span>
+          <span class="pattern-tag pitfall">pitfall</span>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:78%"></div></div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ MEMORY LAYER ═══════════ -->
-  <section id="memory" style="background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-    <div class="container">
-      <div class="big-feature">
-        <div class="big-feature-text fade-in">
-          <div class="section-label" style="color: var(--accent-cyan)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path></svg>
-            Memory Layer
-          </div>
-          <h3>Your AI <span class="gradient-text">remembers</span></h3>
-          <p>
-            Persistent codebase knowledge that carries across sessions. File maps, session summaries, and learned patterns make every new session smarter than the last.
-          </p>
-          <ul>
-            <li><span class="check">&#10003;</span> <strong>File Map</strong> — AI scans your codebase and generates 1-line summaries for key files</li>
-            <li><span class="check">&#10003;</span> <strong>Session Summaries</strong> — automatically extract what was done, key decisions, and modified files</li>
-            <li><span class="check">&#10003;</span> <strong>Learned Patterns</strong> — architecture, conventions, preferences, and pitfalls with confidence scores</li>
-            <li><span class="check">&#10003;</span> <strong>Context Injection</strong> — toggle memory context on/off when starting new sessions</li>
-          </ul>
-        </div>
-
-        <div class="big-feature-visual fade-in">
-          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path></svg>
-            <span style="font-size: 12px; font-weight: 600;">Patterns</span>
-            <span style="font-size: 10px; color: var(--text-muted);">12 patterns</span>
-          </div>
-          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
-            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 8px;">
-              <span style="font-size: 9px; padding: 2px 6px; background: rgba(188,140,255,0.15); color: var(--accent-purple); border-radius: 3px; white-space: nowrap; margin-top: 2px;">architecture</span>
-              <div>
-                <div style="font-size: 11px; color: var(--text-primary);">Uses Zustand for all state management</div>
-                <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
-                  <span style="font-size: 9px; color: var(--text-muted);">confidence</span>
-                  <div style="width: 48px; height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden;"><div style="width: 92%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div></div>
-                  <span style="font-size: 9px; color: var(--text-muted);">92%</span>
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 8px;">
-              <span style="font-size: 9px; padding: 2px 6px; background: rgba(88,166,255,0.15); color: var(--accent-blue); border-radius: 3px; white-space: nowrap; margin-top: 2px;">convention</span>
-              <div>
-                <div style="font-size: 11px; color: var(--text-primary);">Tailwind with custom theme tokens, never raw colors</div>
-                <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
-                  <span style="font-size: 9px; color: var(--text-muted);">confidence</span>
-                  <div style="width: 48px; height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden;"><div style="width: 88%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div></div>
-                  <span style="font-size: 9px; color: var(--text-muted);">88%</span>
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 8px;">
-              <span style="font-size: 9px; padding: 2px 6px; background: rgba(248,81,73,0.15); color: var(--accent-red); border-radius: 3px; white-space: nowrap; margin-top: 2px;">pitfall</span>
-              <div>
-                <div style="font-size: 11px; color: var(--text-primary);">Windows requires creation_flags to hide console windows</div>
-                <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
-                  <span style="font-size: 9px; color: var(--text-muted);">confidence</span>
-                  <div style="width: 48px; height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden;"><div style="width: 75%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div></div>
-                  <span style="font-size: 9px; color: var(--text-muted);">75%</span>
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 8px;">
-              <span style="font-size: 9px; padding: 2px 6px; background: rgba(63,185,80,0.15); color: var(--accent-green); border-radius: 3px; white-space: nowrap; margin-top: 2px;">preference</span>
-              <div>
-                <div style="font-size: 11px; color: var(--text-primary);">lucide-react for icons, size={12} in toolbars</div>
-                <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
-                  <span style="font-size: 9px; color: var(--text-muted);">confidence</span>
-                  <div style="width: 48px; height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden;"><div style="width: 95%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div></div>
-                  <span style="font-size: 9px; color: var(--text-muted);">95%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+<!-- ===== WORKFLOW ===== -->
+<section class="workflow" id="workflow">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>From idea to production in three steps</h2>
+    </div>
+    <div class="workflow-steps reveal" style="--delay:0.1s">
+      <div class="workflow-step">
+        <div class="workflow-num">1</div>
+        <h3>Plan</h3>
+        <p>Define objectives. Vibe Architect generates specs, issues auto-populate the board, Flight Deck coordinates.</p>
+      </div>
+      <div class="workflow-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+      <div class="workflow-step">
+        <div class="workflow-num">2</div>
+        <h3>Execute</h3>
+        <p>Agents work across sessions. Memory informs context. Profiles shape behavior. You review what matters.</p>
+      </div>
+      <div class="workflow-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+      <div class="workflow-step">
+        <div class="workflow-num">3</div>
+        <h3>Release</h3>
+        <p>Deploy pipeline ships. GitHub handles PRs. Flight Deck confirms all issues resolved.</p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ MODULE SYSTEM ═══════════ -->
-  <section id="modules">
-    <div class="container">
-      <div class="big-feature reverse">
-        <div class="big-feature-text fade-in">
-          <div class="section-label" style="color: var(--accent-blue)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 0 1.41l2.83 2.83a1 1 0 0 0 1.41 0l2.4-2.4a1 1 0 0 0 0-1.41L19.2 2a1 1 0 0 0-1.41 0Z"/><path d="m14 7-8.29 8.29a2 2 0 0 0-.59 1.42V19a1 1 0 0 0 1 1h2.29a2 2 0 0 0 1.42-.59L19 11"/><path d="M2 22h4"/><path d="M7 22v-4"/></svg>
-            Module System
-          </div>
-          <h3>Modular by <span class="gradient-text-purple">design</span></h3>
-          <p>
-            Tools are registered declaratively through a manifest system. Enable or disable modules from Settings — the menu, routes, and keyboard shortcuts update automatically.
-          </p>
-          <ul>
-            <li><span class="check">&#10003;</span> Each tool is a self-contained module with icon, category, and component</li>
-            <li><span class="check">&#10003;</span> Toggle modules on/off without restarting — state persists across sessions</li>
-            <li><span class="check">&#10003;</span> Disabled modules are removed from the Tools menu and keyboard shortcuts</li>
-            <li><span class="check">&#10003;</span> Adding a new tool is a single manifest file — no more editing 4+ files</li>
-          </ul>
-        </div>
-
-        <div class="big-feature-visual fade-in">
-          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 0 1.41l2.83 2.83a1 1 0 0 0 1.41 0l2.4-2.4a1 1 0 0 0 0-1.41L19.2 2a1 1 0 0 0-1.41 0Z"/><path d="m14 7-8.29 8.29a2 2 0 0 0-.59 1.42V19a1 1 0 0 0 1 1h2.29a2 2 0 0 0 1.42-.59L19 11"/><path d="M2 22h4"/><path d="M7 22v-4"/></svg>
-            <span style="font-size: 12px; font-weight: 600;">Modules</span>
-            <span style="font-size: 10px; color: var(--text-muted); padding: 2px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">4 of 4 enabled</span>
-          </div>
-          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
-            <!-- Vibe Architect — enabled -->
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
-              <div style="flex: 1; min-width: 0;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Vibe Architect</span>
-                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(188,140,255,0.15); color: var(--accent-purple); border-radius: 3px;">AI</span>
-                </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">AI project spec generator — design specs and import as issues <span style="opacity: 0.6;">(Ctrl+Shift+6)</span></div>
-              </div>
-              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
-                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
-              </div>
-            </div>
-            <!-- Ideation Scanner — enabled -->
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="18" x2="15" y2="18"></line><line x1="10" y1="22" x2="14" y2="22"></line><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path></svg>
-              <div style="flex: 1; min-width: 0;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Ideation Scanner</span>
-                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(210,153,34,0.15); color: var(--accent-amber); border-radius: 3px;">Analysis</span>
-                </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Scan your codebase for improvement ideas and feature suggestions</div>
-              </div>
-              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
-                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
-              </div>
-            </div>
-            <!-- MCP Servers — enabled -->
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8Z"></path></svg>
-              <div style="flex: 1; min-width: 0;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">MCP Servers</span>
-                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(88,166,255,0.15); color: var(--accent-blue); border-radius: 3px;">Integration</span>
-                </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Manage Claude Code MCP server configurations</div>
-              </div>
-              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
-                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
-              </div>
-            </div>
-            <!-- New Project — enabled -->
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"></path><path d="M9 13h6"></path><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
-              <div style="flex: 1; min-width: 0;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">New Project</span>
-                  <span style="font-size: 9px; padding: 1px 6px; background: rgba(63,185,80,0.15); color: var(--accent-green); border-radius: 3px;">Utility</span>
-                </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Create new projects from built-in templates</div>
-              </div>
-              <div style="width: 32px; height: 16px; background: var(--accent-green); border-radius: 8px; position: relative; flex-shrink: 0;">
-                <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 18px;"></div>
-              </div>
-            </div>
-            <!-- Code hint -->
-            <div style="margin-top: 4px; padding: 10px 14px; background: var(--bg-primary); border: 1px dashed var(--border); border-radius: 8px;">
-              <div class="mono" style="font-size: 10px; color: var(--text-muted); line-height: 1.7;">
-                <span style="color: var(--accent-purple);">export const</span> <span style="color: var(--accent-green);">myModule</span>: <span style="color: var(--accent-blue);">ModuleManifest</span> = {<br/>
-                &nbsp;&nbsp;id: <span style="color: var(--accent-amber);">"my-tool"</span>, name: <span style="color: var(--accent-amber);">"My Tool"</span>,<br/>
-                &nbsp;&nbsp;icon: Wrench, component: MyView,<br/>
-                &nbsp;&nbsp;category: <span style="color: var(--accent-amber);">"utility"</span>, enabledByDefault: <span style="color: var(--accent-purple);">true</span>,<br/>
-                };
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+<!-- ===== DOWNLOAD ===== -->
+<section class="download" id="download">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Get PacketCode</h2>
+      <p>Free and open source. Always.</p>
     </div>
-  </section>
-
-  <!-- ═══════════ DEPLOY PIPELINE ═══════════ -->
-  <section id="deploy" style="background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-    <div class="container">
-      <div class="big-feature">
-        <div class="big-feature-text fade-in">
-          <div class="section-label" style="color: var(--accent-amber)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
-            Deploy Pipeline
-          </div>
-          <h3>Ship from <span class="gradient-text-amber">one click</span></h3>
-          <p>
-            A built-in deploy view with live terminal output, config auto-detection, and run history. No more switching to a separate terminal to deploy.
-          </p>
-          <ul>
-            <li><span class="check">&#10003;</span> Auto-detects configs from <strong>package.json</strong>, <strong>vercel.json</strong>, <strong>netlify.toml</strong>, and <strong>Dockerfile</strong></li>
-            <li><span class="check">&#10003;</span> Custom deploy configs saved in <strong>packetcode.deploy.json</strong></li>
-            <li><span class="check">&#10003;</span> Live terminal output via PTY — see exactly what's happening</li>
-            <li><span class="check">&#10003;</span> Deploy history tracks status, duration, and commands</li>
-          </ul>
-        </div>
-
-        <div class="big-feature-visual fade-in">
-          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
-            <span style="font-size: 12px; font-weight: 600;">Deploy</span>
-            <span style="font-size: 10px; color: var(--text-muted); padding: 2px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;">package.json</span>
-          </div>
-          <div style="display: flex; height: 220px;">
-            <div style="width: 45%; border-right: 1px solid var(--border); padding: 12px;">
-              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Configurations</div>
-              <div style="display: flex; flex-direction: column; gap: 6px;">
-                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px;">
-                  <div style="flex: 1;">
-                    <div style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run build</div>
-                    <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">npm run build</div>
-                  </div>
-                  <div style="color: var(--accent-green); font-size: 10px;">&#9654;</div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px;">
-                  <div style="flex: 1;">
-                    <div style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run deploy</div>
-                    <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">npm run deploy</div>
-                  </div>
-                  <div style="color: var(--accent-green); font-size: 10px;">&#9654;</div>
-                </div>
-              </div>
-              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 6px;">History</div>
-              <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-elevated); border-radius: 6px; margin-bottom: 4px;">
-                <span style="color: var(--accent-green); font-size: 10px;">&#10003;</span>
-                <span style="font-size: 10px; color: var(--text-primary);">npm run build</span>
-                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">12s</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;">
-                <span style="color: var(--accent-red); font-size: 10px;">&#10007;</span>
-                <span style="font-size: 10px; color: var(--text-secondary);">npm run deploy</span>
-                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">8s</span>
-              </div>
-            </div>
-            <div style="width: 55%; padding: 12px;">
-              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                <span style="color: var(--accent-green); font-size: 10px;">&#10003;</span>
-                <span style="font-size: 11px; font-weight: 600; color: var(--text-primary);">npm run build</span>
-                <span style="font-size: 9px; color: var(--text-muted); margin-left: auto;">12s</span>
-              </div>
-              <div class="mono" style="font-size: 10px; line-height: 1.8; color: var(--text-secondary); background: var(--bg-primary); border-radius: 8px; padding: 10px; height: 160px; overflow: hidden;">
-                <div><span style="color: var(--accent-green);">$</span> npm run build</div>
-                <div style="color: var(--text-muted);">> vite build</div>
-                <div><span style="color: var(--accent-blue);">vite</span> v6.4.1 building for production...</div>
-                <div style="color: var(--accent-green);">&#10003;</div> 142 modules transformed.
-                <div><span style="color: var(--accent-green);">dist/</span>index.html &nbsp; 0.46 kB &nbsp; gzip: 0.30 kB</div>
-                <div><span style="color: var(--accent-green);">dist/</span>assets/index.js &nbsp; 284.19 kB &nbsp; gzip: 89.2 kB</div>
-                <div style="color: var(--accent-green);">&#10003; built in 3.21s</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div class="download-buttons reveal" style="--delay:0.1s">
+      <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-win">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+        Windows
+      </a>
+      <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-mac">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        macOS
+      </a>
+      <a href="https://github.com/packetloss404/PacketCode/releases" class="btn-linux">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.368 1.884 1.43.868.065 1.157-.49 1.291-.872.654-.174 1.548-.368 2.283-.874 1.234-.675 1.929-.935 2.115-1.862.09-.353.055-.696-.09-1.005l.02-.007c.092-.164.195-.306.294-.516.147-.317.215-.698.163-1.072-.088-.636-.473-1.235-1.066-1.593-.18-.105-.378-.189-.593-.237a.795.795 0 00-.277-.58c-.093-.091-.212-.154-.322-.223a1.023 1.023 0 01-.163-.162c-.063-.097-.043-.225-.091-.345-.112-.26-.375-.543-.653-.637-.108-.04-.234-.046-.35-.035a.653.653 0 00-.162-.085 1.17 1.17 0 00-.119-.044c.004-.01.01-.018.013-.027.117-.284-.091-.562-.261-.707a.768.768 0 00-.146-.08l-.029-.016a3.4 3.4 0 00.122-.743c.098-.702-.024-1.417-.392-2.009-.756-1.187-1.924-2.068-2.883-3.139-.958-1.119-1.598-2.213-1.74-3.768-.034-1.381.563-5.876-3.045-6.278a5.5 5.5 0 00-.553-.024z"/></svg>
+        Linux
+      </a>
     </div>
-  </section>
-
-  <!-- ═══════════ KEYBOARD SHORTCUTS ═══════════ -->
-  <section>
-    <div class="container" style="text-align: center;">
-      <div class="section-label" style="color: var(--accent-amber)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><path d="M6 8h.001"></path><path d="M10 8h.001"></path><path d="M14 8h.001"></path><path d="M18 8h.001"></path><path d="M8 12h.001"></path><path d="M12 12h.001"></path><path d="M16 12h.001"></path><path d="M7 16h10"></path></svg>
-        Keyboard-First
-      </div>
-      <h2 class="section-title" style="margin: 0 auto 16px;">Built for the <span class="gradient-text-amber">keyboard</span></h2>
-      <p class="section-desc" style="margin: 0 auto 40px;">Navigate every feature without touching the mouse.</p>
-      <div class="kbd-row" style="justify-content: center;">
-        <div class="kbd-item"><kbd>Ctrl</kbd>+<kbd>\</kbd> Split pane</div>
-        <div class="kbd-item"><kbd>Ctrl</kbd>+<kbd>1-4</kbd> Switch pane</div>
-        <div class="kbd-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1-6</kbd> Switch view</div>
-        <div class="kbd-item"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Start session</div>
-      </div>
+    <div class="code-block reveal" style="--delay:0.2s">
+      <button class="btn-copy" id="btn-copy" aria-label="Copy to clipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Copy
+      </button>
+      <pre><code>git clone https://github.com/packetloss404/PacketCode.git
+cd PacketCode &amp;&amp; pnpm install &amp;&amp; pnpm tauri dev</code></pre>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ TECH STACK ═══════════ -->
-  <section id="stack" style="border-top: 1px solid var(--border);">
-    <div class="container" style="text-align: center;">
-      <div class="section-label" style="color: var(--accent-blue)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-        Tech Stack
-      </div>
-      <h2 class="section-title">Built on <span class="gradient-text-purple">solid foundations</span></h2>
-      <p class="section-desc" style="margin: 0 auto;">Modern, fast, and native — no Electron bloat.</p>
-
-      <div class="tech-grid">
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#129408;</div>
-          <div class="tech-name">Tauri v2</div>
-          <div class="tech-desc">Native Rust backend</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#9883;</div>
-          <div class="tech-name">React 19</div>
-          <div class="tech-desc">UI components</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#128218;</div>
-          <div class="tech-name">TypeScript</div>
-          <div class="tech-desc">Type-safe frontend</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#9889;</div>
-          <div class="tech-name">Vite 6</div>
-          <div class="tech-desc">Lightning-fast bundler</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#127912;</div>
-          <div class="tech-name">Tailwind CSS</div>
-          <div class="tech-desc">Custom dark theme</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#128059;</div>
-          <div class="tech-name">Zustand</div>
-          <div class="tech-desc">State management</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#128187;</div>
-          <div class="tech-name">xterm.js</div>
-          <div class="tech-desc">PTY terminals</div>
-        </div>
-        <div class="tech-card fade-in">
-          <div class="tech-icon">&#128279;</div>
-          <div class="tech-name">reqwest</div>
-          <div class="tech-desc">GitHub API (Rust)</div>
-        </div>
-      </div>
+<!-- ===== OPEN SOURCE CTA ===== -->
+<section class="oss-cta" id="open-source">
+  <div class="container">
+    <div class="section-header reveal">
+      <h2>Built in the open. Built for builders.</h2>
     </div>
-  </section>
-
-  <!-- ═══════════ CTA ═══════════ -->
-  <section class="cta-section">
-    <div class="container">
-      <h2>Ready to <span class="gradient-text">level up</span>?</h2>
-      <p>PacketCode is free and open source. Clone it, build it, make it yours.</p>
-      <div class="hero-buttons">
-        <a href="https://github.com/packetloss404/PacketCode" class="btn-primary">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
-          Get Started on GitHub
-        </a>
-        <a href="#features" class="btn-secondary">
-          Explore Features
-        </a>
-      </div>
+    <p class="oss-body reveal" style="--delay:0.1s">PacketCode is Apache 2.0 licensed and free forever. No telemetry, no vendor lock-in, no paywalls. Contributions welcome.</p>
+    <div class="oss-buttons reveal" style="--delay:0.15s">
+      <a href="https://github.com/packetloss404/PacketCode" class="btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+      <a href="https://github.com/packetloss404/PacketCode#readme" class="btn-outline" target="_blank" rel="noopener">Read the Docs</a>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ═══════════ FOOTER ═══════════ -->
-  <footer>
-    <div class="inner">
-      <div class="copy">PacketCode &copy; 2026. Built with Tauri, React, and Rust.</div>
-      <div class="footer-links">
-        <a href="https://github.com/packetloss404/PacketCode">GitHub</a>
-        <a href="https://github.com/packetloss404/PacketCode/releases">Releases</a>
-        <a href="https://github.com/packetloss404/PacketCode/issues">Issues</a>
-      </div>
+</main>
+
+<!-- ===== FOOTER ===== -->
+<footer>
+  <div class="container">
+    <div class="footer-brand">
+      <img src="icon-192.png" alt="" width="24" height="24" />
+      PacketCode
     </div>
-  </footer>
+    <div class="footer-links">
+      <a href="https://github.com/packetloss404/PacketCode" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/packetloss404/PacketCode/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/packetloss404/PacketCode/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+    </div>
+    <div class="footer-domains">packetcode.app &middot; packetloss.dev</div>
+  </div>
+</footer>
 
-  <!-- ═══════════ Scroll animation ═══════════ -->
-  <script>
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
+<script>
+(function(){
+  'use strict';
+
+  /* ===== SCROLL REVEALS ===== */
+  var revealEls = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    var revealObs = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('show');
+          revealObs.unobserve(e.target);
         }
       });
-    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    revealEls.forEach(function(el) { revealObs.observe(el); });
+  } else {
+    revealEls.forEach(function(el) { el.classList.add('show'); });
+  }
 
-    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
-  </script>
+  /* ===== NAV SCROLL ===== */
+  var nav = document.querySelector('nav');
+  var lastScroll = 0;
+  window.addEventListener('scroll', function() {
+    var y = window.scrollY;
+    if (y > 50) { nav.classList.add('scrolled'); }
+    else { nav.classList.remove('scrolled'); }
+    lastScroll = y;
+  }, { passive: true });
+
+  /* ===== COUNTER ANIMATION ===== */
+  var statsSection = document.getElementById('stats');
+  var counters = document.querySelectorAll('.stat-number');
+  var counted = false;
+  function easeOutExpo(t) { return t === 1 ? 1 : 1 - Math.pow(2, -10 * t); }
+  function animateCounter(el) {
+    var target = parseInt(el.getAttribute('data-target'), 10);
+    var suffix = el.getAttribute('data-suffix') || '';
+    var duration = 1500;
+    var start = performance.now();
+    function tick(now) {
+      var elapsed = now - start;
+      var progress = Math.min(elapsed / duration, 1);
+      var value = Math.round(easeOutExpo(progress) * target);
+      el.textContent = value + suffix;
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  if ('IntersectionObserver' in window) {
+    var statsObs = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting && !counted) {
+          counted = true;
+          counters.forEach(animateCounter);
+          statsObs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.3 });
+    statsObs.observe(statsSection);
+  } else {
+    counters.forEach(function(el) {
+      el.textContent = el.getAttribute('data-target') + (el.getAttribute('data-suffix') || '');
+    });
+  }
+
+  /* ===== TYPED TEXT ===== */
+  var typedEl = document.getElementById('typed-target');
+  var phrases = ['orchestrate agents', 'ship autonomously', 'deploy with confidence', 'learn from every session'];
+  var phraseIdx = 0;
+  var charIdx = 0;
+  var isDeleting = false;
+  var typingSpeed = 80;
+  var deleteSpeed = 40;
+  var pauseDuration = 2000;
+
+  function typeLoop() {
+    var current = phrases[phraseIdx];
+    if (!isDeleting) {
+      charIdx++;
+      typedEl.textContent = current.substring(0, charIdx);
+      if (charIdx === current.length) {
+        isDeleting = true;
+        setTimeout(typeLoop, pauseDuration);
+        return;
+      }
+      setTimeout(typeLoop, typingSpeed);
+    } else {
+      charIdx--;
+      typedEl.textContent = current.substring(0, charIdx);
+      if (charIdx === 0) {
+        isDeleting = false;
+        phraseIdx = (phraseIdx + 1) % phrases.length;
+        setTimeout(typeLoop, 300);
+        return;
+      }
+      setTimeout(typeLoop, deleteSpeed);
+    }
+  }
+  setTimeout(typeLoop, 800);
+
+  /* ===== FLOATING PARTICLES ===== */
+  var canvas = document.getElementById('particles-canvas');
+  var ctx = canvas.getContext('2d');
+  var particles = [];
+  var particleCount = 40;
+  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resizeCanvas();
+
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(resizeCanvas).observe(document.body);
+  } else {
+    window.addEventListener('resize', resizeCanvas);
+  }
+
+  function createParticle() {
+    return {
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: 1 + Math.random(),
+      opacity: 0.03 + Math.random() * 0.09,
+      speedY: -(0.1 + Math.random() * 0.3),
+      speedX: (Math.random() - 0.5) * 0.15
+    };
+  }
+  for (var i = 0; i < particleCount; i++) particles.push(createParticle());
+
+  function drawParticles() {
+    if (reducedMotion) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var j = 0; j < particles.length; j++) {
+      var p = particles[j];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(63,185,80,' + p.opacity + ')';
+      ctx.fill();
+      p.y += p.speedY;
+      p.x += p.speedX;
+      if (p.y < -10) {
+        p.y = canvas.height + 10;
+        p.x = Math.random() * canvas.width;
+      }
+      if (p.x < -10) p.x = canvas.width + 10;
+      if (p.x > canvas.width + 10) p.x = -10;
+    }
+    requestAnimationFrame(drawParticles);
+  }
+  if (!reducedMotion) requestAnimationFrame(drawParticles);
+
+  /* ===== MOBILE MENU ===== */
+  var hamburger = document.getElementById('hamburger');
+  var navLinks = document.getElementById('nav-links');
+  hamburger.addEventListener('click', function() {
+    var isOpen = navLinks.classList.toggle('open');
+    hamburger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  });
+  navLinks.querySelectorAll('a').forEach(function(link) {
+    link.addEventListener('click', function() {
+      navLinks.classList.remove('open');
+      hamburger.setAttribute('aria-expanded', 'false');
+    });
+  });
+
+  /* ===== COPY BUTTON ===== */
+  var copyBtn = document.getElementById('btn-copy');
+  copyBtn.addEventListener('click', function() {
+    var code = document.querySelector('.code-block code').textContent;
+    navigator.clipboard.writeText(code).then(function() {
+      copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+      setTimeout(function() {
+        copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
+      }, 2000);
+    });
+  });
+
+  /* ===== SMOOTH SCROLL ===== */
+  document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+    a.addEventListener('click', function(e) {
+      var target = document.querySelector(this.getAttribute('href'));
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+  });
+
+})();
+</script>
 </body>
 </html>
