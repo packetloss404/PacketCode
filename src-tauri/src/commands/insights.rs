@@ -2,6 +2,7 @@ use crate::claude::binary::{claude_command, run_claude};
 use serde::Deserialize;
 use tauri::Emitter;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tracing::info;
 
 #[derive(Deserialize)]
 pub struct InsightsMessage {
@@ -39,6 +40,8 @@ pub async fn ask_insights(
     project_path: String,
     messages: Vec<InsightsMessage>,
 ) -> Result<String, String> {
+    super::validate_project_path(&project_path)?;
+    info!(project_path = %project_path, message_count = messages.len(), "Insights query");
     let prompt = build_insights_prompt(&messages, None);
     super::validate_input_size(&prompt, super::MAX_INPUT_SIZE, "Insights prompt")?;
     run_claude(&prompt, Some(&project_path)).await
@@ -51,6 +54,8 @@ pub async fn ask_insights_stream(
     messages: Vec<InsightsMessage>,
     session_context: Option<String>,
 ) -> Result<(), String> {
+    super::validate_project_path(&project_path)?;
+    info!(project_path = %project_path, message_count = messages.len(), streaming = true, "Insights stream query");
     let prompt = build_insights_prompt(&messages, session_context.as_deref());
     super::validate_input_size(&prompt, super::MAX_INPUT_SIZE, "Insights stream prompt")?;
 

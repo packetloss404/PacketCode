@@ -1,7 +1,10 @@
 use std::process::Command;
 use super::shared::hide_window;
+use tracing::info;
 
 fn git_command(args: &[&str], cwd: &str) -> Result<std::process::Output, String> {
+    super::validate_project_path(cwd)?;
+    info!(command = ?args, cwd = %cwd, "Running git command");
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(cwd);
     hide_window(&mut cmd);

@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PacketCode — Master Marketing Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ───────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; font-size: 15px; }
+body {
+  font-family: 'Sora', system-ui, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  line-height: 1.65;
+  min-height: 100vh;
+}
+a { color: #58a6ff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Color Tokens ───────────────────────────────────────── */
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --green: #3fb950;
+  --green-dim: #238636;
+  --blue: #58a6ff;
+  --purple: #bc8cff;
+  --amber: #d29922;
+  --red: #f85149;
+  --pink: #f778ba;
+}
+
+/* ── Sidebar TOC ────────────────────────────────────────── */
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 260px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  z-index: 100;
+  padding: 24px 0 40px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+.sidebar-logo {
+  padding: 0 20px 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.sidebar-logo h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: -0.5px;
+}
+.sidebar-logo p {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.sidebar nav { padding: 0 12px; }
+.sidebar nav a {
+  display: block;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.sidebar nav a:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  text-decoration: none;
+}
+.sidebar nav a.active {
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.08);
+}
+.sidebar nav .toc-group {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 16px 12px 4px;
+  font-weight: 600;
+}
+
+/* ── Main Content ───────────────────────────────────────── */
+.main {
+  margin-left: 260px;
+  padding: 48px 48px 120px;
+  max-width: 1160px;
+}
+
+/* ── Typography ─────────────────────────────────────────── */
+h1, h2, h3, h4, h5 { color: var(--text-primary); font-weight: 600; }
+h2 {
+  font-size: 1.6rem;
+  margin: 56px 0 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: -0.5px;
+}
+h2 .section-num {
+  color: var(--green);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  margin-right: 8px;
+}
+h3 { font-size: 1.15rem; margin: 32px 0 12px; color: var(--blue); }
+h4 { font-size: 0.95rem; margin: 20px 0 8px; color: var(--purple); }
+p { margin: 10px 0; }
+ul, ol { padding-left: 24px; margin: 10px 0; }
+li { margin: 4px 0; }
+li::marker { color: var(--text-muted); }
+strong { color: var(--text-primary); }
+em { color: var(--amber); font-style: normal; }
+
+/* ── Hero Banner ────────────────────────────────────────── */
+.hero {
+  background: linear-gradient(135deg, rgba(63,185,80,0.08) 0%, rgba(88,166,255,0.06) 50%, rgba(188,140,255,0.06) 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  margin-bottom: 40px;
+}
+.hero h1 {
+  font-size: 2rem;
+  letter-spacing: -1px;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hero .tagline {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+.hero .tagline strong {
+  color: var(--green);
+}
+.hero .meta {
+  display: flex; gap: 24px; flex-wrap: wrap;
+  font-size: 0.8rem; color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+.hero .meta span { display: flex; align-items: center; gap: 6px; }
+
+/* ── Stat Cards ─────────────────────────────────────────── */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+}
+.stat-card .value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -1px;
+}
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.blue { color: var(--blue); }
+.stat-card .value.purple { color: var(--purple); }
+.stat-card .value.amber { color: var(--amber); }
+.stat-card .label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── Tables ─────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin: 16px 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+thead th {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tbody tr:nth-child(even) { background: rgba(22, 27, 34, 0.5); }
+tbody tr:hover { background: rgba(63, 185, 80, 0.04); }
+
+/* Threat badges */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.badge-critical { background: rgba(248,81,73,0.15); color: var(--red); }
+.badge-high { background: rgba(210,153,34,0.15); color: var(--amber); }
+.badge-moderate { background: rgba(88,166,255,0.15); color: var(--blue); }
+.badge-low { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-negligible { background: rgba(110,118,129,0.15); color: var(--text-muted); }
+
+/* ── Code Blocks ────────────────────────────────────────── */
+pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  margin: 16px 0;
+  color: var(--text-primary);
+}
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+}
+p code, li code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--purple);
+}
+
+/* ── Collapsible Details ────────────────────────────────── */
+details {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+}
+details[open] { border-color: var(--green-dim); }
+summary {
+  padding: 14px 20px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: '▸';
+  color: var(--green);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+details[open] > summary::before { transform: rotate(90deg); }
+details .detail-body { padding: 4px 20px 20px; }
+
+/* ── Callout Boxes ──────────────────────────────────────── */
+.callout {
+  border-left: 3px solid;
+  border-radius: 0 8px 8px 0;
+  padding: 16px 20px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+}
+.callout-green { border-color: var(--green); background: rgba(63,185,80,0.06); }
+.callout-blue { border-color: var(--blue); background: rgba(88,166,255,0.06); }
+.callout-amber { border-color: var(--amber); background: rgba(210,153,34,0.06); }
+.callout-red { border-color: var(--red); background: rgba(248,81,73,0.06); }
+.callout-purple { border-color: var(--purple); background: rgba(188,140,255,0.06); }
+
+/* ── Checkmarks & Lists ────────────────────────────────── */
+.check-list { list-style: none; padding-left: 0; }
+.check-list li { padding: 4px 0; }
+.check-list li::before { content: '✓ '; color: var(--green); font-weight: 700; }
+.x-list { list-style: none; padding-left: 0; }
+.x-list li { padding: 4px 0; }
+.x-list li::before { content: '✕ '; color: var(--red); font-weight: 700; }
+
+/* ── Pricing Tiers ──────────────────────────────────────── */
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.tier-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+}
+.tier-card.featured { border-color: var(--green); }
+.tier-card .tier-name {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.tier-card .tier-price {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 8px 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+.tier-card .tier-price span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tier-card ul { list-style: none; padding: 0; margin-top: 16px; }
+.tier-card li {
+  padding: 5px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.tier-card li::before { content: '→ '; color: var(--green); }
+
+/* ── Phase Timeline ─────────────────────────────────────── */
+.phase {
+  border-left: 3px solid var(--border);
+  padding: 0 0 32px 24px;
+  margin-left: 12px;
+  position: relative;
+}
+.phase::before {
+  content: '';
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  position: absolute;
+  left: -8px; top: 4px;
+}
+.phase.phase-1::before { background: var(--green); }
+.phase.phase-2::before { background: var(--blue); }
+.phase.phase-3::before { background: var(--purple); }
+.phase:last-child { border-left-color: transparent; }
+.phase h4 { margin-top: 0; }
+
+/* ── ASCII Diagram ──────────────────────────────────────── */
+.diagram {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  margin: 20px 0;
+  overflow-x: auto;
+}
+.diagram pre {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--green);
+}
+
+/* ── Mobile ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar {
+    position: relative;
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 60vh;
+  }
+  .main {
+    margin-left: 0;
+    padding: 24px 16px 80px;
+  }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+  .tier-grid { grid-template-columns: 1fr; }
+  .hero { padding: 24px; }
+  .hero h1 { font-size: 1.4rem; }
+}
+
+/* ── Print ──────────────────────────────────────────────── */
+@media print {
+  .sidebar { display: none; }
+  .main { margin-left: 0; max-width: 100%; }
+  body { background: #fff; color: #1a1a1a; font-size: 11pt; }
+  h2, h3, h4 { color: #111; }
+  pre, .stat-card, details, .callout, .tier-card, .diagram {
+    border-color: #ccc;
+    background: #f8f8f8;
+  }
+  .badge { border: 1px solid currentColor; }
+  a { color: #0366d6; }
+  details { break-inside: avoid; }
+  details[open] > .detail-body { display: block; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SIDEBAR TOC                                                 -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <h1>PacketCode</h1>
+    <p>Master Marketing Plan</p>
+  </div>
+  <nav>
+    <div class="toc-group">Strategy</div>
+    <a href="#executive-summary">1. Executive Summary</a>
+    <a href="#competitive-landscape">2. Competitive Landscape</a>
+    <a href="#differentiation">3. Unique Position</a>
+    <a href="#target-users">4. Target Users</a>
+    <a href="#revenue-model">5. Revenue Model & Pricing</a>
+
+    <div class="toc-group">Execution</div>
+    <a href="#marketing-channels">6. Marketing Channels</a>
+    <a href="#content-strategy">7. Content & Social Strategy</a>
+    <a href="#growth-playbook">8. Growth Playbook</a>
+    <a href="#case-studies">9. Case Studies</a>
+
+    <div class="toc-group">Funnel System</div>
+    <a href="#funnel-architecture">10. Funnel Architecture</a>
+    <a href="#funnel-modules">11. Funnel GUI Modules</a>
+    <a href="#data-models">12. Data Models</a>
+    <a href="#cost-analysis">13. Cost Analysis</a>
+
+    <div class="toc-group">Appendix</div>
+    <a href="#sources">14. Sources</a>
+  </nav>
+</aside>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- MAIN CONTENT                                                -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="main">
+
+<!-- ── Hero ────────────────────────────────────────────────── -->
+<div class="hero">
+  <h1>PacketCode Master Marketing Plan</h1>
+  <p class="tagline"><strong>One cockpit. Every AI agent. Ship faster.</strong></p>
+  <div class="meta">
+    <span>v1.0</span>
+    <span>Internal Reference</span>
+    <span>Apache-2.0</span>
+    <span>Last updated: 2026-03-21</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 1. EXECUTIVE SUMMARY                                      -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="executive-summary"><span class="section-num">01</span> Executive Summary</h2>
+
+<div class="callout callout-green">
+  <strong>Positioning:</strong> PacketCode is the first open-source, native desktop IDE that orchestrates multiple AI coding agents (Claude Code, OpenAI Codex CLI, and more) in a single multi-pane cockpit — with built-in project management, memory, and deployment tools.
+</div>
+
+<p><strong>Key taglines:</strong></p>
+<ul>
+  <li><em>"One cockpit. Every AI agent. Ship faster."</em></li>
+  <li><em>"The mission control for AI-powered development."</em></li>
+  <li><em>"Stop switching tabs. Start shipping."</em></li>
+</ul>
+
+<h3>Who it's for</h3>
+<ul>
+  <li><strong>Solo developers</strong> who use AI daily and are drowning in tool-switching</li>
+  <li><strong>Indie hackers</strong> who need to ship fast with a one-person team</li>
+  <li><strong>Small teams (2-5)</strong> exploring multi-agent workflows</li>
+</ul>
+
+<h3>Core Principles</h3>
+<ul class="check-list">
+  <li>Open source, Apache 2.0 licensed</li>
+  <li>Native desktop (Tauri v2) — not another Electron wrapper</li>
+  <li>Agent-agnostic — bring any CLI-based AI agent</li>
+  <li>Batteries included — issues, memory, deploy, MCP in one app</li>
+</ul>
+
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="value green">$15B</div>
+    <div class="label">AI coding tool spend (2025)</div>
+  </div>
+  <div class="stat-card">
+    <div class="value blue">24mo</div>
+    <div class="label">Cursor $0 → $1B ARR</div>
+  </div>
+  <div class="stat-card">
+    <div class="value purple">4,704%</div>
+    <div class="label">Cline YoY contributor growth</div>
+  </div>
+  <div class="stat-card">
+    <div class="value amber">63%</div>
+    <div class="label">"Vibe coders" are non-devs</div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 2. COMPETITIVE LANDSCAPE                                  -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="competitive-landscape"><span class="section-num">02</span> Competitive Landscape</h2>
+
+<h3>Market Statistics</h3>
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="value green">$3B</div>
+    <div class="label">Windsurf acquisition (75x revenue)</div>
+  </div>
+  <div class="stat-card">
+    <div class="value blue">$100M</div>
+    <div class="label">Lovable ARR</div>
+  </div>
+  <div class="stat-card">
+    <div class="value purple">$40M</div>
+    <div class="label">Bolt.new ARR</div>
+  </div>
+  <div class="stat-card">
+    <div class="value amber">5M</div>
+    <div class="label">Cline installs</div>
+  </div>
+</div>
+
+<h3>Competitor Matrix</h3>
+<div class="table-wrap">
+<table>
+<thead>
+  <tr>
+    <th>Tool</th>
+    <th>Model</th>
+    <th>Funding</th>
+    <th>Traction</th>
+    <th>Threat Level</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td><strong>Cursor</strong></td>
+    <td>VS Code fork, SaaS</td>
+    <td>$29.3B valuation</td>
+    <td>$1.2B ARR; pricing backlash</td>
+    <td><span class="badge badge-critical">Critical</span></td>
+  </tr>
+  <tr>
+    <td><strong>Cline</strong></td>
+    <td>VS Code extension, open-source</td>
+    <td>$32M raised</td>
+    <td>5M installs; 4,704% contributor growth</td>
+    <td><span class="badge badge-high">High</span></td>
+  </tr>
+  <tr>
+    <td><strong>Continue.dev</strong></td>
+    <td>VS Code/JetBrains extension</td>
+    <td>$5.1M raised</td>
+    <td>$1.4M revenue; open-source</td>
+    <td><span class="badge badge-moderate">Moderate</span></td>
+  </tr>
+  <tr>
+    <td><strong>Aider</strong></td>
+    <td>CLI, open-source</td>
+    <td>Bootstrapped</td>
+    <td>28K GitHub stars; solo-dev hero</td>
+    <td><span class="badge badge-moderate">Moderate</span></td>
+  </tr>
+  <tr>
+    <td><strong>Zed</strong></td>
+    <td>Native IDE (Rust), VC-backed</td>
+    <td>$42M+</td>
+    <td>Fast editor; AI assistant built-in</td>
+    <td><span class="badge badge-high">High</span></td>
+  </tr>
+  <tr>
+    <td><strong>OpenAI Codex App</strong></td>
+    <td>Standalone app</td>
+    <td>OpenAI-backed</td>
+    <td>macOS-only; cloud sandbox</td>
+    <td><span class="badge badge-high">High</span></td>
+  </tr>
+  <tr>
+    <td><strong>Bolt.new</strong></td>
+    <td>Web-based, AI-first</td>
+    <td>StackBlitz-backed</td>
+    <td>$40M ARR; near-death pivot</td>
+    <td><span class="badge badge-moderate">Moderate</span></td>
+  </tr>
+  <tr>
+    <td><strong>Lovable</strong></td>
+    <td>Web-based, AI-first</td>
+    <td>VC-backed</td>
+    <td>$100M ARR; non-dev focused</td>
+    <td><span class="badge badge-low">Low</span></td>
+  </tr>
+  <tr>
+    <td><strong>Replit</strong></td>
+    <td>Cloud IDE + AI agent</td>
+    <td>$100M+ raised</td>
+    <td>$100M ARR; education/enterprise focus</td>
+    <td><span class="badge badge-low">Low</span></td>
+  </tr>
+</tbody>
+</table>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 3. UNIQUE POSITION & DIFFERENTIATION                      -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="differentiation"><span class="section-num">03</span> Unique Position & Differentiation</h2>
+
+<h3>What No One Else Does</h3>
+<div class="table-wrap">
+<table>
+<thead>
+  <tr><th>Capability</th><th>PacketCode</th><th>Cursor</th><th>Windsurf</th><th>Zed</th><th>Void/PearAI</th><th>Claude CLI</th><th>Codex App</th></tr>
+</thead>
+<tbody>
+  <tr><td>Multi-agent orchestration</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+  <tr><td>Built-in Kanban board</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+  <tr><td>MCP Hub</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>Config</td><td>No</td></tr>
+  <tr><td>Project scaffolding</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+  <tr><td>Deploy pipeline</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+  <tr><td>Memory layer</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>Partial</td><td>No</td><td>No</td><td>CLAUDE.md</td><td>No</td></tr>
+  <tr><td>Agent profiles</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+  <tr><td>Tauri native (small binary)</td><td><strong style="color:var(--green)">Yes</strong></td><td>Electron</td><td>Electron</td><td>GPUI</td><td>Electron</td><td>CLI</td><td>Electron</td></tr>
+  <tr><td>Flight Deck (unified view)</td><td><strong style="color:var(--green)">Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+</tbody>
+</table>
+</div>
+
+<details>
+  <summary>Defensible Advantages vs. Not-a-Moat</summary>
+  <div class="detail-body">
+    <h4>Defensible Advantages</h4>
+    <ul class="check-list">
+      <li><strong>Multi-agent orchestration UX</strong> — hard to replicate in a VS Code extension</li>
+      <li><strong>Integrated workflow</strong> — issues + memory + deploy in one binary</li>
+      <li><strong>Tauri native performance</strong> — 10-50x smaller than Electron apps</li>
+      <li><strong>Open source community</strong> — contributors become advocates</li>
+      <li><strong>Agent-agnostic</strong> — survives any single model provider change</li>
+    </ul>
+    <h4>Not a Moat (Easily Copied)</h4>
+    <ul class="x-list">
+      <li>Dark theme / pretty UI</li>
+      <li>Any single feature in isolation</li>
+      <li>Integration with specific AI providers</li>
+      <li>Project scaffolding templates</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Critical Risks & Mitigations</summary>
+  <div class="detail-body">
+    <div class="table-wrap">
+    <table>
+    <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Cursor/Windsurf add multi-agent</td><td><span class="badge badge-critical">Critical</span></td><td>Move fast; depth of integration is hard to copy</td></tr>
+      <tr><td>Claude/OpenAI break CLI APIs</td><td><span class="badge badge-high">High</span></td><td>Agent-agnostic design; PTY-based (no API coupling)</td></tr>
+      <tr><td>Solo-dev burnout</td><td><span class="badge badge-high">High</span></td><td>Open source contributors; automate marketing pipeline</td></tr>
+      <tr><td>Users want full IDE features</td><td><span class="badge badge-moderate">Moderate</span></td><td>Position as cockpit, not replacement; integrate with editors</td></tr>
+      <tr><td>Tauri ecosystem immaturity</td><td><span class="badge badge-moderate">Moderate</span></td><td>Tauri v2 is stable; Rust community growing fast</td></tr>
+    </tbody>
+    </table>
+    </div>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 4. TARGET USERS                                           -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="target-users"><span class="section-num">04</span> Target Users</h2>
+
+<details open>
+  <summary>Primary: "AI-Native Solo Builder"</summary>
+  <div class="detail-body">
+    <div class="callout callout-green">
+      <strong>Profile:</strong> Technical developer who uses AI coding tools daily. Runs Claude Code or Codex from the terminal. Juggles 3-5 tabs/tools to manage context. Ships side projects or freelance work solo.
+    </div>
+    <ul>
+      <li><strong>Pain:</strong> Context fragmentation across terminal + editor + browser + project tracker</li>
+      <li><strong>Want:</strong> One app that unifies AI agents, project state, and shipping workflow</li>
+      <li><strong>Budget:</strong> $10-20/mo for tools that save significant time</li>
+      <li><strong>Where they hang out:</strong> Twitter/X, HN, Reddit r/programming, GitHub, YouTube</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Secondary: "Workflow Architect"</summary>
+  <div class="detail-body">
+    <div class="callout callout-blue">
+      <strong>Profile:</strong> Technical lead or senior dev at a small team (2-5). Evaluates tools for the team. Wants repeatable AI-augmented workflows, not just chat.
+    </div>
+    <ul>
+      <li><strong>Pain:</strong> Team members use different AI tools; no shared context or workflow</li>
+      <li><strong>Want:</strong> Standardized multi-agent setup with shared memory and profiles</li>
+      <li><strong>Budget:</strong> $20/user/mo is the ceiling for team tools</li>
+      <li><strong>Where they hang out:</strong> LinkedIn, Dev.to, engineering blogs, Discord</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>NOT For</summary>
+  <div class="detail-body">
+    <ul class="x-list">
+      <li><strong>Enterprise (500+)</strong> — no SSO, audit logs, or compliance features planned near-term</li>
+      <li><strong>Non-technical users</strong> — PacketCode requires CLI comfort; Bolt/Lovable serve this market</li>
+      <li><strong>Full IDE seekers</strong> — no built-in code editor, syntax highlighting, or debugger; pair with VS Code/Zed</li>
+    </ul>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 5. REVENUE MODEL & PRICING                                -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="revenue-model"><span class="section-num">05</span> Revenue Model & Pricing</h2>
+
+<h3>Market Anchors</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Tool</th><th>Price</th><th>Notes</th></tr></thead>
+<tbody>
+  <tr><td>Cursor Pro</td><td>$20/mo</td><td>Facing pricing backlash; users exploring alternatives</td></tr>
+  <tr><td>Windsurf Pro</td><td>$15/mo</td><td>Now OpenAI-owned; pricing uncertain</td></tr>
+  <tr><td>GitHub Copilot</td><td>$10/mo</td><td>Baseline for AI coding; commoditized</td></tr>
+  <tr><td>Cline Teams</td><td>$20/user/mo</td><td>Open-source core with paid team layer</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>PacketCode Pricing Tiers</h3>
+<div class="tier-grid">
+  <div class="tier-card">
+    <div class="tier-name">Free / Core</div>
+    <div class="tier-price">$0</div>
+    <ul>
+      <li>Full open-source app</li>
+      <li>Multi-agent sessions (unlimited)</li>
+      <li>Kanban issue tracker</li>
+      <li>Memory layer</li>
+      <li>MCP Hub</li>
+      <li>Deploy pipeline</li>
+      <li>Community support (GitHub/Discord)</li>
+    </ul>
+  </div>
+  <div class="tier-card featured">
+    <div class="tier-name">Pro</div>
+    <div class="tier-price">$12<span>/mo</span></div>
+    <ul>
+      <li>Everything in Free</li>
+      <li>Cloud memory sync</li>
+      <li>Agent profile marketplace</li>
+      <li>Priority GitHub issues</li>
+      <li>Advanced analytics dashboard</li>
+      <li>Custom scaffolding templates</li>
+      <li>Early access to new features</li>
+    </ul>
+  </div>
+  <div class="tier-card">
+    <div class="tier-name">Teams</div>
+    <div class="tier-price">$20<span>/user/mo</span></div>
+    <ul>
+      <li>Everything in Pro</li>
+      <li>Shared team memory</li>
+      <li>Team agent profiles</li>
+      <li>Shared issue boards</li>
+      <li>Team deploy configs</li>
+      <li>Admin dashboard</li>
+      <li>Slack/email support</li>
+    </ul>
+  </div>
+</div>
+
+<details>
+  <summary>Willingness-to-Pay Ranked Features</summary>
+  <div class="detail-body">
+    <ol>
+      <li><strong>Cloud memory sync</strong> — highest demand; devs want context across machines</li>
+      <li><strong>Agent profile marketplace</strong> — curated profiles for specific workflows</li>
+      <li><strong>Advanced analytics</strong> — usage, cost, productivity metrics per agent</li>
+      <li><strong>Team shared context</strong> — memory + issues synced across team</li>
+      <li><strong>Custom templates</strong> — enterprise-grade scaffolding</li>
+    </ol>
+  </div>
+</details>
+
+<details>
+  <summary>Revenue Projections</summary>
+  <div class="detail-body">
+    <div class="table-wrap">
+    <table>
+    <thead><tr><th>Milestone</th><th>GitHub Stars</th><th>Monthly Users</th><th>Pro Conv. %</th><th>Pro Users</th><th>Est. MRR</th></tr></thead>
+    <tbody>
+      <tr><td>Month 3</td><td>500</td><td>200</td><td>0%</td><td>0</td><td>$0</td></tr>
+      <tr><td>Month 6</td><td>2,000</td><td>800</td><td>3%</td><td>24</td><td>$288</td></tr>
+      <tr><td>Month 9</td><td>5,000</td><td>2,000</td><td>5%</td><td>100</td><td>$1,200</td></tr>
+      <tr><td>Month 12</td><td>10,000</td><td>5,000</td><td>5%</td><td>250</td><td>$3,000</td></tr>
+      <tr><td>Month 18</td><td>25,000</td><td>12,000</td><td>6%</td><td>720</td><td>$8,640</td></tr>
+      <tr><td>Month 24</td><td>50,000</td><td>25,000</td><td>7%</td><td>1,750</td><td>$21,000</td></tr>
+    </tbody>
+    </table>
+    </div>
+    <p style="color:var(--text-muted);font-size:0.8rem;">Projections assume organic growth with $0 paid acquisition budget. Pro-only; team revenue excluded.</p>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 6. MARKETING CHANNELS                                     -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="marketing-channels"><span class="section-num">06</span> Marketing Channels</h2>
+
+<h3>Tier 1 — High Impact</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Channel</th><th>Why</th><th>Approach</th></tr></thead>
+<tbody>
+  <tr><td><strong>Word of Mouth</strong></td><td>#1 driver for dev tools</td><td>Build something so good people can't shut up about it</td></tr>
+  <tr><td><strong>Hacker News</strong></td><td>Dev tool launches live/die here</td><td>Show HN posts; technical deep-dives; no marketing speak</td></tr>
+  <tr><td><strong>Twitter/X</strong></td><td>AI dev community epicenter</td><td>Build-in-public thread; demo clips; engage thought leaders</td></tr>
+  <tr><td><strong>Reddit</strong></td><td>r/programming, r/LocalLLaMA, r/SideProject</td><td>80% value / 20% promo; never shill</td></tr>
+  <tr><td><strong>YouTube</strong></td><td>Long-form trust builder</td><td>Build sessions, architecture tours, comparisons</td></tr>
+  <tr><td><strong>GitHub</strong></td><td>Discovery + credibility</td><td>Excellent README, tags, topics; engage issues; sponsor</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Tier 2 — Supporting</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Channel</th><th>Purpose</th></tr></thead>
+<tbody>
+  <tr><td>Discord</td><td>Community hub; support; feedback loop</td></tr>
+  <tr><td>Dev.to / Hashnode</td><td>SEO; long-form tutorials; repurpose YouTube content</td></tr>
+  <tr><td>Product Hunt</td><td>Launch day spike; badge credibility</td></tr>
+  <tr><td>LinkedIn</td><td>Reach "Workflow Architect" persona; engineering managers</td></tr>
+  <tr><td>Newsletters</td><td>TLDR, Bytes, Console.dev — get featured</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Tier 3 — Emerging</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Channel</th><th>Notes</th></tr></thead>
+<tbody>
+  <tr><td>TikTok / YouTube Shorts</td><td>Quick demo clips; repurpose from long-form; test virality</td></tr>
+  <tr><td>Podcasts</td><td>Guest spots on dev/AI podcasts; earned media > ads</td></tr>
+</tbody>
+</table>
+</div>
+
+<details>
+  <summary>What NOT to Do</summary>
+  <div class="detail-body">
+    <ul class="x-list">
+      <li>Paid ads before product-market fit</li>
+      <li>Cold email outreach (devs hate it)</li>
+      <li>Premature PR/press coverage (wait for traction)</li>
+      <li>Generic "AI tool" positioning (be specific)</li>
+      <li>Spam Reddit/HN (instant credibility death)</li>
+      <li>Chase enterprise before nailing solo-dev experience</li>
+      <li>Build features nobody asked for to "differentiate"</li>
+    </ul>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 7. CONTENT & SOCIAL STRATEGY                              -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="content-strategy"><span class="section-num">07</span> Content & Social Strategy</h2>
+
+<h3>Automation Stack</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Tool</th><th>Cost</th><th>Purpose</th></tr></thead>
+<tbody>
+  <tr><td>OBS Studio</td><td>Free</td><td>Screen recording for build sessions and demos</td></tr>
+  <tr><td>Opus Clip</td><td>$15/mo</td><td>Auto-clip long videos into shorts</td></tr>
+  <tr><td>CapCut</td><td>Free</td><td>Quick video editing, captions, effects</td></tr>
+  <tr><td>Claude (API)</td><td>~$20/mo</td><td>Content writing, repurposing, social copy</td></tr>
+  <tr><td>Postiz</td><td>Free (self-host)</td><td>Social media scheduling and cross-posting</td></tr>
+  <tr><td>HeyGen</td><td>$24/mo</td><td>AI avatar videos for product tours</td></tr>
+  <tr><td>Zebracat</td><td>$20/mo</td><td>Text-to-video for marketing clips</td></tr>
+  <tr><td>PostHog</td><td>Free tier</td><td>Product analytics, feature flags, session replay</td></tr>
+  <tr><td>Resend</td><td>Free tier</td><td>Transactional + marketing email</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Content Types Ranked by Effectiveness</h3>
+<ol>
+  <li><strong>Build-in-public threads</strong> (Twitter/X) — highest engagement-to-effort ratio</li>
+  <li><strong>Demo videos</strong> (YouTube, 3-10 min) — shows product value directly</li>
+  <li><strong>"I built X with PacketCode" posts</strong> — social proof</li>
+  <li><strong>Technical deep-dives</strong> (blog/HN) — credibility + SEO</li>
+  <li><strong>Comparison posts</strong> ("PacketCode vs Cursor for multi-agent") — captures search intent</li>
+  <li><strong>Short-form clips</strong> (TikTok/Shorts) — reach; low conversion but high awareness</li>
+  <li><strong>Tutorial series</strong> (YouTube/blog) — long-tail traffic; compound returns</li>
+</ol>
+
+<details>
+  <summary>Video Content Strategy</summary>
+  <div class="detail-body">
+    <div class="table-wrap">
+    <table>
+    <thead><tr><th>Format</th><th>Platform</th><th>Cadence</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Build session (20-45 min)</td><td>YouTube</td><td>1/week</td><td>Trust, depth, SEO</td></tr>
+      <tr><td>Feature demo (3-8 min)</td><td>YouTube, Twitter</td><td>2/week</td><td>Product awareness</td></tr>
+      <tr><td>Short clip (30-60s)</td><td>TikTok, Shorts, Reels</td><td>3-5/week</td><td>Reach, virality</td></tr>
+      <tr><td>Architecture tour (10-20 min)</td><td>YouTube</td><td>1/month</td><td>Credibility, contributors</td></tr>
+      <tr><td>Comparison/review (5-10 min)</td><td>YouTube</td><td>2/month</td><td>Capture search intent</td></tr>
+    </tbody>
+    </table>
+    </div>
+  </div>
+</details>
+
+<details>
+  <summary>Reddit Strategy (80/20 Rule)</summary>
+  <div class="detail-body">
+    <div class="callout callout-amber">
+      <strong>Rule:</strong> 80% of posts must be genuinely helpful to the community with zero mention of PacketCode. 20% can mention PacketCode when contextually relevant.
+    </div>
+    <ul>
+      <li><strong>Target subs:</strong> r/programming, r/LocalLLaMA, r/SideProject, r/webdev, r/rust, r/opensource</li>
+      <li><strong>Do:</strong> Answer questions, share learnings, post "I built this" with honest reflections</li>
+      <li><strong>Don't:</strong> Astroturf, use alt accounts, post-and-run, use marketing language</li>
+      <li><strong>ToS-compliant:</strong> Always disclose if you're the creator; never fake organic posts</li>
+    </ul>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 8. GROWTH PLAYBOOK                                        -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="growth-playbook"><span class="section-num">08</span> Growth Playbook</h2>
+
+<div class="phase phase-1">
+  <h4 style="color: var(--green);">Phase 1: Foundation — Months 1-3 — <em>"Have Fun"</em></h4>
+  <p><strong>Product:</strong></p>
+  <ul>
+    <li>Ship stable v1.0 with core features working reliably</li>
+    <li>Polished README, screenshots, GIF demos on GitHub</li>
+    <li>Quick-start guide that gets users running in &lt;2 minutes</li>
+  </ul>
+  <p><strong>Channels:</strong></p>
+  <ul>
+    <li>Start build-in-public on Twitter/X (daily)</li>
+    <li>Establish Discord server with welcome flow</li>
+    <li>First YouTube build session video</li>
+  </ul>
+  <p><strong>Content:</strong></p>
+  <ul>
+    <li>Record everything you build — this IS the content</li>
+    <li>Weekly Twitter thread on what you shipped</li>
+  </ul>
+  <p><strong>Target:</strong> <em>500 GitHub stars, 50 Discord members, 200 Twitter followers</em></p>
+</div>
+
+<div class="phase phase-2">
+  <h4 style="color: var(--blue);">Phase 2: Traction — Months 3-6 — <em>"Get Noticed"</em></h4>
+  <p><strong>Launches:</strong></p>
+  <ul>
+    <li>Show HN post (prepare demo, be ready to answer for 48h)</li>
+    <li>Product Hunt launch (coordinate with Discord community)</li>
+    <li>Submit to Console.dev, TLDR newsletter</li>
+  </ul>
+  <p><strong>Content:</strong></p>
+  <ul>
+    <li>Scale to 2 YouTube videos/week</li>
+    <li>Start short-form clips from long-form content</li>
+    <li>Dev.to/Hashnode tutorials for SEO</li>
+    <li>First comparison posts (PacketCode vs X)</li>
+  </ul>
+  <p><strong>Community:</strong></p>
+  <ul>
+    <li>First external contributors (good first issues)</li>
+    <li>Feature request voting system</li>
+    <li>User showcase channel in Discord</li>
+  </ul>
+  <p><strong>Target:</strong> <em>2,000 stars, 200 Discord, 1,000 Twitter, 800 MAU</em></p>
+</div>
+
+<div class="phase phase-3">
+  <h4 style="color: var(--purple);">Phase 3: Monetize — Months 6-12 — <em>"Ship Pro"</em></h4>
+  <p><strong>Product:</strong></p>
+  <ul>
+    <li>Launch Pro tier ($12/mo) with cloud memory sync</li>
+    <li>Agent profile marketplace (curated, then community)</li>
+    <li>Analytics dashboard for usage/cost tracking</li>
+  </ul>
+  <p><strong>Growth:</strong></p>
+  <ul>
+    <li>Referral program (free Pro month for referrals)</li>
+    <li>Sponsor open-source devs who use PacketCode</li>
+    <li>Guest spots on 2-3 dev/AI podcasts</li>
+    <li>Start Teams tier beta with 5-10 early teams</li>
+  </ul>
+  <p><strong>Target:</strong> <em>10,000 stars, 5,000 MAU, $3,000 MRR</em></p>
+</div>
+
+<details>
+  <summary>Key Marketing Vectors (Ranked)</summary>
+  <div class="detail-body">
+    <ol>
+      <li><strong>Product quality</strong> — the product IS the marketing (see: Cursor case study)</li>
+      <li><strong>Build-in-public</strong> — transparency creates trust and organic reach</li>
+      <li><strong>Video content</strong> — seeing is believing; demos > descriptions</li>
+      <li><strong>Community</strong> — contributors become the most credible advocates</li>
+      <li><strong>SEO / comparison content</strong> — capture "best AI coding tool" searches</li>
+      <li><strong>Launch events</strong> — HN, PH create spikes that compound</li>
+      <li><strong>Newsletter features</strong> — borrowed audience; high-trust traffic</li>
+    </ol>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 9. CASE STUDIES                                           -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="case-studies"><span class="section-num">09</span> Case Studies</h2>
+
+<details open>
+  <summary>Cursor: Product IS Marketing</summary>
+  <div class="detail-body">
+    <div class="stat-row">
+      <div class="stat-card"><div class="value green">$0→$1B</div><div class="label">ARR in 24 months</div></div>
+      <div class="stat-card"><div class="value blue">$29.3B</div><div class="label">Valuation</div></div>
+    </div>
+    <ul>
+      <li>Cursor spent almost nothing on marketing — the product spread through word of mouth</li>
+      <li>Key insight: they made AI coding so seamlessly integrated that users couldn't go back</li>
+      <li>Every feature was designed to create "wow" moments that people share</li>
+      <li><strong>Lesson:</strong> Invest 90% of effort in product; 10% in making it easy to share</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Cline: Community IS the Product Team</summary>
+  <div class="detail-body">
+    <div class="stat-row">
+      <div class="stat-card"><div class="value green">5M</div><div class="label">Installs</div></div>
+      <div class="stat-card"><div class="value blue">4,704%</div><div class="label">YoY contributor growth</div></div>
+    </div>
+    <ul>
+      <li>Open-source extension that grew entirely through community</li>
+      <li>Contributors drove feature development, bug fixes, and marketing simultaneously</li>
+      <li>Discord became the product feedback loop — features shipped based on community demand</li>
+      <li><strong>Lesson:</strong> Open source contributors are the most authentic marketing channel</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Aider: The Solo Builder Path</summary>
+  <div class="detail-body">
+    <ul>
+      <li>Bootstrapped by a single developer; 28K GitHub stars</li>
+      <li>No funding, no team, no marketing budget</li>
+      <li>Grew through genuine utility — devs found it, tried it, told others</li>
+      <li>Maintained credibility by staying focused and honest</li>
+      <li><strong>Lesson:</strong> A solo builder can compete with funded teams through quality and authenticity</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Bolt.new: Near-Death to $40M ARR</summary>
+  <div class="detail-body">
+    <ul>
+      <li>StackBlitz was struggling; pivoted to AI-first web development</li>
+      <li>Bolt.new launched and hit $40M ARR rapidly by targeting non-developers</li>
+      <li>Key move: made AI coding accessible to people who'd never used a terminal</li>
+      <li>63% of their "vibe coders" had never written code before</li>
+      <li><strong>Lesson:</strong> There's a massive market beyond traditional developers</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Pricing Backlash Warning</summary>
+  <div class="detail-body">
+    <div class="callout callout-red">
+      <strong>Warning:</strong> Cursor's pricing increases triggered significant user backlash on Reddit, HN, and Twitter. Users actively searched for alternatives — this is an opportunity for PacketCode.
+    </div>
+    <ul>
+      <li>Cursor raised prices and changed limits; users felt trapped</li>
+      <li>Open-source alternatives saw immediate spike in interest</li>
+      <li><strong>Lesson:</strong> Keep the free tier genuinely generous. Never make users feel locked in. Open source = escape hatch = trust.</li>
+    </ul>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 10. FUNNEL SYSTEM ARCHITECTURE                            -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="funnel-architecture"><span class="section-num">10</span> Funnel System Architecture</h2>
+
+<p>The funnel system is a built-in marketing automation pipeline inside PacketCode itself — dogfooding the product to market the product.</p>
+
+<h3>System Overview</h3>
+<div class="diagram">
+<pre>
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                     PACKETCODE FUNNEL SYSTEM                        │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │                                                                      │
+  │   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐            │
+  │   │  Raw Input   │───▶│   Content   │───▶│   Content   │            │
+  │   │  (ideas,     │    │   Studio    │    │   Library   │            │
+  │   │   notes,     │    │  (AI-aided) │    │  (organize) │            │
+  │   │   clips)     │    └─────────────┘    └──────┬──────┘            │
+  │   └─────────────┘                               │                   │
+  │                                                  ▼                   │
+  │   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐            │
+  │   │  Analytics   │◀───│   Funnel    │◀───│  Scheduler  │            │
+  │   │  Dashboard   │    │   Builder   │    │  & Publisher │            │
+  │   │  (measure)   │    │  (convert)  │    │  (distribute)│            │
+  │   └─────────────┘    └──────┬──────┘    └─────────────┘            │
+  │                              │                                      │
+  │                              ▼                                      │
+  │                      ┌─────────────┐                                │
+  │                      │   Email     │                                │
+  │                      │   Engine    │                                │
+  │                      │  (nurture)  │                                │
+  │                      └─────────────┘                                │
+  │                                                                      │
+  └──────────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>Data Flow</h3>
+<div class="diagram">
+<pre>
+  Raw Material ──▶ Content Studio ──▶ Content Library ──▶ Scheduler ──▶ Analytics
+       │                │                   │                │              │
+       │           AI Transform        Tag & Search      Auto-Publish    Track KPIs
+       │           Multi-format        Version Ctrl      Multi-Platform  Funnel Viz
+       │                                                      │
+       └──────────────────────────────────────────────────────┘
+                              Feedback Loop
+</pre>
+</div>
+
+<h3>High-Level Architecture</h3>
+<div class="diagram">
+<pre>
+  ┌─────────────────────────────────────────────────────────┐
+  │                    FRONTEND (React)                      │
+  │                                                          │
+  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+  │  │ Content  │ │ Content  │ │Scheduler │ │ Funnel   │  │
+  │  │ Studio   │ │ Library  │ │Publisher │ │ Builder  │  │
+  │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘  │
+  │       │             │            │             │         │
+  │  ┌────┴─────┐ ┌────┴─────┐                              │
+  │  │  Email   │ │Analytics │                              │
+  │  │  Engine  │ │Dashboard │                              │
+  │  └────┬─────┘ └────┬─────┘                              │
+  ├───────┼─────────────┼──────────────────────────────────┤
+  │       ▼             ▼         TAURI IPC                 │
+  ├─────────────────────────────────────────────────────────┤
+  │                   BACKEND (Rust)                         │
+  │                                                          │
+  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+  │  │ Content  │ │  Social  │ │  Email   │ │Analytics │  │
+  │  │ Store    │ │   APIs   │ │  (Resend)│ │  Store   │  │
+  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+  │                                                          │
+  │  ┌──────────────────────────────────────────────────┐   │
+  │  │              SQLite / JSON Store                  │   │
+  │  └──────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 11. FUNNEL GUI MODULES                                    -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="funnel-modules"><span class="section-num">11</span> Funnel GUI Modules</h2>
+
+<details open>
+  <summary>Module 1: Content Studio</summary>
+  <div class="detail-body">
+    <p>Transform raw material (ideas, notes, video clips, build logs) into platform-ready content using AI.</p>
+    <ul>
+      <li><strong>Input:</strong> Paste text, upload media, import from clipboard</li>
+      <li><strong>AI Transform:</strong> Rewrite for Twitter, LinkedIn, blog, newsletter, Reddit</li>
+      <li><strong>Multi-format:</strong> Generate text, thread, image prompt, video script from one source</li>
+      <li><strong>Preview:</strong> Platform-specific preview (tweet mockup, LinkedIn card, etc.)</li>
+      <li><strong>Send to:</strong> Content Library or direct to Scheduler</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Module 2: Content Library</summary>
+  <div class="detail-body">
+    <p>Organize, tag, search, and manage all content assets in one place.</p>
+    <ul>
+      <li><strong>Organization:</strong> Tags, categories, platform labels, status (draft/ready/published)</li>
+      <li><strong>Search:</strong> Full-text search + filter by tag, platform, date, status</li>
+      <li><strong>Versioning:</strong> Track edits; revert to previous versions</li>
+      <li><strong>Bulk actions:</strong> Tag, schedule, archive multiple items</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Module 3: Scheduler & Publisher</summary>
+  <div class="detail-body">
+    <p>Calendar view for scheduling and auto-publishing to multiple platforms.</p>
+    <ul>
+      <li><strong>Calendar:</strong> Week/month view; drag-and-drop scheduling</li>
+      <li><strong>Auto-publish:</strong> Connect Twitter, LinkedIn, Dev.to, Reddit APIs</li>
+      <li><strong>Platform-specific:</strong> Adjust format/length per platform at publish time</li>
+      <li><strong>Queue:</strong> Evergreen content queue for auto-fill empty slots</li>
+      <li><strong>Timezone:</strong> Schedule in target audience timezone</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Module 4: Funnel Builder</summary>
+  <div class="detail-body">
+    <p>Visual node-based editor (React Flow) for designing conversion funnels.</p>
+    <ul>
+      <li><strong>Node editor:</strong> Drag stages onto canvas; connect with edges</li>
+      <li><strong>Stage templates:</strong> Awareness, Interest, Trial, Conversion, Retention</li>
+      <li><strong>Event binding:</strong> Trigger actions (email, content, notification) on stage transitions</li>
+      <li><strong>Metrics:</strong> Real-time conversion rates between stages</li>
+      <li><strong>A/B paths:</strong> Split funnels for testing different journeys</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Module 5: Email Engine</summary>
+  <div class="detail-body">
+    <p>Event-driven email sequences powered by Resend API.</p>
+    <ul>
+      <li><strong>Triggers:</strong> Funnel stage entry, time delay, user action, manual</li>
+      <li><strong>Sequences:</strong> Multi-step email campaigns with branching logic</li>
+      <li><strong>Templates:</strong> HTML email builder with PacketCode branding</li>
+      <li><strong>A/B testing:</strong> Subject line and content variants</li>
+      <li><strong>Analytics:</strong> Open rate, click rate, unsubscribe rate per sequence</li>
+      <li><strong>Compliance:</strong> Unsubscribe links, CAN-SPAM, GDPR</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Module 6: Analytics Dashboard</summary>
+  <div class="detail-body">
+    <p>Unified metrics view for content performance, funnel health, and revenue.</p>
+    <ul>
+      <li><strong>KPIs:</strong> Impressions, clicks, downloads, active users, paid conversions, MRR</li>
+      <li><strong>Funnel visualization:</strong> Drop-off rates per stage; bottleneck detection</li>
+      <li><strong>Platform performance:</strong> Which channels drive the most conversions</li>
+      <li><strong>Content analytics:</strong> Best-performing content by engagement and conversion</li>
+      <li><strong>Revenue tracking:</strong> MRR, churn, LTV per cohort</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Posting Schedule Defaults (JSON)</summary>
+  <div class="detail-body">
+<pre>{
+  "scheduleDefaults": {
+    "twitter": {
+      "timesPerDay": 2,
+      "bestTimes": ["09:00", "17:00"],
+      "timezone": "America/New_York",
+      "contentMix": {
+        "buildInPublic": 0.3,
+        "featureDemo": 0.25,
+        "engagement": 0.2,
+        "curated": 0.15,
+        "promo": 0.1
+      }
+    },
+    "youtube": {
+      "longForm": { "perWeek": 1, "bestDay": "Tuesday", "bestTime": "14:00" },
+      "shorts": { "perWeek": 3, "bestDays": ["Monday", "Wednesday", "Friday"] }
+    },
+    "reddit": {
+      "perWeek": 2,
+      "subreddits": ["programming", "SideProject", "LocalLLaMA", "webdev"],
+      "rule": "80% value / 20% mention"
+    },
+    "devto": { "perWeek": 1, "bestDay": "Wednesday" },
+    "linkedin": { "perWeek": 2, "bestDays": ["Tuesday", "Thursday"], "bestTime": "08:00" },
+    "newsletter": { "perMonth": 2, "tool": "Resend" }
+  }
+}</pre>
+  </div>
+</details>
+
+<details>
+  <summary>AI Prompt Templates (JSON)</summary>
+  <div class="detail-body">
+<pre>{
+  "promptTemplates": {
+    "tweetFromNote": {
+      "system": "You are a dev tool marketer. Write concise, authentic tweets. No emojis spam. No hashtag spam. Sound like a developer, not a marketer.",
+      "user": "Turn this note into a tweet (max 280 chars):\n\n{{input}}"
+    },
+    "threadFromBuildLog": {
+      "system": "You write build-in-public Twitter threads. Be honest about challenges. Show the process, not just results.",
+      "user": "Turn this build log into a 5-7 tweet thread:\n\n{{input}}"
+    },
+    "blogFromVideo": {
+      "system": "You convert video transcripts into well-structured blog posts with code examples.",
+      "user": "Convert this video transcript into a Dev.to blog post with proper headings and code blocks:\n\n{{input}}"
+    },
+    "redditPost": {
+      "system": "You write helpful Reddit posts. Never sound promotional. Focus on sharing knowledge and experience. Always be honest about limitations.",
+      "user": "Write a Reddit post sharing what I learned while building this. Topic: {{topic}}\n\nKey points:\n{{input}}"
+    },
+    "emailSequenceStep": {
+      "system": "You write developer-focused emails. Short, valuable, no fluff. Include one clear CTA.",
+      "user": "Write email {{stepNumber}} of a {{totalSteps}}-part sequence. Topic: {{topic}}\nGoal: {{goal}}\nPrevious email summary: {{previousSummary}}"
+    }
+  }
+}</pre>
+  </div>
+</details>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 12. DATA MODELS                                           -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="data-models"><span class="section-num">12</span> Data Models</h2>
+
+<h3>ContentItem</h3>
+<pre>interface ContentItem {
+  id: string;
+  type: 'tweet' | 'thread' | 'blog' | 'video' | 'short' | 'email' | 'reddit' | 'linkedin';
+  platform: 'twitter' | 'youtube' | 'devto' | 'reddit' | 'linkedin' | 'newsletter';
+  status: 'draft' | 'ready' | 'scheduled' | 'published' | 'archived';
+  text: string;
+  mediaUrl?: string;
+  tags: string[];
+  sourceId?: string;           // ID of raw material it was created from
+  createdAt: string;           // ISO 8601
+  updatedAt: string;
+  publishedAt?: string;
+  scheduledAt?: string;
+  analytics?: {
+    impressions: number;
+    clicks: number;
+    engagement: number;        // likes + comments + shares
+    conversions: number;       // tracked link clicks to site
+  };
+}</pre>
+
+<h3>FunnelStage</h3>
+<pre>interface FunnelStage {
+  id: string;
+  type: 'awareness' | 'interest' | 'trial' | 'conversion' | 'retention';
+  name: string;
+  description?: string;
+  position: { x: number; y: number };   // React Flow canvas position
+  events: FunnelEvent[];
+  targets: string[];                      // IDs of connected downstream stages
+  emailSequenceId?: string;              // Trigger email sequence on entry
+  metrics?: {
+    entered: number;
+    exited: number;
+    conversionRate: number;
+  };
+}
+
+interface FunnelEvent {
+  id: string;
+  trigger: 'stage_enter' | 'time_delay' | 'user_action' | 'manual';
+  action: 'send_email' | 'add_tag' | 'move_stage' | 'notify' | 'webhook';
+  config: Record&lt;string, unknown&gt;;
+  delayDays?: number;
+}</pre>
+
+<h3>EmailSequence</h3>
+<pre>interface EmailSequence {
+  id: string;
+  name: string;
+  trigger: 'funnel_stage' | 'signup' | 'trial_start' | 'trial_end' | 'manual';
+  status: 'draft' | 'active' | 'paused' | 'completed';
+  steps: EmailStep[];
+  analytics?: {
+    sent: number;
+    opened: number;
+    clicked: number;
+    unsubscribed: number;
+  };
+}
+
+interface EmailStep {
+  day: number;                // Days after trigger
+  subject: string;
+  template: string;           // HTML template ID or inline
+  abVariant?: {
+    subject?: string;
+    template?: string;
+    splitPercent: number;     // 0-100
+  };
+}</pre>
+
+<h3>ScheduledPost</h3>
+<pre>interface ScheduledPost {
+  id: string;
+  contentId: string;           // Reference to ContentItem
+  platform: string;
+  scheduledAt: string;         // ISO 8601
+  status: 'pending' | 'publishing' | 'published' | 'failed';
+  publishedUrl?: string;
+  error?: string;
+  retryCount: number;
+}</pre>
+
+<h3>AnalyticsSnapshot</h3>
+<pre>interface AnalyticsSnapshot {
+  date: string;                // ISO 8601 date
+  impressions: number;         // Total across all platforms
+  clicks: number;              // Link clicks to site/repo
+  downloads: number;           // App downloads / installs
+  activeUsers: number;         // Monthly active users
+  paidUsers: number;           // Pro + Teams subscribers
+  mrr: number;                 // Monthly recurring revenue in cents
+  platformBreakdown: {
+    [platform: string]: {
+      impressions: number;
+      clicks: number;
+      engagement: number;
+      followers: number;
+    };
+  };
+  funnelSnapshot: {
+    [stageId: string]: {
+      entered: number;
+      exited: number;
+      conversionRate: number;
+    };
+  };
+}</pre>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 13. COST ANALYSIS                                         -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="cost-analysis"><span class="section-num">13</span> Cost Analysis</h2>
+
+<h3>Monthly Automation Stack Cost</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Tool</th><th>Monthly Cost</th><th>Category</th></tr></thead>
+<tbody>
+  <tr><td>OBS Studio</td><td>$0</td><td>Recording</td></tr>
+  <tr><td>CapCut</td><td>$0</td><td>Editing</td></tr>
+  <tr><td>Postiz (self-hosted)</td><td>$0</td><td>Scheduling</td></tr>
+  <tr><td>PostHog (free tier)</td><td>$0</td><td>Analytics</td></tr>
+  <tr><td>Resend (free tier)</td><td>$0</td><td>Email</td></tr>
+  <tr><td>Opus Clip</td><td>$15</td><td>Video Clips</td></tr>
+  <tr><td>Claude API</td><td>~$20</td><td>AI Content</td></tr>
+  <tr><td>Zebracat</td><td>$20</td><td>Video Gen</td></tr>
+  <tr><td>HeyGen</td><td>$24</td><td>Avatar Video</td></tr>
+  <tr style="background: rgba(63,185,80,0.08); font-weight: 600;">
+    <td><strong>Total</strong></td><td><strong>~$79/mo</strong></td><td></td>
+  </tr>
+</tbody>
+</table>
+</div>
+
+<h3>vs. Commercial Alternatives</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Alternative</th><th>Monthly Cost</th><th>What You Get</th></tr></thead>
+<tbody>
+  <tr><td>GoHighLevel</td><td>$97 - $497</td><td>CRM, funnels, email, scheduling (all-in-one SaaS)</td></tr>
+  <tr><td>ClickFunnels</td><td>$127 - $208</td><td>Funnel builder, email, limited CRM</td></tr>
+  <tr><td>HubSpot Marketing</td><td>$45 - $3,600</td><td>Full marketing suite (overkill for indie dev)</td></tr>
+  <tr><td>Buffer + Mailchimp + Analytics</td><td>$45 - $100</td><td>Piecemeal stack; no funnel builder</td></tr>
+  <tr style="background: rgba(63,185,80,0.08); font-weight: 600;">
+    <td><strong>PacketCode Funnel System</strong></td><td><strong>~$79</strong></td><td>Full pipeline, self-hosted, integrated into IDE</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="callout callout-green">
+  <strong>Savings:</strong> The built-in funnel system saves $50-400+/mo compared to commercial alternatives while providing tighter integration with the development workflow. Since it's built into PacketCode, there's zero context-switching between building and marketing.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- 14. SOURCES                                               -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<h2 id="sources"><span class="section-num">14</span> Sources</h2>
+
+<details open>
+  <summary>Competitor Data</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://sacra.com/research/cursor-revenue-growth/">Sacra — Cursor Revenue & Growth Analysis</a></li>
+      <li><a href="https://www.theinformation.com/articles/cursor-valuation">The Information — Cursor $29.3B Valuation</a></li>
+      <li><a href="https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev">VS Code Marketplace — Cline (5M installs)</a></li>
+      <li><a href="https://github.com/cline/cline">GitHub — Cline repository (contributor data)</a></li>
+      <li><a href="https://continue.dev">Continue.dev — Official site</a></li>
+      <li><a href="https://github.com/Aider-AI/aider">GitHub — Aider repository</a></li>
+      <li><a href="https://zed.dev">Zed — Official site</a></li>
+      <li><a href="https://openai.com/index/introducing-codex/">OpenAI — Codex announcement</a></li>
+      <li><a href="https://bolt.new">Bolt.new — Official site</a></li>
+      <li><a href="https://lovable.dev">Lovable — Official site</a></li>
+      <li><a href="https://replit.com">Replit — Official site</a></li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Business Models & Funding</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://www.wsj.com/articles/openai-windsurf-acquisition">WSJ — OpenAI acquires Windsurf for $3B</a></li>
+      <li><a href="https://www.bloomberg.com/news/articles/ai-coding-tools-market">Bloomberg — AI Coding Tools Market ($15B)</a></li>
+      <li><a href="https://sacra.com/research/cline-funding/">Sacra — Cline $32M Funding Round</a></li>
+      <li><a href="https://techcrunch.com/zed-funding">TechCrunch — Zed $42M+ Funding</a></li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Marketing Strategy</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://www.ycombinator.com/library/5z-how-to-launch">Y Combinator — How to Launch</a></li>
+      <li><a href="https://www.producthunt.com/launch">Product Hunt — Launch Guide</a></li>
+      <li><a href="https://console.dev">Console.dev — Developer Tool Newsletter</a></li>
+      <li><a href="https://tldr.tech">TLDR Newsletter</a></li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Social Media Tools</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://obsproject.com">OBS Studio</a></li>
+      <li><a href="https://opus.pro">Opus Clip</a></li>
+      <li><a href="https://www.capcut.com">CapCut</a></li>
+      <li><a href="https://postiz.com">Postiz — Open-source social scheduler</a></li>
+      <li><a href="https://www.heygen.com">HeyGen — AI avatar videos</a></li>
+      <li><a href="https://www.zebracat.ai">Zebracat — Text-to-video</a></li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Growth & Funnels</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://posthog.com">PostHog — Product Analytics</a></li>
+      <li><a href="https://resend.com">Resend — Email API</a></li>
+      <li><a href="https://reactflow.dev">React Flow — Node-based editor</a></li>
+      <li><a href="https://www.gohighlevel.com">GoHighLevel — Marketing Platform</a></li>
+      <li><a href="https://www.clickfunnels.com">ClickFunnels — Funnel Builder</a></li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>Video & Content</summary>
+  <div class="detail-body">
+    <ul>
+      <li><a href="https://www.youtube.com/creators">YouTube Creator Academy</a></li>
+      <li><a href="https://dev.to">Dev.to — Developer blogging platform</a></li>
+      <li><a href="https://hashnode.com">Hashnode — Developer blogging platform</a></li>
+    </ul>
+  </div>
+</details>
+
+<!-- ── Footer ─────────────────────────────────────────────── -->
+<div style="margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace;">
+  <p>PacketCode Master Marketing Plan — Internal Reference Document</p>
+  <p>Generated 2026-03-21 | Apache-2.0 | Not for public distribution</p>
+</div>
+
+</div><!-- /.main -->
+
+<!-- ── Minimal JS for TOC highlighting ──────────────────── -->
+<script>
+(function() {
+  const links = document.querySelectorAll('.sidebar nav a[href^="#"]');
+  const sections = [];
+  links.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ id, el, link });
+  });
+
+  function updateActive() {
+    let current = sections[0];
+    const scrollY = window.scrollY + 120;
+    for (const s of sections) {
+      if (s.el.offsetTop <= scrollY) current = s;
+    }
+    links.forEach(l => l.classList.remove('active'));
+    if (current) current.link.classList.add('active');
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
+</script>
+
+</body>
+</html>

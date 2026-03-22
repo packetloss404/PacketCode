@@ -26,8 +26,12 @@ function loadSessions(): InsightsSession[] {
   return loadFromStorage<InsightsSession[]>(STORAGE_KEY, []);
 }
 
+const MAX_SESSIONS = 50;
+
 function saveSessions(sessions: InsightsSession[]) {
-  saveToStorage(STORAGE_KEY, sessions);
+  // Prune oldest sessions to prevent localStorage quota exhaustion
+  const pruned = sessions.length > MAX_SESSIONS ? sessions.slice(0, MAX_SESSIONS) : sessions;
+  saveToStorage(STORAGE_KEY, pruned);
 }
 
 export const useInsightsStore = create<InsightsStore>((set, get) => ({

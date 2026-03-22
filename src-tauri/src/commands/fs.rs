@@ -2,6 +2,7 @@ use super::shared::SKIP_DIRS;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
+use tracing::info;
 
 #[derive(Clone, Serialize)]
 pub struct DirEntry {
@@ -21,10 +22,9 @@ pub fn get_cwd() -> Result<String, String> {
 
 #[tauri::command]
 pub fn list_directory(dir_path: String) -> Result<Vec<DirEntry>, String> {
+    super::validate_project_path(&dir_path)?;
+    info!(dir_path = %dir_path, "Listing directory");
     let path = Path::new(&dir_path);
-    if !path.is_dir() {
-        return Err(format!("Not a directory: {}", dir_path));
-    }
 
     // Validate against symlink escape
     let canonical = fs::canonicalize(path)

@@ -303,6 +303,7 @@ pub async fn github_investigate_issue(
     repo: String,
     issue_number: u32,
 ) -> Result<String, String> {
+    super::validate_project_path(&project_path)?;
     validate_github_name(&owner, "owner")?;
     validate_github_name(&repo, "repo")?;
     let client = github_client_from_state(auth.inner()).await?;

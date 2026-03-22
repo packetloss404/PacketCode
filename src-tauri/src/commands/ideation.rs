@@ -1,10 +1,13 @@
 use crate::claude::binary::run_claude;
+use tracing::info;
 
 #[tauri::command]
 pub async fn generate_ideas(
     project_path: String,
     idea_types: Vec<String>,
 ) -> Result<String, String> {
+    super::validate_project_path(&project_path)?;
+    info!(project_path = %project_path, types = ?idea_types, "Generating ideas");
     let types_str = idea_types.join(", ");
 
     let prompt = format!(
