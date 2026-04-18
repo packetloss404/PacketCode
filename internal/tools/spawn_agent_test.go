@@ -27,10 +27,18 @@ type fakeSpawner struct {
 	// external signal (e.g. a close on a test-owned channel) — but for our
 	// purposes the delay suffices.
 
-	spawned  atomic.Int32
-	waited   atomic.Int32
-	lastReq  JobSpawnRequest
-	lastWait string
+	spawned    atomic.Int32
+	waited     atomic.Int32
+	cancelled  atomic.Int32
+	lastReq    JobSpawnRequest
+	lastWait   string
+	lastCancel string
+}
+
+func (f *fakeSpawner) Cancel(id string) bool {
+	f.cancelled.Add(1)
+	f.lastCancel = id
+	return true
 }
 
 func (f *fakeSpawner) Spawn(req JobSpawnRequest) (JobSpawnResult, *JobSpawnError) {
@@ -193,6 +201,15 @@ func TestSpawnAgentTool_Wait_Cancelled(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("cancellation path took %s; should return promptly", elapsed)
+	}
+	// Cascade: the parent's cancellation must have propagated to the
+	// spawner so the sub-agent is told to terminate too. Without this,
+	// /cancel on a wait=true spawn would leave an orphan worker running.
+	if f.cancelled.Load() != 1 {
+		t.Fatalf("Spawner.Cancel called %d times, want 1 (cascade)", f.cancelled.Load())
+	}
+	if f.lastCancel != "abcd1234" {
+		t.Fatalf("Spawner.Cancel called with id %q, want abcd1234", f.lastCancel)
 	}
 }
 

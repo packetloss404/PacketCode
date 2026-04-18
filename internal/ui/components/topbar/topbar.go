@@ -7,10 +7,10 @@
 // segments in this priority order (right-most first):
 //   duration → cost → git branch → project name → context %
 // Provider/model and the brand are always shown. The jobs segment is
-// deliberately placed LAST (after duration) in the droppable slice —
-// active background jobs are time-sensitive information the user wants
-// to see as long as any chrome survives. See
-// TestTopbar_JobsSegment_DropsBeforeDuration and
+// deliberately placed FIRST in the droppable slice (so it's the last
+// thing dropped as the terminal narrows) — active background jobs are
+// time-sensitive information the user wants to see as long as any
+// chrome survives. See TestTopbar_JobsSegment_SurvivesNarrowDrops and
 // docs/feature-background-agents.md for the choice.
 package topbar
 

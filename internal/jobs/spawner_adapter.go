@@ -42,6 +42,10 @@ func (a *spawnerAdapter) Spawn(req tools.JobSpawnRequest) (tools.JobSpawnResult,
 	}, nil
 }
 
+func (a *spawnerAdapter) Cancel(id string) bool {
+	return a.m.Cancel(id)
+}
+
 func (a *spawnerAdapter) WaitForJob(id string, timeout time.Duration) (tools.JobWaitResult, bool) {
 	res, ok := a.m.WaitForJob(id, timeout)
 	if !ok {

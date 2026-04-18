@@ -114,6 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Test coverage
 
-14 test-bearing packages, all green: agent, config, cost, git, provider
-(registry + 5 providers), session, tools (registry + safefs + 6 tools),
+17 test-bearing packages, all green: agent, app, config, cost, git,
+jobs, provider (registry + 5 providers), session, tools (registry +
+safefs + 6 tools + spawn_agent), ui/components/jobs,
 ui/components/topbar, ui/layout.

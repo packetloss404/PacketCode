@@ -154,9 +154,9 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, raw json.RawMessage) (Tool
 
 // waitAndReport blocks on the spawner until the job terminates, ctx
 // cancels, or timeout fires. We race a goroutine that calls WaitForJob
-// against ctx.Done() because the JobSpawner interface does not accept
-// a ctx — cascading cancellation through Manager.Cancel is the caller's
-// responsibility at the wiring layer above.
+// against ctx.Done(); on ctx cancellation we call Spawner.Cancel to
+// cascade the cancellation down to the sub-agent so we don't leave an
+// orphan worker running after returning an IsError result to the parent.
 func (t *SpawnAgentTool) waitAndReport(ctx context.Context, snap JobSpawnResult, timeout time.Duration) (ToolResult, error) {
 	resultCh := make(chan waitOutcome, 1)
 	go func() {
@@ -166,6 +166,10 @@ func (t *SpawnAgentTool) waitAndReport(ctx context.Context, snap JobSpawnResult,
 
 	select {
 	case <-ctx.Done():
+		// Cascade: tell the manager to kill the sub-agent. The racing
+		// WaitForJob goroutine will then return promptly as the job
+		// flips to StateCancelled and we can safely drop its result.
+		t.Spawner.Cancel(snap.ID)
 		return ToolResult{
 			Content: fmt.Sprintf("spawn_agent: cancelled while waiting on job %s: %s",
 				snap.ID, ctx.Err()),

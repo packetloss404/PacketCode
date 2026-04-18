@@ -24,6 +24,13 @@ type JobSpawner interface {
 	// or timeout elapses. ok=false when the job is unknown or the
 	// timeout fires first.
 	WaitForJob(id string, timeout time.Duration) (JobWaitResult, bool)
+
+	// Cancel signals the named job to terminate. Returns true if a
+	// cancellation was dispatched, false if the job is unknown or
+	// already in a terminal state. Used by spawn_agent (wait=true) to
+	// cascade parent-context cancellation down to the sub-agent so a
+	// cancelled wait doesn't leave an orphan worker running.
+	Cancel(id string) bool
 }
 
 // JobSpawnRequest mirrors jobs.SpawnRequest.
