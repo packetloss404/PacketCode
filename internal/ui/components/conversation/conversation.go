@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/packetcode/packetcode/internal/tools"
+	"github.com/packetcode/packetcode/internal/ui/components/diff"
 	"github.com/packetcode/packetcode/internal/ui/components/welcome"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
@@ -273,19 +274,58 @@ func renderToolCall(msg Message, width int) string {
 
 	if msg.ToolResult != "" {
 		divider := theme.StyleDim.Render(strings.Repeat("─", 24))
-		parts = append(parts, divider)
-		body := msg.ToolResult
-		if msg.IsError {
-			body = theme.StyleError.Render(body)
-		}
-		if msg.Collapsed {
-			lines := strings.Count(msg.ToolResult, "\n") + 1
-			parts = append(parts, theme.StyleDim.Render(fmt.Sprintf("▶ Output collapsed (%d lines) — press Tab to expand", lines)))
-		} else {
-			parts = append(parts, body)
-		}
+		parts = append(parts, divider, renderToolResultBody(msg, width-4))
 	}
 	return theme.StyleToolCall.Width(width - 2).Render(strings.Join(parts, "\n"))
+}
+
+// renderToolResultBody picks the right rendering for the result body
+// (error / collapsed / diff / plain). Extracted from renderToolCall so
+// the diff path stays testable in isolation.
+func renderToolResultBody(msg Message, width int) string {
+	if msg.IsError {
+		return theme.StyleError.Render(msg.ToolResult)
+	}
+	if msg.Collapsed {
+		lines := strings.Count(msg.ToolResult, "\n") + 1
+		return theme.StyleDim.Render(fmt.Sprintf("▶ Output collapsed (%d lines) — press Tab to expand", lines))
+	}
+	if msg.ToolName == "patch_file" {
+		if rendered, ok := tryRenderDiffResult(msg.ToolResult, width); ok {
+			return rendered
+		}
+	}
+	return msg.ToolResult
+}
+
+// tryRenderDiffResult looks for a unified-diff marker inside a tool
+// result and, if found, renders everything after it via the diff
+// component. Anything before the marker (patch_file's "Applied N
+// patches" preamble) is preserved dim above the diff so the user
+// still sees the summary line.
+//
+// Conversation uses a 200-row cap — the viewport is scrollable so
+// truncation is only about keeping gigantic diffs from hanging
+// lipgloss.
+func tryRenderDiffResult(content string, width int) (string, bool) {
+	idx := strings.Index(content, "--- ")
+	if idx < 0 {
+		idx = strings.Index(content, "@@ ")
+	}
+	if idx < 0 {
+		return "", false
+	}
+	prefix := strings.TrimRight(content[:idx], "\n")
+	m, err := diff.Parse(content[idx:])
+	if err != nil || m.Empty() {
+		return "", false
+	}
+	m = m.SetWidth(width).SetMaxRows(200)
+	out := m.View()
+	if prefix != "" {
+		return theme.StyleDim.Render(prefix) + "\n" + out, true
+	}
+	return out, true
 }
 
 func truncate(s string, max int) string {

@@ -40,39 +40,14 @@ layout slot.
 
 ## Round 4 — Standalone diff component + richer tool-call rendering
 
-**Scope.** Extract diff rendering into a dedicated
-`internal/ui/components/diff` component with proper hunk headers, line
-numbers, and colour-coded `+`/`-` lines. Wire it into the approval
-prompt for `write_file`/`patch_file` (today the user sees only the JSON
-params) and into the completed tool-call block in the conversation.
-
-**Why fourth.** Makes approvals far more legible — right now the user
-approves a raw JSON blob for `patch_file`. This is a UX cliff that
-matters more as the feature gets used heavily.
-
-**File-by-file sketch.**
-
-- `internal/ui/components/diff/diff.go` — parse a unified diff string
-  (already produced by `patch_file`) into structured hunks, render
-  with side-by-side or unified presentation, line-number gutter, colour.
-- `internal/ui/components/approval/approval.go` — when the tool is
-  `write_file` or `patch_file`, generate a preview diff (compute it
-  from the current file vs the proposed content) and render via the
-  diff component instead of raw JSON.
-- `internal/ui/components/conversation/conversation.go` — swap the
-  inline diff-in-toolcall path to use the new component for visual
-  parity.
-- `internal/tools/write_file.go` — add a `PreviewDiff(root, path,
-  content string) string` helper so approval can render without
-  re-implementing diffing.
-
-**Agents.**
-1. **Plan** — diff parsing approach (reuse `go-difflib` vs custom),
-   component API, side-by-side vs unified decision.
-2. **Implement** — component + approval wiring + conversation wiring.
-3. **Tests + visual-smoke + commit**.
-
-**Estimated effort.** Single session, ~3 agents.
+**Landed.** See `docs/feature-diff-component.md` for the full design
+spec and the git log for the commit that shipped the
+`internal/ui/components/diff` package, the diff-aware approval
+renderers for `write_file` and `patch_file` (via new
+`WriteFileTool.PreviewDiff` / `PatchFileTool.PreviewPatchDiff`
+helpers), and the conversation-side parity rendering for the
+completed `patch_file` tool-result block. Rounds 5–7 below are
+unchanged.
 
 ---
 

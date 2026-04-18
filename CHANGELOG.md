@@ -105,6 +105,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same `applyProviderSwitch` / `applyModelSwitch` helpers in
   `internal/app`, so the side effects (Registry.SetActive, top-bar
   refresh, `switched …` system message) stay identical.
+- **Standalone diff component + richer approvals — Round 4.** New
+  `internal/ui/components/diff` package parses a unified-diff string
+  into structured hunks and renders it with colour, a right-aligned
+  line-number gutter, width-clamp truncation ("…"), and a capped-
+  height layout that falls back to "N lines omitted (+X, −Y across Z
+  hunks)" when the cap is exceeded (40 rows in the approval modal,
+  200 rows in the scrollable conversation viewport). `write_file`
+  and `patch_file` approvals now route through tool-specific
+  `BodyRenderer` functions registered in `internal/ui/components/
+  approval/renderers.go`: `write_file` previews via a new
+  `WriteFileTool.PreviewDiff` helper (handles brand-new files,
+  identical-content no-ops, binary rejection, path traversal);
+  `patch_file` previews via a new `PatchFileTool.PreviewPatchDiff`
+  helper (shares validation + diff generation with `Execute` through
+  a new private `applyPatches`). The completed `patch_file`
+  tool-result block in the conversation pane renders through the
+  same component for visual parity between "approve" and "approved".
+  The unexported `patchOp` struct is renamed to exported `PatchOp`
+  (JSON wire format unchanged). Every other tool keeps the existing
+  `summariseParams` JSON-pretty-print fallback.
 - **Slash-command autocomplete — Round 3.** Typing `/` as the first
   character of the input buffer opens a borderless filter-as-you-type
   popup above the input listing every slash command. A two-tier sort
@@ -137,8 +157,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- Standalone diff component — diffs render inline in tool-call blocks
-  for now.
 - Streaming-generation HTTP cancellation on Ctrl+C — today the spinner
   stops but the request continues until the provider closes the stream.
 - MCP / plugin system.
@@ -146,18 +164,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Test coverage
 
-19 test-bearing packages, all green. Round 3 added
-`internal/ui/components/autocomplete` (the new package) with ~22
-component tests covering lifecycle, two-tier filter bucketing,
-navigation keys, render shape (cursor marker, overflow footer, width
-clamp), plus ~23 App-level integration tests covering the open/close
-triggers, Tab / Enter semantics, modal precedence, no-match
-fall-through, the Enter-submits-with-args fall-through, and the keymap
-dedup. A `TestParseSlashCommand_TrailingSpaceAfterVerb` regression
-pins the "accept leaves a trailing space" invariant; the layout and
-input component tests absorbed the new 5-arg `Frame` signature and
+22 test-bearing packages, all green. Round 4 added
+`internal/ui/components/diff` (new package, ~28 component tests
+covering parse edge cases, malformed-hunk errors, new-file
+synthesis, stats, gutter width, width-clamp truncation, row-cap
+head/tail/single-line fallback, and immutable-builder copy
+semantics) and turned `internal/ui/components/approval` and
+`internal/ui/components/conversation` into test-bearing packages
+where they weren't before (+13 approval tests using real
+`WriteFileTool` / `PatchFileTool` rooted at `t.TempDir()` for every
+branch of the diff-aware renderers — new-file, overwrite,
+identical, binary fallback, path-traversal fallback, malformed-JSON
+fallback, patch valid, search-not-found, ambiguous, registry
+override, unregistered-tool fallthrough; +6 conversation tests
+covering patch_file diff routing, error fallthrough, collapsed
+placeholder precedence, non-patch-file passthrough, missing-marker
+fast path, and the 200-row cap). Tools package gained 6 new
+`TestWriteFile_PreviewDiff_*` tests, 9 new
+`TestPatchFile_PreviewPatchDiff_*` tests, and a
+`TestPatchFile_PatchOpJSONWireFormat` regression pinning the
+unexported `patchOp` → exported `PatchOp` rename's on-the-wire
+stability. ~63 new tests, all green; no regressions in any existing
+test. Round 3 added `internal/ui/components/autocomplete` (the new
+package) with ~22 component tests covering lifecycle, two-tier
+filter bucketing, navigation keys, render shape (cursor marker,
+overflow footer, width clamp), plus ~23 App-level integration tests
+covering the open/close triggers, Tab / Enter semantics, modal
+precedence, no-match fall-through, the Enter-submits-with-args
+fall-through, and the keymap dedup. A
+`TestParseSlashCommand_TrailingSpaceAfterVerb` regression pins the
+"accept leaves a trailing space" invariant; the layout and input
+component tests absorbed the new 5-arg `Frame` signature and
 `input.SetValue` helper. Packages: agent, app, config, cost, git,
 jobs, provider (registry + 5 providers), session, tools (registry +
-safefs + 6 tools + spawn_agent), ui/components/autocomplete,
-ui/components/input, ui/components/jobs, ui/components/picker,
-ui/components/topbar, ui/layout.
+safefs + 6 tools + spawn_agent), ui/components/approval,
+ui/components/autocomplete, ui/components/conversation,
+ui/components/diff, ui/components/input, ui/components/jobs,
+ui/components/picker, ui/components/topbar, ui/layout.

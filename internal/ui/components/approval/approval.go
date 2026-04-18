@@ -93,7 +93,16 @@ func (m Model) View() string {
 		width = 80
 	}
 	header := theme.LabelBadge(m.tool.Name(), theme.Warning)
-	body := summariseParams(m.toolCall.Arguments)
+	var body string
+	if r, ok := renderers[m.tool.Name()]; ok {
+		body = r(RenderContext{
+			Tool:      m.tool,
+			Arguments: m.toolCall.Arguments,
+			Width:     width - 4,
+		})
+	} else {
+		body = summariseParams(m.toolCall.Arguments)
+	}
 	actions := strings.Join([]string{
 		theme.StyleAccent.Render("[Y]") + theme.StylePrimary.Render(" Approve"),
 		theme.StyleAccent.Render("[N]") + theme.StylePrimary.Render(" Reject"),

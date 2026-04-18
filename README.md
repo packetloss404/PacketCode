@@ -157,7 +157,7 @@ regular user message.
 - **Welcome splash** with the packetcode wordmark when the conversation is empty.
 - **Status bar** at the bottom: provider/model, context-window gauge, project name, git branch, cumulative cost, session duration. Sheds segments gracefully on narrow terminals.
 - **Conversation pane** with bordered user/assistant bubbles, collapsible tool-call blocks, syntax-highlighted code, inline diffs.
-- **Approval prompt** with `Y` / `N` keys. Trust mode (`--trust` or `trust_mode = true`) auto-approves everything for the session.
+- **Approval prompt** with `Y` / `N` keys. `write_file` and `patch_file` approvals render a colour-coded preview diff (line numbers, `+`/`−` colouring, capped height with a "N lines omitted" legend) so the user sees the actual change instead of raw JSON. Trust mode (`--trust` or `trust_mode = true`) auto-approves everything for the session.
 - **Multi-line input** — `Enter` to send, `Shift+Enter` for a newline.
 
 ### Session + cost tracking
@@ -315,7 +315,6 @@ Foundation, all five providers, hot-switching, six tools with approval gating, s
 
 ### Next
 
-- Standalone diff component (currently rendered inline in tool-call blocks)
 - Streaming generation cancellation via `Ctrl+C` (today it stops the spinner; we should also cancel the in-flight HTTP request)
 
 ### Later

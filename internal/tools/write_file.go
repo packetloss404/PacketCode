@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 const writeFileSchema = `{
@@ -96,4 +99,45 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 			"lines": lineCount,
 		},
 	}, nil
+}
+
+// PreviewDiff computes the unified diff between the on-disk contents
+// of path and the proposed content, without writing anything. Used by
+// the approval renderer to show a real diff in the confirmation
+// modal.
+//
+// Return shape:
+//   - unified == "" && newFile == true  → path does not yet exist
+//     (caller should render with diff.NewFile)
+//   - unified == "" && newFile == false → proposed == current, no-op
+//   - unified != ""                     → normal overwrite diff
+//
+// Mirrors read_file's binary guard so approval never attempts to
+// render an invalid-UTF-8 diff.
+func (t *WriteFileTool) PreviewDiff(path, content string) (string, bool, error) {
+	abs, err := resolveInRoot(t.Root, path)
+	if err != nil {
+		return "", false, err
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", true, nil
+		}
+		return "", false, fmt.Errorf("preview_diff: %w", err)
+	}
+	if !utf8.Valid(data) {
+		return "", false, fmt.Errorf("preview_diff: %s appears to be binary", path)
+	}
+	if string(data) == content {
+		return "", false, nil
+	}
+	unified, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        difflib.SplitLines(string(data)),
+		B:        difflib.SplitLines(content),
+		FromFile: path + " (current)",
+		ToFile:   path + " (proposed)",
+		Context:  3,
+	})
+	return unified, false, nil
 }
