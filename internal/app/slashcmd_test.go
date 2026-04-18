@@ -336,6 +336,23 @@ func TestParseSlashCommand_Clear(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Regression: autocomplete's acceptAutocomplete leaves a trailing space in
+// the input buffer ("/spawn "). The parser must tolerate that so the
+// submit-without-args path (user hits Enter immediately after accepting)
+// still parses as the bare verb.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_TrailingSpaceAfterVerb(t *testing.T) {
+	cmd, args, ok := ParseSlashCommand("/spawn ")
+	if !ok || cmd != "spawn" {
+		t.Fatalf("parse = %q %v %v", cmd, args, ok)
+	}
+	if len(args) != 0 {
+		t.Fatalf("args = %v, want empty", args)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Unknown verbs must still be rejected by the allow-list.
 // ---------------------------------------------------------------------------
 

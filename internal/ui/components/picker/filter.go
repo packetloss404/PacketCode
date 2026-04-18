@@ -39,3 +39,14 @@ func matches(item Item, filter string) bool {
 	haystack := normalize(item.ID + " " + item.Label + " " + item.Detail)
 	return strings.Contains(haystack, needle)
 }
+
+// Normalize is the exported alias for the picker's lowercase-and-dash
+// canonicalisation. Other components (notably the slash-command
+// autocomplete popup) reuse the same matching rules via this helper so
+// the semantics stay in one place.
+func Normalize(s string) string { return normalize(s) }
+
+// Matches is the exported alias for the picker's substring match. Used
+// by the autocomplete popup when it needs to fall back on the same
+// "does the haystack contain the filter" check the picker does.
+func Matches(item Item, filter string) bool { return matches(item, filter) }

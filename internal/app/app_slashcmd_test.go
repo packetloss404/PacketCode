@@ -17,6 +17,7 @@ import (
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
+	"github.com/packetcode/packetcode/internal/ui/components/autocomplete"
 	"github.com/packetcode/packetcode/internal/ui/components/conversation"
 	"github.com/packetcode/packetcode/internal/ui/components/input"
 	jobs_ui "github.com/packetcode/packetcode/internal/ui/components/jobs"
@@ -162,6 +163,7 @@ func newTestApp(t *testing.T) *testAppRig {
 		approval:     approval.New(),
 		jobsPanel:    jobs_ui.New(),
 		spinner:      spinner.New(),
+		autocomplete: autocomplete.New(buildAutocompleteEntries()),
 		approver:     newUIApprover(),
 		backups:      bk,
 		contextMgr:   agent.NewContextManager(80),

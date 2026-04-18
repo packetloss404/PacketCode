@@ -31,31 +31,10 @@ the generic `picker` component, and the shared `applyProviderSwitch` /
 
 ## Round 3 — Slash-command autocomplete popup
 
-**Scope.** When the input buffer starts with `/`, show a floating
-completion list above the input bar. Filter as the user types, Tab /
-Enter to accept, Esc to dismiss.
-
-**Why third.** Quality-of-life polish for Round 1's slash commands.
-Moderate complexity — needs a small overlay positioning fix in the
-layout.
-
-**File-by-file sketch.**
-
-- `internal/ui/components/autocomplete/autocomplete.go` — new component.
-  Takes a list of `{verb, description}`, filters by prefix.
-- `internal/ui/layout/layout.go` — extend `Frame` to accept an
-  `aboveInput` slot for the autocomplete popup so it renders between
-  the conversation body and the input bar.
-- `internal/app/app.go` — on every input keystroke, if buffer starts
-  with `/`, update autocomplete's filter; on Tab/Enter with a selection,
-  replace the buffer with the chosen verb.
-
-**Agents.**
-1. **Plan** — exact visual layout, keybindings (Tab vs Enter semantics).
-2. **Implement** — component + layout slot + app wiring.
-3. **Tests + commit**.
-
-**Estimated effort.** Single session, ~3 agents.
+**Landed.** See `docs/feature-slash-autocomplete.md` for the spec and
+the git log for the commit that shipped the autocomplete popup, the new
+`internal/ui/components/autocomplete` component, and the `aboveInput`
+layout slot.
 
 ---
 

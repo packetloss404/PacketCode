@@ -55,3 +55,27 @@ func TestMatches_SearchesAllFields(t *testing.T) {
 		t.Fatalf("should match on Detail")
 	}
 }
+
+// TestNormalize_Exported smoke-tests the exported Normalize wrapper.
+// Other packages (autocomplete) depend on this behaviour, so the
+// exported surface needs its own direct test.
+func TestNormalize_Exported(t *testing.T) {
+	if got := Normalize("GPT 4.1"); got != "gpt-4.1" {
+		t.Fatalf("Normalize(\"GPT 4.1\") = %q, want %q", got, "gpt-4.1")
+	}
+	if got := Normalize(""); got != "" {
+		t.Fatalf("Normalize(\"\") = %q, want empty", got)
+	}
+}
+
+// TestMatches_Exported smoke-tests the exported Matches wrapper
+// delegates to the existing substring logic.
+func TestMatches_Exported(t *testing.T) {
+	it := Item{ID: "gpt-4.1", Label: "OpenAI gpt-4.1"}
+	if !Matches(it, "GPT") {
+		t.Fatalf("exported Matches should be case-insensitive")
+	}
+	if Matches(it, "zzz") {
+		t.Fatalf("exported Matches should return false on miss")
+	}
+}

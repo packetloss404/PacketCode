@@ -8,7 +8,7 @@ var (
 		{"Ctrl+M", "Open model picker"},
 		{"Ctrl+C", "Cancel current generation; press twice to exit"},
 		{"Ctrl+L", "Clear screen (keep session)"},
-		{"Esc", "Close jobs modal / approval / picker"},
+		{"Esc", "Close jobs modal / approval / picker / autocomplete popup"},
 	}
 	ConversationKeys = []KeyHelp{
 		{"↑/k", "Scroll up"},
@@ -24,6 +24,18 @@ var (
 	InputKeys = []KeyHelp{
 		{"Enter", "Send message"},
 		{"Shift+Enter", "Insert newline"},
+	}
+	// AutocompleteKeys documents the slash-command autocomplete popup's
+	// bindings. The popup opens automatically when the input buffer
+	// starts with "/" and closes when a space lands after the verb.
+	AutocompleteKeys = []KeyHelp{
+		{"/", "Open popup (when buffer is empty or starts with /)"},
+		{"↑/↓", "Move cursor"},
+		{"Ctrl+N/P", "Move cursor (down/up)"},
+		{"Ctrl+J/K", "Move cursor (down/up)"},
+		{"Tab", "Accept highlighted suggestion"},
+		{"Enter", "Accept when buffer is a bare verb; otherwise submit"},
+		{"Esc", "Dismiss popup (keep typed text)"},
 	}
 	// PickerKeys documents the generic picker modal's bindings. The
 	// provider (Ctrl+P) and model (Ctrl+M) pickers both honour every

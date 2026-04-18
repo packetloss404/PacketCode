@@ -131,6 +131,27 @@ Inside a picker modal:
 | `Ctrl+U`                         | Clear the filter                         |
 | `r`                              | Retry the loader (error state only)      |
 
+#### Slash-command autocomplete
+
+Typing `/` as the first character of the input buffer opens a small
+filter-as-you-type popup above the input bar listing every slash command.
+Additional keystrokes narrow the list (prefix matches beat substring
+matches, ties broken alphabetically); the popup silently disappears once
+you type whitespace past the verb so long multi-word prompts never fight
+the popup for the input line.
+
+| Key                              | Effect                                                     |
+| -------------------------------- | ---------------------------------------------------------- |
+| `/`                              | Open the popup (when buffer is empty or starts with `/`)   |
+| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` / `Ctrl+J` / `Ctrl+K` | Move cursor              |
+| `Tab`                            | Accept the highlighted suggestion — buffer becomes `/<verb> ` |
+| `Enter`                          | Accept if the buffer is still a bare verb; otherwise submit |
+| `Esc`                            | Dismiss the popup without touching the typed text           |
+
+With no matches the popup renders as empty so an unknown command like
+`/xyz` falls through to the normal submit path and reaches the LLM as a
+regular user message.
+
 ### Keyboard-driven TUI
 
 - **Welcome splash** with the packetcode wordmark when the conversation is empty.
@@ -294,7 +315,6 @@ Foundation, all five providers, hot-switching, six tools with approval gating, s
 
 ### Next
 
-- Slash-command autocomplete popup
 - Standalone diff component (currently rendered inline in tool-call blocks)
 - Streaming generation cancellation via `Ctrl+C` (today it stops the spinner; we should also cancel the in-flight HTTP request)
 

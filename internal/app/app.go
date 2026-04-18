@@ -32,6 +32,7 @@ import (
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
+	"github.com/packetcode/packetcode/internal/ui/components/autocomplete"
 	"github.com/packetcode/packetcode/internal/ui/components/conversation"
 	"github.com/packetcode/packetcode/internal/ui/components/input"
 	jobs_ui "github.com/packetcode/packetcode/internal/ui/components/jobs"
@@ -87,6 +88,7 @@ type App struct {
 	jobsPanel    jobs_ui.Model
 	picker       picker.Model
 	spinner      spinner.Model
+	autocomplete autocomplete.Model
 
 	// Agent + bridge.
 	agent    *agent.Agent
@@ -166,6 +168,7 @@ func New(deps Deps) (*App, error) {
 		jobsPanel:    jobs_ui.New(),
 		picker:       picker.New("", ""),
 		spinner:      spinner.New(),
+		autocomplete: autocomplete.New(buildAutocompleteEntries()),
 		agent:        a,
 		approver:     approver,
 		jobs:         deps.Jobs,
@@ -219,6 +222,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleKey(msg)
 
 	case input.SubmitMsg:
+		// Force-close the autocomplete popup at the start of the submit
+		// path so it doesn't linger across a send (the buffer is about
+		// to be reset anyway, but be explicit — cheaper than audit).
+		a.autocomplete.Close()
 		// Slash commands are UI-side concerns: they don't hit the LLM.
 		// Intercept them before startTurn so /spawn, /jobs, /cancel etc.
 		// take effect immediately without invoking agent.Run.
@@ -304,6 +311,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		a.conversation, cmd = a.conversation.Update(msg)
 		cmds = append(cmds, cmd)
+		// The input may have mutated on this path (printable-rune
+		// messages arrive as generic tea.Msg, not KeyMsg). Refresh so
+		// the popup tracks what's in the buffer.
+		a.refreshAutocomplete()
 	}
 	if a.spinner.Active() {
 		var cmd tea.Cmd
@@ -314,6 +325,42 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Autocomplete popup takes precedence over BOTH the global
+	// shortcuts and the modal-visible guards for the keys that
+	// coordinate with its selection (Esc / Tab / Enter / arrows /
+	// Ctrl+N/P/J/K). Ctrl+P in particular collides with the provider
+	// picker's global shortcut — while the popup is up, the user is
+	// obviously navigating the popup, so route it there first. Any
+	// other key falls through so the input still receives it and the
+	// popup tracks the edit.
+	if a.autocomplete.Visible() {
+		switch msg.String() {
+		case "esc":
+			a.autocomplete.Close()
+			return a, nil
+		case "tab":
+			if verb := a.autocomplete.SelectedVerb(); verb != "" {
+				a.acceptAutocomplete(verb)
+			}
+			return a, nil
+		case "enter":
+			verb := a.autocomplete.SelectedVerb()
+			text := a.input.Value()
+			bufferIsBareVerb := strings.HasPrefix(text, "/") &&
+				!strings.ContainsAny(text, " \t\n")
+			if verb != "" && bufferIsBareVerb {
+				a.acceptAutocomplete(verb)
+				return a, nil
+			}
+			// Fall through to the input's SubmitMsg path (no matches,
+			// or buffer already contains args — let the user send it).
+		case "up", "down", "ctrl+n", "ctrl+p", "ctrl+k", "ctrl+j":
+			var cmd tea.Cmd
+			a.autocomplete, cmd = a.autocomplete.Update(msg)
+			return a, cmd
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+p":
 		// Refuse to stack on approval (more urgent) or an existing picker.
@@ -340,6 +387,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		return a.handleClearCommand(nil)
 	}
+
 	if a.approval.Visible() {
 		var cmd tea.Cmd
 		a.approval, cmd = a.approval.Update(msg)
@@ -357,7 +405,47 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)
+	// After input has consumed the key, refresh the popup so it opens
+	// on "/" and closes when a space lands or the slash disappears.
+	a.refreshAutocomplete()
 	return a, cmd
+}
+
+// refreshAutocomplete recomputes the popup state from the current input
+// buffer. Called after every input-mutating key path so the popup
+// tracks what the user is typing. Closes when any modal is up (they
+// block the input anyway), when the buffer no longer starts with "/",
+// or when whitespace landed after the verb.
+func (a *App) refreshAutocomplete() {
+	if a.approval.Visible() || a.picker.Visible() || a.jobsPanel.Visible() {
+		a.autocomplete.Close()
+		return
+	}
+	text := a.input.Value()
+	if !strings.HasPrefix(text, "/") {
+		a.autocomplete.Close()
+		return
+	}
+	if strings.ContainsAny(text, " \t\n") {
+		a.autocomplete.Close()
+		return
+	}
+	filter := strings.TrimPrefix(text, "/")
+	a.autocomplete.SetWidth(a.width)
+	if a.autocomplete.Visible() {
+		a.autocomplete.SetFilter(filter)
+	} else {
+		a.autocomplete.Open(filter)
+	}
+}
+
+// acceptAutocomplete swaps the current input buffer for "/<verb> " and
+// closes the popup. The trailing space both feels natural to type
+// after (so the user can continue with args) and triggers the
+// refreshAutocomplete close path on the next keystroke.
+func (a *App) acceptAutocomplete(verb string) {
+	a.input.SetValue("/" + verb + " ")
+	a.autocomplete.Close()
 }
 
 func (a *App) View() string {
@@ -386,14 +474,27 @@ func (a *App) View() string {
 		overlay = a.spinner.View()
 	}
 
+	// aboveInput lives in its own layout slot — below overlay so a
+	// visible modal always covers it, above the input so it reads as
+	// "attached to" the input chrome. Today the only tenant is the
+	// slash-command autocomplete popup.
+	aboveInput := ""
+	if overlay == "" && a.autocomplete.Visible() {
+		aboveInput = a.autocomplete.View()
+	}
+
 	statusH := lipgloss.Height(status)
 	inputH := lipgloss.Height(in)
 	overlayH := 0
 	if overlay != "" {
 		overlayH = lipgloss.Height(overlay)
 	}
+	aboveH := 0
+	if aboveInput != "" {
+		aboveH = lipgloss.Height(aboveInput)
+	}
 
-	bodyH := a.height - statusH - inputH - overlayH
+	bodyH := a.height - statusH - inputH - overlayH - aboveH
 	if bodyH < 3 {
 		bodyH = 3
 	}
@@ -405,7 +506,7 @@ func (a *App) View() string {
 	a.conversation.Resize(a.width, bodyH)
 	body := a.conversation.View()
 
-	return layout.Frame(body, overlay, in, status)
+	return layout.Frame(body, overlay, aboveInput, in, status)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -432,6 +533,7 @@ func (a *App) resize(w, h int) {
 	}
 	a.jobsPanel.Resize(w, modalH)
 	a.picker.Resize(w, h)
+	a.autocomplete.SetWidth(w)
 	// Conversation height is set in View() after measuring chrome.
 }
 

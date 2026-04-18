@@ -54,6 +54,14 @@ func (m *Model) Blur()    { m.focused = false; m.ta.Blur() }
 func (m *Model) Reset()   { m.ta.Reset() }
 func (m *Model) Value() string { return m.ta.Value() }
 
+// SetValue replaces the textarea contents and moves the caret to the
+// end. Used by the slash-command autocomplete popup to swap in the
+// chosen "/<verb> " prefix without the user losing their typing flow.
+func (m *Model) SetValue(s string) {
+	m.ta.SetValue(s)
+	m.ta.CursorEnd()
+}
+
 // Update runs the textarea's own logic and intercepts Enter to fire SubmitMsg.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && m.focused {

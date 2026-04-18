@@ -105,6 +105,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same `applyProviderSwitch` / `applyModelSwitch` helpers in
   `internal/app`, so the side effects (Registry.SetActive, top-bar
   refresh, `switched …` system message) stay identical.
+- **Slash-command autocomplete — Round 3.** Typing `/` as the first
+  character of the input buffer opens a borderless filter-as-you-type
+  popup above the input listing every slash command. A two-tier sort
+  (verb-prefix matches first, alphabetically, then substring matches
+  on the verb+description haystack) keeps the best candidates at the
+  top; the cursor is navigated with arrows, `Ctrl+N/P`, or `Ctrl+J/K`.
+  `Tab` always accepts the highlighted row and `Enter` accepts only
+  while the buffer is a bare verb — otherwise Enter falls through to
+  the normal submit path so `/xyz` (zero matches) still reaches the
+  LLM as a user message. The popup lives in a new `aboveInput` layout
+  slot between the overlay cascade and the input bar, so any modal
+  (approval / picker / jobs) visually covers it and
+  `refreshAutocomplete` closes it whenever one is up. Bespoke component
+  at `internal/ui/components/autocomplete` (not a reuse of `picker` —
+  the geometry and dismiss semantics are different); entries are
+  built once from `keymap.SlashCommands` with verb dedup so `/jobs`
+  and `/jobs <id>` collapse into a single row.
 
 ### Design
 
@@ -120,7 +137,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- Slash-command autocomplete popup.
 - Standalone diff component — diffs render inline in tool-call blocks
   for now.
 - Streaming-generation HTTP cancellation on Ctrl+C — today the spinner
@@ -130,13 +146,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Test coverage
 
-18 test-bearing packages, all green. Round 2 added
-`internal/ui/components/picker` (the new package) plus 50 new top-level
-test functions: 18 picker component + 6 filter + 4 registry cache
-(including a 100-goroutine concurrent-access test) + 22 App-level
-integration tests for `Ctrl+P` / `Ctrl+M` (cache hits, fresh loads,
-error + retry, stacking guards against approval / self, and
-slash-command regressions). Packages: agent, app, config, cost, git,
+19 test-bearing packages, all green. Round 3 added
+`internal/ui/components/autocomplete` (the new package) with ~22
+component tests covering lifecycle, two-tier filter bucketing,
+navigation keys, render shape (cursor marker, overflow footer, width
+clamp), plus ~23 App-level integration tests covering the open/close
+triggers, Tab / Enter semantics, modal precedence, no-match
+fall-through, the Enter-submits-with-args fall-through, and the keymap
+dedup. A `TestParseSlashCommand_TrailingSpaceAfterVerb` regression
+pins the "accept leaves a trailing space" invariant; the layout and
+input component tests absorbed the new 5-arg `Frame` signature and
+`input.SetValue` helper. Packages: agent, app, config, cost, git,
 jobs, provider (registry + 5 providers), session, tools (registry +
-safefs + 6 tools + spawn_agent), ui/components/jobs,
-ui/components/picker, ui/components/topbar, ui/layout.
+safefs + 6 tools + spawn_agent), ui/components/autocomplete,
+ui/components/input, ui/components/jobs, ui/components/picker,
+ui/components/topbar, ui/layout.
