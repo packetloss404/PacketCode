@@ -348,7 +348,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
-	go parseGeminiSSE(resp.Body, ch)
+	go parseGeminiSSE(ctx, resp.Body, ch)
 	return ch, nil
 }
 
@@ -359,7 +359,12 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 // each functionCall part arrives as a complete unit. We still emit the
 // Start/Delta/End triple so downstream code (the agent loop) can treat
 // every provider uniformly.
-func parseGeminiSSE(body io.ReadCloser, ch chan<- provider.StreamEvent) {
+//
+// ctx is checked once per scanner iteration so Ctrl+C from the App layer
+// unblocks the parser promptly even when server keep-alive hides the
+// body-close from Scanner. On cancel we emit EventError with ctx.Err()
+// so the agent path surfaces the friendlier "turn cancelled" rendering.
+func parseGeminiSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
@@ -370,6 +375,10 @@ func parseGeminiSSE(body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	toolCallIdx := 0
 
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			return
+		}
 		line := scanner.Text()
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue

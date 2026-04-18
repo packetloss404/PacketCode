@@ -125,6 +125,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The unexported `patchOp` struct is renamed to exported `PatchOp`
   (JSON wire format unchanged). Every other tool keeps the existing
   `summariseParams` JSON-pretty-print fallback.
+- **HTTP cancellation on Ctrl+C — Round 5.** Pressing Ctrl+C during a
+  streaming turn now cancels the in-flight provider HTTP request,
+  kills any running tool, and dismisses any pending approval prompt
+  within ~1s (previously the spinner stopped but the stream continued
+  billing tokens). The conversation shows a "turn cancelled" system
+  line; a second Ctrl+C while idle exits. Implemented via a new
+  `App.cancelTurn context.CancelFunc` lifecycle and a per-iteration
+  `ctx.Err()` guard inside `parseSSE` / `parseGeminiSSE` /
+  `parseOllamaStream`. Background `/spawn`'d jobs are NOT cascaded —
+  their ctx tree derives from the `jobs.Manager` root, not `agent.Run`.
 - **Slash-command autocomplete — Round 3.** Typing `/` as the first
   character of the input buffer opens a borderless filter-as-you-type
   popup above the input listing every slash command. A two-tier sort
@@ -157,14 +167,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- Streaming-generation HTTP cancellation on Ctrl+C — today the spinner
-  stops but the request continues until the provider closes the stream.
 - MCP / plugin system.
 - User-customisable theme via `~/.packetcode/theme.toml`.
 
 ### Test coverage
 
-22 test-bearing packages, all green. Round 4 added
+24 test-bearing packages, all green. Round 5 added
+`internal/provider/openaicompat` as a test-bearing package (new
+`client_test.go` with a slow-trickle httptest server asserting the
+stream goroutine exits within 1s of ctx cancel and emits
+`EventError(context.Canceled)`), plus matching
+`TestGemini_ChatCompletion_CancellationStopsStream` and
+`TestOllama_ChatCompletion_CancellationStopsStream`. Agent-level
+`TestAgent_Run_CancelDuringChatCompletion` and
+`TestAgent_Run_CancelDuringApproval` prove the events channel closes
+promptly and the approver unblocks on ctx cancel. Tools gained
+`TestExecuteCommand_ContextCancelKillsProcess` (Unix; Windows
+skipped) confirming SIGKILL propagation within 1s.
+`internal/app/app_cancel_test.go` is new, with five integration
+tests covering the state-machine branches: cancel-during-stream
+(cancelTurn cleared synchronously, streaming flips on agentDoneMsg),
+idle-Ctrl+C-quits, approval-modal-hides, turn-cancelled-line,
+double-Ctrl+C-is-safe-during-shutdown — plus a
+`TestIsCancellation_WalksErrorChain` unit test. ~11 new tests; no
+regressions. Round 4 added
 `internal/ui/components/diff` (new package, ~28 component tests
 covering parse edge cases, malformed-hunk errors, new-file
 synthesis, stats, gutter width, width-clamp truncation, row-cap
@@ -196,8 +222,9 @@ fall-through, and the keymap dedup. A
 "accept leaves a trailing space" invariant; the layout and input
 component tests absorbed the new 5-arg `Frame` signature and
 `input.SetValue` helper. Packages: agent, app, config, cost, git,
-jobs, provider (registry + 5 providers), session, tools (registry +
-safefs + 6 tools + spawn_agent), ui/components/approval,
-ui/components/autocomplete, ui/components/conversation,
-ui/components/diff, ui/components/input, ui/components/jobs,
-ui/components/picker, ui/components/topbar, ui/layout.
+jobs, provider (registry + 5 providers + openaicompat shared
+client), session, tools (registry + safefs + 6 tools +
+spawn_agent), ui/components/approval, ui/components/autocomplete,
+ui/components/conversation, ui/components/diff, ui/components/input,
+ui/components/jobs, ui/components/picker, ui/components/topbar,
+ui/layout.

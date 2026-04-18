@@ -14,6 +14,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -117,6 +118,21 @@ type App struct {
 	height   int
 	streaming bool
 	err      string
+
+	// cancelTurn cancels the in-flight agent.Run context for the current
+	// streaming turn. Set in startTurn, cleared in agentDoneMsg / on
+	// EventError / on Ctrl+C. A non-nil cancelTurn plus streaming==true
+	// means "turn is live"; cancelTurn==nil plus streaming==true means
+	// "cancel requested, waiting for goroutine drain" — in that window a
+	// second Ctrl+C is a no-op (not a quit). Single-writer from Update.
+	cancelTurn context.CancelFunc
+}
+
+// isCancellation reports whether err is (or wraps) a context cancellation
+// or deadline, so the App can render a friendlier "turn cancelled" line
+// instead of the raw error text.
+func isCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // New constructs the App and registers the active provider/model from
@@ -247,6 +263,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.streaming = false
 		a.spinner.Stop()
 		a.conversation.FinaliseAgent()
+		// Release the turn ctx now that the goroutine has drained. In
+		// the normal-exit path this is a no-op (ctx already done); in
+		// the error-exit path EventError already cleared it. This is
+		// the canonical clear.
+		if a.cancelTurn != nil {
+			a.cancelTurn()
+			a.cancelTurn = nil
+		}
 		return a, nil
 
 	case approval.ResultMsg:
@@ -377,10 +401,24 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.openModelPicker()
 	case "ctrl+c":
 		if a.streaming {
-			// Streaming: cancel current generation by stopping spinner;
-			// proper cancellation context-plumbing is a follow-up.
+			// First Ctrl+C while streaming: cancel the in-flight turn
+			// ctx (kills the provider HTTP request, unblocks any pending
+			// approval, kills any running tool), clear the CancelFunc so
+			// a *second* Ctrl+C during the goroutine's drain window is a
+			// no-op instead of a quit, and visually settle. We
+			// deliberately do NOT clear a.streaming here — agentDoneMsg
+			// owns that transition once the channel closes. State
+			// machine: (streaming && cancelTurn!=nil) -> first press
+			// cancels; (streaming && cancelTurn==nil) -> second press
+			// is a no-op; (!streaming) -> quit.
+			if a.cancelTurn != nil {
+				a.cancelTurn()
+				a.cancelTurn = nil
+			}
 			a.spinner.Stop()
-			a.streaming = false
+			if a.approval.Visible() {
+				a.approval.Hide()
+			}
 			return a, nil
 		}
 		return a, tea.Quit
@@ -589,7 +627,13 @@ func (a *App) startTurn(text string) (tea.Model, tea.Cmd) {
 	// Spin off the agent run on a background goroutine. We forward each
 	// AgentEvent to the Bubble Tea program via Send(); the message
 	// arrives in Update as an agentEventMsg.
-	ctx := context.Background()
+	//
+	// The ctx is cancellable so Ctrl+C can tear down the in-flight
+	// provider HTTP request, kill any running tool, and unblock any
+	// pending approval prompt. The CancelFunc is stashed on App so the
+	// key handler and EventError / agentDoneMsg paths can reach it.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancelTurn = cancel
 	stream := a.agent.Run(ctx, text)
 
 	go func() {
@@ -635,7 +679,19 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		// channel close itself produces agentDoneMsg.
 
 	case agent.EventError:
-		a.conversation.AppendSystem("error: " + ev.Error.Error())
+		// A ctx.Canceled chain (from Ctrl+C) renders as a dim system
+		// line reading "turn cancelled" rather than the alarming
+		// "error: context canceled" text. Provider errors wrap with
+		// %w, so errors.Is walks the whole chain.
+		if isCancellation(ev.Error) {
+			a.conversation.AppendSystem("turn cancelled")
+		} else {
+			a.conversation.AppendSystem("error: " + ev.Error.Error())
+		}
+		if a.cancelTurn != nil {
+			a.cancelTurn()
+			a.cancelTurn = nil
+		}
 	}
 	return a, nil
 }

@@ -263,7 +263,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
-	go parseOllamaStream(resp.Body, ch)
+	go parseOllamaStream(ctx, resp.Body, ch)
 	return ch, nil
 }
 
@@ -274,7 +274,12 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 // also carries done=true (or earlier, for some models). We buffer them and
 // emit Start/Delta/End as one unit per call to keep the stream protocol
 // uniform with the other providers.
-func parseOllamaStream(body io.ReadCloser, ch chan<- provider.StreamEvent) {
+//
+// ctx is checked once per NDJSON line so Ctrl+C from the App layer
+// unblocks the parser promptly even when local daemon keep-alive hides
+// the body-close from Scanner. On cancel we emit EventError with
+// ctx.Err() so the agent surfaces the friendlier "turn cancelled" line.
+func parseOllamaStream(ctx context.Context, body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
@@ -285,6 +290,10 @@ func parseOllamaStream(body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	var lastUsage *provider.Usage
 
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			return
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue

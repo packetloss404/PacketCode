@@ -77,3 +77,32 @@ func TestExecuteCommand_RequiresApproval(t *testing.T) {
 	tool := NewExecuteCommandTool(t.TempDir())
 	assert.True(t, tool.RequiresApproval())
 }
+
+// TestExecuteCommand_ContextCancelKillsProcess proves that cancelling
+// the ctx handed to Execute tears down the underlying process within
+// 1s. Round 5 relies on this: Ctrl+C at the App layer cancels the turn
+// ctx, which the agent passes through to tool.Execute, which must kill
+// anything mid-flight. Skipped on Windows — `timeout /t 30` has
+// tortured stdout semantics under cmd.exe and the payoff doesn't
+// justify the platform dance.
+func TestExecuteCommand_ContextCancelKillsProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows timeout /t has weird redirect semantics; Unix proves the invariant")
+	}
+	tool := NewExecuteCommandTool(t.TempDir())
+	body, _ := json.Marshal(map[string]any{"command": "sleep 30"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	res, err := tool.Execute(ctx, body)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err, "Execute should swallow the killed-process error into a ToolResult")
+	assert.True(t, res.IsError, "cancelled run should be flagged as an error")
+	assert.Less(t, elapsed, 1*time.Second, "Execute must return within 1s of ctx cancel; took %s", elapsed)
+}

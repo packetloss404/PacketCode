@@ -315,12 +315,11 @@ Foundation, all five providers, hot-switching, six tools with approval gating, s
 
 ### Next
 
-- Streaming generation cancellation via `Ctrl+C` (today it stops the spinner; we should also cancel the in-flight HTTP request)
+- User-customisable theme via `~/.packetcode/theme.toml`
 
 ### Later
 
 - MCP / plugin system (deferred from MVP)
-- User-customisable theme via `~/.packetcode/theme.toml`
 
 ---
 

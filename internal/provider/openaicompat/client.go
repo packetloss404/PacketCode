@@ -254,7 +254,7 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
-	go parseSSE(resp.Body, ch)
+	go parseSSE(ctx, resp.Body, ch)
 	return ch, nil
 }
 
@@ -305,7 +305,13 @@ type chatUsage struct {
 // parseSSE reads OpenAI-style SSE frames and translates them into
 // provider.StreamEvent values on ch. The function closes ch and the body
 // before returning.
-func parseSSE(body io.ReadCloser, ch chan<- provider.StreamEvent) {
+//
+// ctx is checked once per scanner iteration so Ctrl+C from the App layer
+// unblocks the parser even when the server's TCP keep-alive hides the
+// body close from bufio.Scanner. On cancel we emit EventError with the
+// ctx.Err() cause (context.Canceled / DeadlineExceeded) so the agent
+// path surfaces the friendlier "turn cancelled" rendering.
+func parseSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
@@ -316,6 +322,10 @@ func parseSSE(body io.ReadCloser, ch chan<- provider.StreamEvent) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			return
+		}
 		line := scanner.Text()
 		if line == "" {
 			continue

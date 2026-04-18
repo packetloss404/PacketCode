@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
@@ -386,6 +387,151 @@ func TestAgent_ParallelToolCallsDispatched(t *testing.T) {
 	require.Len(t, cur.Messages[1].ToolCalls, 2)
 	assert.Equal(t, "alpha", cur.Messages[1].ToolCalls[0].Name)
 	assert.Equal(t, "beta", cur.Messages[1].ToolCalls[1].Name)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Cancellation — Round 5
+// ────────────────────────────────────────────────────────────────────────────
+
+// cancellableProvider hands back a stream channel whose lifetime is
+// bounded by the ChatCompletion ctx. The goroutine emits EventError
+// (context.Canceled) as soon as ctx is done, mirroring what real
+// providers do under the parser-level ctx.Err() guard added in Round 5.
+type cancellableProvider struct{}
+
+func (cancellableProvider) Name() string                                          { return "cancellable" }
+func (cancellableProvider) Slug() string                                          { return "cancellable" }
+func (cancellableProvider) BrandColor() lipgloss.Color                            { return lipgloss.Color("#000000") }
+func (cancellableProvider) ValidateKey(context.Context, string) error             { return nil }
+func (cancellableProvider) ListModels(context.Context) ([]provider.Model, error)  { return nil, nil }
+func (cancellableProvider) Pricing(string) (float64, float64)                     { return 1.0, 5.0 }
+func (cancellableProvider) ContextWindow(string) int                              { return 100_000 }
+func (cancellableProvider) SupportsTools(string) bool                             { return true }
+
+func (cancellableProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	ch := make(chan provider.StreamEvent, 4)
+	go func() {
+		defer close(ch)
+		// Drip a single text delta so the test can see the stream
+		// actually started, then block on ctx.
+		ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: "tick"}
+		<-ctx.Done()
+		ch <- provider.StreamEvent{Type: provider.EventError, Error: ctx.Err()}
+	}()
+	return ch, nil
+}
+
+// TestAgent_Run_CancelDuringChatCompletion drives a turn against a
+// provider that blocks on ctx, cancels the ctx after the first delta,
+// and asserts the events channel closes promptly with EventError whose
+// cause is context.Canceled. This is the agent-level contract Round 5
+// relies on: %w wrapping all the way through oneTurn / run.
+func TestAgent_Run_CancelDuringChatCompletion(t *testing.T) {
+	a, _, _ := newAgentRig(t, cancellableProvider{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := a.Run(ctx, "hang forever")
+
+	// Read the first event to confirm streaming actually started, then
+	// cancel.
+	first, ok := <-events
+	require.True(t, ok, "expected at least one event before cancel")
+	assert.Equal(t, EventTextDelta, first.Type)
+	cancel()
+
+	deadline := time.After(200 * time.Millisecond)
+	var lastMeaningful AgentEvent
+	var sawCancelErr bool
+	var channelClosed bool
+drain:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				channelClosed = true
+				break drain
+			}
+			lastMeaningful = ev
+			if ev.Type == EventError && ev.Error != nil && errors.Is(ev.Error, context.Canceled) {
+				sawCancelErr = true
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+	assert.True(t, channelClosed, "events channel must close within 200ms of cancel")
+	assert.True(t, sawCancelErr, "last meaningful event should be EventError wrapping context.Canceled; got %+v", lastMeaningful)
+}
+
+// blockingApprover blocks Approve on ctx.Done() — i.e. it never returns
+// of its own accord. Used to prove the agent unblocks the approver when
+// Run's ctx is cancelled.
+type blockingApprover struct {
+	called int32
+}
+
+func (b *blockingApprover) Approve(ctx context.Context, _ ApprovalRequest) ApprovalDecision {
+	atomic.AddInt32(&b.called, 1)
+	<-ctx.Done()
+	return ApprovalDecision{Approved: false, Reason: "cancelled"}
+}
+
+// TestAgent_Run_CancelDuringApproval drives a turn that reaches the
+// approval gate and never resolves, then cancels the ctx. The agent
+// should unblock the approver (via ctx), record the rejection, and
+// close the events channel promptly.
+func TestAgent_Run_CancelDuringApproval(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "danger"}},
+			{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{}`}},
+			{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+			{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	rt := &recordingTool{name: "danger", approval: true}
+	app := &blockingApprover{}
+
+	reg := provider.NewRegistry()
+	reg.Register(prov)
+	require.NoError(t, reg.SetActive("scripted", "scripted-model"))
+	tr := tools.NewRegistry()
+	tr.Register(rt)
+	sm := session.NewManager(t.TempDir())
+	_, _ = sm.New("scripted", "scripted-model")
+	a := New(Config{
+		Registry: reg,
+		Tools:    tr,
+		Session:  sm,
+		Approver: app,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := a.Run(ctx, "be dangerous")
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	// Drain the channel; require close within 500ms of cancel.
+	deadline := time.After(1 * time.Second)
+	var channelClosed bool
+drain:
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				channelClosed = true
+				break drain
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+	assert.True(t, channelClosed, "events channel must close once approval unblocks on cancel")
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&app.called), int32(1), "approver should have been invoked")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&rt.executed), "rejected-on-cancel tool must not execute")
 }
 
 func TestContextManager_EstimateAndPercent(t *testing.T) {

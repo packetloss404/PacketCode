@@ -53,37 +53,15 @@ unchanged.
 
 ## Round 5 — Real HTTP cancellation on Ctrl+C
 
-**Scope.** Today Ctrl+C during streaming stops the spinner but the HTTP
-request keeps running until the provider closes the stream (user still
-pays for tokens generated after they pressed cancel). Wire a true
-context-cancellation through.
-
-**Why fifth.** Correctness issue that becomes a cost issue as users
-lean on `/spawn` and long-running generations.
-
-**File-by-file sketch.**
-
-- `internal/agent/agent.go` — `Agent.Run` already accepts a ctx and
-  passes it to `provider.ChatCompletion`; the existing provider
-  implementations already honour ctx. The missing piece is App-side:
-  currently `app.startTurn` uses `context.Background()`. Store a
-  `cancelTurn context.CancelFunc` on App and have Ctrl+C call it.
-- `internal/app/app.go` — add `cancelTurn` field, derive ctx in
-  `startTurn`, store cancel, call on Ctrl+C-during-streaming.
-- `internal/provider/*/` — audit each provider's cancellation story.
-  OpenAI-compat already uses `http.NewRequestWithContext`; Ollama the
-  same. Verify streamed reads unblock on ctx cancel (add tests that
-  simulate a hung server).
-
-**Agents.**
-1. **Plan** — audit cancellation plumbing across providers; decide
-   whether to add a double-Ctrl+C "force quit" behaviour.
-2. **Implement** — App cancelTurn + any provider fixes.
-3. **Tests** — fake slow server, assert cancel returns fast without
-   consuming the full stream.
-4. **Commit**.
-
-**Estimated effort.** Single session, ~3 agents.
+**Landed.** See `docs/feature-http-cancellation.md` for the full design
+spec and the git log for the commit that shipped the
+`App.cancelTurn context.CancelFunc` lifecycle, the per-iteration
+`ctx.Err()` guard inside `parseSSE` / `parseGeminiSSE` /
+`parseOllamaStream`, the `isCancellation` helper rendering a friendly
+"turn cancelled" system line, and the state-machine property that
+makes double Ctrl+C during shutdown a safe no-op. Background
+`/spawn`'d jobs are not cascaded — their ctx trees derive from the
+`jobs.Manager` root.
 
 ---
 

@@ -3,11 +3,14 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -210,6 +213,79 @@ func TestProvider_ChatCompletion_StreamsToolCall(t *testing.T) {
 	assert.Equal(t, 1, ends)
 	assert.Equal(t, "read_file", name)
 	assert.JSONEq(t, `{"path":"main.go"}`, args)
+}
+
+// TestGemini_ChatCompletion_CancellationStopsStream verifies the
+// per-iteration ctx.Err() guard in parseGeminiSSE: cancelling the ctx
+// passed to ChatCompletion closes the stream channel within 1s and
+// surfaces an EventError whose cause is (or wraps) context.Canceled.
+func TestGemini_ChatCompletion_CancellationStopsStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("ResponseWriter does not implement Flusher")
+		}
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+		for i := 0; i < 50; i++ {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+			if _, err := fmt.Fprintf(w,
+				"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"chunk %d \"}]}}]}\n\n",
+				i); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := p.ChatCompletion(ctx, provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "stream please"}},
+	})
+	require.NoError(t, err)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancelDrain()
+
+	var events []provider.StreamEvent
+	var channelClosed bool
+loop:
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				channelClosed = true
+				break loop
+			}
+			events = append(events, ev)
+		case <-drainCtx.Done():
+			break loop
+		}
+	}
+
+	assert.True(t, channelClosed, "channel must close within 1s of cancel")
+	var sawCancelErr bool
+	for _, ev := range events {
+		if ev.Type == provider.EventError && ev.Error != nil && errors.Is(ev.Error, context.Canceled) {
+			sawCancelErr = true
+			break
+		}
+	}
+	assert.True(t, sawCancelErr, "expected EventError wrapping context.Canceled; got events: %+v", events)
 }
 
 func TestProvider_ChatCompletion_ErrorStatus(t *testing.T) {
