@@ -1,0 +1,149 @@
+// Package config loads, persists, and exposes packetcode's user configuration.
+//
+// The on-disk format is TOML at ~/.packetcode/config.toml with 0600 perms.
+// API keys may be overridden at runtime via env vars of the form
+// PACKETCODE_<SLUG>_API_KEY (e.g. PACKETCODE_OPENAI_API_KEY).
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+type Config struct {
+	Default   DefaultConfig             `toml:"default"`
+	Providers map[string]ProviderConfig `toml:"providers"`
+	Behavior  BehaviorConfig            `toml:"behavior"`
+}
+
+type DefaultConfig struct {
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
+}
+
+type ProviderConfig struct {
+	APIKey       string `toml:"api_key"`
+	DefaultModel string `toml:"default_model"`
+	Host         string `toml:"host,omitempty"` // Ollama only
+}
+
+type BehaviorConfig struct {
+	TrustMode            bool `toml:"trust_mode"`
+	AutoCompactThreshold int  `toml:"auto_compact_threshold"`
+	MaxInputRows         int  `toml:"max_input_rows"`
+}
+
+// Load reads ~/.packetcode/config.toml and returns the parsed config.
+// If the file does not exist, returns Default() — the caller can use
+// IsFirstRun() to distinguish a fresh install from a returning user.
+func Load() (*Config, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+	return LoadFrom(path)
+}
+
+// LoadFrom reads config from an explicit path. Exposed for testing and
+// for callers that want to point at a non-default file.
+func LoadFrom(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Default(), nil
+		}
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	cfg := Default()
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]ProviderConfig{}
+	}
+	return cfg, nil
+}
+
+// Save writes the config to ~/.packetcode/config.toml atomically with 0600 perms.
+// Atomic = write to temp file in the same directory, then rename.
+func (c *Config) Save() error {
+	path, err := ConfigPath()
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	return c.SaveTo(path)
+}
+
+// SaveTo writes the config to an explicit path. Same atomic semantics as Save.
+func (c *Config) SaveTo(path string) error {
+	if err := EnsureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.*.toml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(buf.String()); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename temp config: %w", err)
+	}
+	return nil
+}
+
+// SetProviderKey records an API key for the named provider and persists.
+func (c *Config) SetProviderKey(slug, apiKey string) error {
+	if c.Providers == nil {
+		c.Providers = map[string]ProviderConfig{}
+	}
+	p := c.Providers[slug]
+	p.APIKey = apiKey
+	c.Providers[slug] = p
+	return c.Save()
+}
+
+// GetProviderKey returns the API key for a provider. The env var
+// PACKETCODE_<SLUG>_API_KEY takes precedence over the on-disk value.
+// Returns empty string if neither is set.
+func (c *Config) GetProviderKey(slug string) string {
+	envKey := fmt.Sprintf("PACKETCODE_%s_API_KEY", strings.ToUpper(slug))
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	if p, ok := c.Providers[slug]; ok {
+		return p.APIKey
+	}
+	return ""
+}
+
+// IsFirstRun reports whether the config file is missing on disk.
+func IsFirstRun() bool {
+	path, err := ConfigPath()
+	if err != nil {
+		return true
+	}
+	_, err = os.Stat(path)
+	return os.IsNotExist(err)
+}

@@ -1,0 +1,30 @@
+# Build output
+bin/
+dist/
+*.exe
+*.test
+
+# Coverage
+*.out
+coverage.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Local-only environment / secrets — never commit API keys
+.env
+.env.local
+*.local
+
+# Claude Code working files (workspace-specific, not project artefacts)
+.claude/

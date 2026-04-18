@@ -1,0 +1,436 @@
+// Package gemini implements provider.Provider for Google's Gemini API.
+//
+// Gemini's wire protocol differs from OpenAI's in three notable ways:
+//   1. Roles are "user" / "model" (not "assistant").
+//   2. System messages live under a separate top-level systemInstruction
+//      field, not in the contents array.
+//   3. Content is structured as parts ([{text}, {functionCall}, ...])
+//      rather than a flat string.
+//
+// This package handles all of that translation in one place so the rest
+// of packetcode can keep speaking the unified provider.Message format.
+package gemini
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/packetcode/packetcode/internal/provider"
+)
+
+const (
+	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+	slug           = "gemini"
+	displayName    = "Google Gemini"
+)
+
+var brandColor = lipgloss.Color("#4285F4")
+
+type Provider struct {
+	baseURL    string
+	apiKey     string
+	httpClient *http.Client
+}
+
+func New(apiKey string) *Provider {
+	return NewWithBaseURL(defaultBaseURL, apiKey)
+}
+
+func NewWithBaseURL(baseURL, apiKey string) *Provider {
+	return &Provider{
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		httpClient: &http.Client{},
+	}
+}
+
+func (p *Provider) Name() string                { return displayName }
+func (p *Provider) Slug() string                { return slug }
+func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+
+func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
+	if apiKey == "" {
+		return fmt.Errorf("api key is empty")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	url := p.baseURL + "/models?key=" + apiKey
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("validate key: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("validate key: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// modelsResponse is the Gemini /models response payload.
+type modelsResponse struct {
+	Models []struct {
+		Name                       string   `json:"name"` // "models/gemini-2.5-pro"
+		DisplayName                string   `json:"displayName"`
+		InputTokenLimit            int      `json:"inputTokenLimit"`
+		SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+	} `json:"models"`
+}
+
+func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
+	url := p.baseURL + "/models?key=" + p.apiKey
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list models: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list models: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed modelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("decode models: %w", err)
+	}
+
+	out := make([]provider.Model, 0, len(parsed.Models))
+	for _, m := range parsed.Models {
+		if !supportsGenerate(m.SupportedGenerationMethods) {
+			continue
+		}
+		id := stripModelsPrefix(m.Name)
+		entry, hasPricing := pricingTable[id]
+		ctxWindow := m.InputTokenLimit
+		if ctxWindow == 0 {
+			ctxWindow = entry.ContextWindow
+		}
+		out = append(out, provider.Model{
+			ID:            id,
+			DisplayName:   m.DisplayName,
+			ContextWindow: ctxWindow,
+			SupportsTools: true, // 2.x family all support function calling
+			InputPer1M:    entry.Input,
+			OutputPer1M:   entry.Output,
+		})
+		_ = hasPricing
+	}
+	return out, nil
+}
+
+func supportsGenerate(methods []string) bool {
+	for _, m := range methods {
+		if m == "generateContent" || m == "streamGenerateContent" {
+			return true
+		}
+	}
+	return false
+}
+
+func stripModelsPrefix(name string) string {
+	return strings.TrimPrefix(name, "models/")
+}
+
+func (p *Provider) Pricing(modelID string) (float64, float64) {
+	if entry, ok := pricingTable[modelID]; ok {
+		return entry.Input, entry.Output
+	}
+	return 1.25, 10.00 // conservative — bias toward overcounting cost
+}
+
+func (p *Provider) ContextWindow(modelID string) int {
+	if entry, ok := pricingTable[modelID]; ok {
+		return entry.ContextWindow
+	}
+	return 1_000_000
+}
+
+func (p *Provider) SupportsTools(modelID string) bool {
+	// All Gemini 2.x models support function calling. 1.x is out of scope.
+	return strings.HasPrefix(modelID, "gemini-2.")
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Wire types and message translation
+// ────────────────────────────────────────────────────────────────────────────
+
+type wirePart struct {
+	Text             string                  `json:"text,omitempty"`
+	FunctionCall     *wireFunctionCall       `json:"functionCall,omitempty"`
+	FunctionResponse *wireFunctionResponse   `json:"functionResponse,omitempty"`
+}
+
+type wireFunctionCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
+type wireFunctionResponse struct {
+	Name     string          `json:"name"`
+	Response json.RawMessage `json:"response"`
+}
+
+type wireContent struct {
+	Role  string     `json:"role,omitempty"`
+	Parts []wirePart `json:"parts"`
+}
+
+type wireTool struct {
+	FunctionDeclarations []wireFunctionDeclaration `json:"functionDeclarations"`
+}
+
+type wireFunctionDeclaration struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type wireRequest struct {
+	Contents          []wireContent `json:"contents"`
+	Tools             []wireTool    `json:"tools,omitempty"`
+	SystemInstruction *wireContent  `json:"systemInstruction,omitempty"`
+}
+
+// toWireRequest translates packetcode's unified messages into Gemini's
+// shape. System messages are pulled out into systemInstruction; tool
+// responses become user-role messages with a functionResponse part.
+func toWireRequest(req provider.ChatRequest) (wireRequest, error) {
+	wr := wireRequest{}
+
+	for _, m := range req.Messages {
+		switch m.Role {
+		case provider.RoleSystem:
+			// Concatenate multiple system messages with newlines into a
+			// single systemInstruction. Gemini accepts only one.
+			text := m.Content
+			if wr.SystemInstruction == nil {
+				wr.SystemInstruction = &wireContent{Parts: []wirePart{{Text: text}}}
+			} else {
+				wr.SystemInstruction.Parts[0].Text += "\n\n" + text
+			}
+		case provider.RoleUser:
+			wr.Contents = append(wr.Contents, wireContent{
+				Role:  "user",
+				Parts: []wirePart{{Text: m.Content}},
+			})
+		case provider.RoleAssistant:
+			parts := []wirePart{}
+			if m.Content != "" {
+				parts = append(parts, wirePart{Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				args := json.RawMessage(tc.Arguments)
+				if len(args) == 0 {
+					args = json.RawMessage("{}")
+				}
+				parts = append(parts, wirePart{
+					FunctionCall: &wireFunctionCall{
+						Name: tc.Name,
+						Args: args,
+					},
+				})
+			}
+			wr.Contents = append(wr.Contents, wireContent{
+				Role:  "model",
+				Parts: parts,
+			})
+		case provider.RoleTool:
+			// Gemini expects tool results as a user-role message with a
+			// functionResponse part. The "response" field must be a JSON
+			// object; if Content is plain text, wrap it as {"output": ...}.
+			respObj, err := wrapToolResponse(m.Content)
+			if err != nil {
+				return wr, err
+			}
+			wr.Contents = append(wr.Contents, wireContent{
+				Role: "user",
+				Parts: []wirePart{{
+					FunctionResponse: &wireFunctionResponse{
+						Name:     m.Name,
+						Response: respObj,
+					},
+				}},
+			})
+		}
+	}
+
+	for _, t := range req.Tools {
+		wr.Tools = append(wr.Tools, wireTool{
+			FunctionDeclarations: []wireFunctionDeclaration{{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			}},
+		})
+	}
+
+	return wr, nil
+}
+
+// wrapToolResponse coerces a tool result into the JSON object Gemini wants.
+// If the content is already a JSON object we pass it through; otherwise we
+// wrap a string in {"output": "..."} so Gemini sees structured data.
+func wrapToolResponse(content string) (json.RawMessage, error) {
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		// Validate it parses as an object.
+		var probe map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &probe); err == nil {
+			return json.RawMessage(trimmed), nil
+		}
+	}
+	return json.Marshal(map[string]string{"output": content})
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Streaming
+// ────────────────────────────────────────────────────────────────────────────
+
+type streamChunk struct {
+	Candidates []struct {
+		Content      wireContent `json:"content"`
+		FinishReason string      `json:"finishReason,omitempty"`
+		Index        int         `json:"index"`
+	} `json:"candidates"`
+	UsageMetadata *struct {
+		PromptTokenCount     int `json:"promptTokenCount"`
+		CandidatesTokenCount int `json:"candidatesTokenCount"`
+		TotalTokenCount      int `json:"totalTokenCount"`
+	} `json:"usageMetadata,omitempty"`
+}
+
+func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	body, err := toWireRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gemini request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s",
+		p.baseURL, req.Model, p.apiKey)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("chat completion request: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		errBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("chat completion: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+
+	ch := make(chan provider.StreamEvent, 8)
+	go parseGeminiSSE(resp.Body, ch)
+	return ch, nil
+}
+
+// parseGeminiSSE reads Gemini's SSE stream (one JSON candidate per event)
+// and translates it into provider.StreamEvent values.
+//
+// Gemini does not stream tool calls token-by-token the way OpenAI does:
+// each functionCall part arrives as a complete unit. We still emit the
+// Start/Delta/End triple so downstream code (the agent loop) can treat
+// every provider uniformly.
+func parseGeminiSSE(body io.ReadCloser, ch chan<- provider.StreamEvent) {
+	defer close(ch)
+	defer body.Close()
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	var lastUsage *provider.Usage
+	toolCallIdx := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
+
+		var chunk streamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse gemini chunk: %w", err)}
+			return
+		}
+
+		for _, cand := range chunk.Candidates {
+			for _, part := range cand.Content.Parts {
+				if part.Text != "" {
+					ch <- provider.StreamEvent{
+						Type:      provider.EventTextDelta,
+						TextDelta: part.Text,
+					}
+				}
+				if part.FunctionCall != nil {
+					id := fmt.Sprintf("call_%d", toolCallIdx)
+					ch <- provider.StreamEvent{
+						Type: provider.EventToolCallStart,
+						ToolCall: &provider.ToolCallDelta{
+							Index: toolCallIdx,
+							ID:    id,
+							Name:  part.FunctionCall.Name,
+						},
+					}
+					ch <- provider.StreamEvent{
+						Type: provider.EventToolCallDelta,
+						ToolCall: &provider.ToolCallDelta{
+							Index:          toolCallIdx,
+							ID:             id,
+							Name:           part.FunctionCall.Name,
+							ArgumentsDelta: string(part.FunctionCall.Args),
+						},
+					}
+					ch <- provider.StreamEvent{
+						Type:     provider.EventToolCallEnd,
+						ToolCall: &provider.ToolCallDelta{Index: toolCallIdx},
+					}
+					toolCallIdx++
+				}
+			}
+		}
+
+		if chunk.UsageMetadata != nil {
+			lastUsage = &provider.Usage{
+				InputTokens:  chunk.UsageMetadata.PromptTokenCount,
+				OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		return
+	}
+	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}
+}

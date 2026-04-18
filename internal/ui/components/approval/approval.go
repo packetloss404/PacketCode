@@ -1,0 +1,122 @@
+// Package approval renders the destructive-action confirmation prompt
+// the agent loop pauses on for write_file, patch_file, and execute_command.
+//
+// The component is presentation-only: it has no opinions about
+// approver bookkeeping. The App shell wires the result back to the
+// agent's Approver.
+package approval
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/tools"
+	"github.com/packetcode/packetcode/internal/ui/theme"
+)
+
+// Result is what bubbles out of the approval prompt's Update.
+type Result int
+
+const (
+	Pending Result = iota
+	Approved
+	Rejected
+)
+
+// ResultMsg is the tea.Msg the App listens for to know an approval has
+// resolved. It carries a copy of the originating tool call so the App
+// can route the decision to the right pending Approver call.
+type ResultMsg struct {
+	Result   Result
+	ToolCall provider.ToolCall
+}
+
+type Model struct {
+	visible  bool
+	tool     tools.Tool
+	toolCall provider.ToolCall
+	width    int
+	result   Result
+}
+
+func New() Model { return Model{} }
+
+// Show makes the prompt visible for the given tool call. The caller
+// should ensure no other modal is competing for input — App handles that.
+func (m *Model) Show(tool tools.Tool, call provider.ToolCall) {
+	m.tool = tool
+	m.toolCall = call
+	m.visible = true
+	m.result = Pending
+}
+
+func (m *Model) Hide() { m.visible = false }
+func (m *Model) Visible() bool { return m.visible }
+
+func (m *Model) SetWidth(w int) { m.width = w }
+
+// Update handles the y/n/d (full diff toggle isn't implemented yet —
+// folded into the visible body) keys.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if !m.visible {
+		return m, nil
+	}
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "y", "Y":
+			m.result = Approved
+			m.visible = false
+			return m, emit(ResultMsg{Result: Approved, ToolCall: m.toolCall})
+		case "n", "N", "esc":
+			m.result = Rejected
+			m.visible = false
+			return m, emit(ResultMsg{Result: Rejected, ToolCall: m.toolCall})
+		}
+	}
+	return m, nil
+}
+
+func emit(msg ResultMsg) tea.Cmd {
+	return func() tea.Msg { return msg }
+}
+
+func (m Model) View() string {
+	if !m.visible || m.tool == nil {
+		return ""
+	}
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	header := theme.LabelBadge(m.tool.Name(), theme.Warning)
+	body := summariseParams(m.toolCall.Arguments)
+	actions := strings.Join([]string{
+		theme.StyleAccent.Render("[Y]") + theme.StylePrimary.Render(" Approve"),
+		theme.StyleAccent.Render("[N]") + theme.StylePrimary.Render(" Reject"),
+		theme.StyleDim.Render("[Esc] Cancel"),
+	}, "   ")
+
+	content := strings.Join([]string{header, "", body, "", actions}, "\n")
+	return theme.StyleApprovalPrompt.Width(width - 4).Render(content)
+}
+
+// summariseParams renders the tool's JSON arguments as a readable two-line
+// preview. We deliberately show the full JSON for now — the design system
+// proposes specialised renderings (diffs for write_file, $ for execute)
+// which are post-MVP polish.
+func summariseParams(args string) string {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return theme.StyleDim.Render("(no parameters)")
+	}
+	var pretty any
+	if err := json.Unmarshal([]byte(trimmed), &pretty); err == nil {
+		buf, _ := json.MarshalIndent(pretty, "", "  ")
+		return theme.StylePrimary.Render(string(buf))
+	}
+	return fmt.Sprintf("%s", trimmed)
+}
