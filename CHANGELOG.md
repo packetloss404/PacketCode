@@ -85,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `background_max_concurrent` (4), `background_max_depth` (2),
   `background_max_total` (32), `background_default_provider`,
   `background_default_model`.
+- **Slash commands — Round 1.** Extended the input-bar slash-command
+  surface from three verbs to twelve: `/provider`, `/model`,
+  `/sessions`, `/undo`, `/compact`, `/cost`, `/trust`, `/help`, and
+  `/clear` now sit alongside the existing `/spawn`, `/jobs`, and
+  `/cancel`. The parser is a flat allow-list and per-handler sub-arg
+  parsers; handlers are thin adapters over `provider.Registry`,
+  `session.Manager`, `session.BackupManager`, `cost.Tracker`,
+  `agent.ContextManager`, and `uiApprover`. Destructive verbs
+  (`/sessions delete`, `/cost reset`) require an explicit `--yes`
+  flag instead of a confirmation modal.
 
 ### Design
 
@@ -100,9 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- Slash command parsing in the input bar (`/provider`, `/model`,
-  `/sessions`, `/undo`, `/compact`, `/cost`, `/trust`, `/help`,
-  `/clear`).
 - Provider + model selector modals (Ctrl+P / Ctrl+M today open nothing).
 - Slash-command autocomplete popup.
 - Standalone diff component — diffs render inline in tool-call blocks
@@ -114,7 +121,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Test coverage
 
-17 test-bearing packages, all green: agent, app, config, cost, git,
-jobs, provider (registry + 5 providers), session, tools (registry +
-safefs + 6 tools + spawn_agent), ui/components/jobs,
+17 test-bearing packages, all green. `internal/app` carries the bulk
+of UX test coverage after Round 1: parse-layer + handler-integration
+for all 12 slash-command verbs (~48 new top-level test functions,
+expanding to ~84 cases with subtests). Packages: agent, app, config,
+cost, git, jobs, provider (registry + 5 providers), session, tools
+(registry + safefs + 6 tools + spawn_agent), ui/components/jobs,
 ui/components/topbar, ui/layout.

@@ -161,3 +161,330 @@ func TestParseSlashCommand_NotACommand(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// /provider parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Provider(t *testing.T) {
+	t.Run("bare", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/provider")
+		if !ok || cmd != "provider" || len(args) != 0 {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("with slug", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/provider gemini")
+		if !ok || cmd != "provider" || !reflect.DeepEqual(args, []string{"gemini"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("whitespace tolerated", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("   /provider    openai  ")
+		if !ok || cmd != "provider" || !reflect.DeepEqual(args, []string{"openai"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("concatenated is not a command", func(t *testing.T) {
+		if _, _, ok := ParseSlashCommand("/providergemini"); ok {
+			t.Fatalf("expected ok=false for /providergemini")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// /model parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Model(t *testing.T) {
+	t.Run("bare", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/model")
+		if !ok || cmd != "model" || len(args) != 0 {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("with id", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/model gpt-4.1")
+		if !ok || cmd != "model" || !reflect.DeepEqual(args, []string{"gpt-4.1"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("trailing extra token", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/model gpt-4.1 extra")
+		if !ok || cmd != "model" || !reflect.DeepEqual(args, []string{"gpt-4.1", "extra"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// /sessions parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Sessions(t *testing.T) {
+	t.Run("bare", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/sessions")
+		if !ok || cmd != "sessions" || len(args) != 0 {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("resume", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/sessions resume 7f3a")
+		if !ok || cmd != "sessions" || !reflect.DeepEqual(args, []string{"resume", "7f3a"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("delete with yes", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/sessions delete 7f3a --yes")
+		if !ok || cmd != "sessions" {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+		if !reflect.DeepEqual(args, []string{"delete", "7f3a", "--yes"}) {
+			t.Fatalf("args = %v", args)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// /undo parse.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Undo(t *testing.T) {
+	cmd, args, ok := ParseSlashCommand("/undo")
+	if !ok || cmd != "undo" || len(args) != 0 {
+		t.Fatalf("parse = %q %v %v", cmd, args, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /compact parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Compact(t *testing.T) {
+	t.Run("bare", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/compact")
+		if !ok || cmd != "compact" || len(args) != 0 {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("with --keep", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/compact --keep 5")
+		if !ok || cmd != "compact" || !reflect.DeepEqual(args, []string{"--keep", "5"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// /cost parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Cost(t *testing.T) {
+	t.Run("bare", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/cost")
+		if !ok || cmd != "cost" || len(args) != 0 {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("reset", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/cost reset")
+		if !ok || cmd != "cost" || !reflect.DeepEqual(args, []string{"reset"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+	t.Run("reset --yes", func(t *testing.T) {
+		cmd, args, ok := ParseSlashCommand("/cost reset --yes")
+		if !ok || cmd != "cost" || !reflect.DeepEqual(args, []string{"reset", "--yes"}) {
+			t.Fatalf("parse = %q %v %v", cmd, args, ok)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// /trust parse variants.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Trust(t *testing.T) {
+	for _, in := range []string{"/trust", "/trust on", "/trust off"} {
+		cmd, _, ok := ParseSlashCommand(in)
+		if !ok || cmd != "trust" {
+			t.Fatalf("parse %q = %q %v", in, cmd, ok)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /help parse.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Help(t *testing.T) {
+	cmd, args, ok := ParseSlashCommand("/help")
+	if !ok || cmd != "help" || len(args) != 0 {
+		t.Fatalf("parse = %q %v %v", cmd, args, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /clear parse.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_Clear(t *testing.T) {
+	cmd, args, ok := ParseSlashCommand("/clear")
+	if !ok || cmd != "clear" || len(args) != 0 {
+		t.Fatalf("parse = %q %v %v", cmd, args, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Unknown verbs must still be rejected by the allow-list.
+// ---------------------------------------------------------------------------
+
+func TestParseSlashCommand_UnknownStillReturnsFalse(t *testing.T) {
+	for _, in := range []string{"/foo", "/bar baz", "/sessio resume"} {
+		if _, _, ok := ParseSlashCommand(in); ok {
+			t.Fatalf("input %q: expected ok=false", in)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-arg parser tests.
+// ---------------------------------------------------------------------------
+
+func TestParseCompactFlags(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		keep, err := parseCompactFlags(nil)
+		if err != nil || keep != 10 {
+			t.Fatalf("parseCompactFlags(nil) = %d %v", keep, err)
+		}
+	})
+	t.Run("valid", func(t *testing.T) {
+		keep, err := parseCompactFlags([]string{"--keep", "20"})
+		if err != nil || keep != 20 {
+			t.Fatalf("got %d %v, want 20 nil", keep, err)
+		}
+	})
+	t.Run("missing value", func(t *testing.T) {
+		_, err := parseCompactFlags([]string{"--keep"})
+		if err == nil {
+			t.Fatalf("expected error for --keep without value")
+		}
+	})
+	t.Run("non-integer", func(t *testing.T) {
+		_, err := parseCompactFlags([]string{"--keep", "abc"})
+		if err == nil {
+			t.Fatalf("expected error for non-integer --keep value")
+		}
+	})
+	t.Run("negative", func(t *testing.T) {
+		_, err := parseCompactFlags([]string{"--keep", "-3"})
+		if err == nil {
+			t.Fatalf("expected error for negative --keep value")
+		}
+	})
+	t.Run("zero", func(t *testing.T) {
+		_, err := parseCompactFlags([]string{"--keep", "0"})
+		if err == nil {
+			t.Fatalf("expected error for zero --keep value")
+		}
+	})
+	t.Run("trailing junk", func(t *testing.T) {
+		_, err := parseCompactFlags([]string{"--keep", "5", "extra"})
+		if err == nil {
+			t.Fatalf("expected error for trailing junk")
+		}
+	})
+}
+
+func TestParseSessionsArgs(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		sub, id, yes, err := parseSessionsArgs(nil)
+		if err != nil || sub != "" || id != "" || yes {
+			t.Fatalf("parseSessionsArgs(nil) = %q %q %v %v", sub, id, yes, err)
+		}
+	})
+	t.Run("resume with id", func(t *testing.T) {
+		sub, id, yes, err := parseSessionsArgs([]string{"resume", "7f3a"})
+		if err != nil || sub != "resume" || id != "7f3a" || yes {
+			t.Fatalf("got %q %q %v %v", sub, id, yes, err)
+		}
+	})
+	t.Run("delete without yes", func(t *testing.T) {
+		sub, id, yes, err := parseSessionsArgs([]string{"delete", "7f3a"})
+		if err != nil || sub != "delete" || id != "7f3a" || yes {
+			t.Fatalf("got %q %q %v %v", sub, id, yes, err)
+		}
+	})
+	t.Run("delete with yes", func(t *testing.T) {
+		sub, id, yes, err := parseSessionsArgs([]string{"delete", "7f3a", "--yes"})
+		if err != nil || sub != "delete" || id != "7f3a" || !yes {
+			t.Fatalf("got %q %q %v %v", sub, id, yes, err)
+		}
+	})
+	t.Run("missing id", func(t *testing.T) {
+		_, _, _, err := parseSessionsArgs([]string{"resume"})
+		if err == nil {
+			t.Fatalf("expected error for missing id")
+		}
+	})
+	t.Run("unknown sub", func(t *testing.T) {
+		_, _, _, err := parseSessionsArgs([]string{"purge"})
+		if err == nil {
+			t.Fatalf("expected error for unknown subcommand")
+		}
+	})
+}
+
+func TestParseCostArgs(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		reset, yes, err := parseCostArgs(nil)
+		if err != nil || reset || yes {
+			t.Fatalf("got reset=%v yes=%v err=%v", reset, yes, err)
+		}
+	})
+	t.Run("reset", func(t *testing.T) {
+		reset, yes, err := parseCostArgs([]string{"reset"})
+		if err != nil || !reset || yes {
+			t.Fatalf("got reset=%v yes=%v err=%v", reset, yes, err)
+		}
+	})
+	t.Run("reset --yes", func(t *testing.T) {
+		reset, yes, err := parseCostArgs([]string{"reset", "--yes"})
+		if err != nil || !reset || !yes {
+			t.Fatalf("got reset=%v yes=%v err=%v", reset, yes, err)
+		}
+	})
+	t.Run("bogus", func(t *testing.T) {
+		_, _, err := parseCostArgs([]string{"wipe"})
+		if err == nil {
+			t.Fatalf("expected error for unknown subcommand")
+		}
+	})
+}
+
+func TestParseTrustArgs(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		set, value, err := parseTrustArgs(nil)
+		if err != nil || set || value {
+			t.Fatalf("got set=%v value=%v err=%v", set, value, err)
+		}
+	})
+	t.Run("on", func(t *testing.T) {
+		set, value, err := parseTrustArgs([]string{"on"})
+		if err != nil || !set || !value {
+			t.Fatalf("got set=%v value=%v err=%v", set, value, err)
+		}
+	})
+	t.Run("off", func(t *testing.T) {
+		set, value, err := parseTrustArgs([]string{"off"})
+		if err != nil || !set || value {
+			t.Fatalf("got set=%v value=%v err=%v", set, value, err)
+		}
+	})
+	t.Run("unknown", func(t *testing.T) {
+		_, _, err := parseTrustArgs([]string{"maybe"})
+		if err == nil {
+			t.Fatalf("expected error for unknown value")
+		}
+	})
+}

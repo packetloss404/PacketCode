@@ -2,17 +2,35 @@ package app
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 )
 
-// ParseSlashCommand inspects a raw input line and, if it starts with "/",
-// returns the command name (without the leading slash) and its
-// whitespace-split arguments. ok=false means the input is not a slash
-// command and should be treated as a normal user prompt.
-//
-// Recognised commands: "/spawn", "/jobs", "/cancel". Anything else returns
-// ok=false so the caller can decide whether to surface an "unknown
-// command" system message or just ignore.
+// knownSlashCommands is the flat allow-list of recognised verbs. Each
+// handler is responsible for any further argument parsing; the parser's
+// job is only to distinguish "this looked like a slash command" from
+// "this is normal prose".
+var knownSlashCommands = map[string]struct{}{
+	"spawn":    {},
+	"jobs":     {},
+	"cancel":   {},
+	"provider": {},
+	"model":    {},
+	"sessions": {},
+	"undo":     {},
+	"compact":  {},
+	"cost":     {},
+	"trust":    {},
+	"help":     {},
+	"clear":    {},
+}
+
+// ParseSlashCommand inspects a raw input line and, if it starts with "/"
+// and names a recognised verb, returns the command name (without the
+// leading slash) and its whitespace-split arguments. ok=false means the
+// input is not a slash command and should be treated as a normal user
+// prompt.
 func ParseSlashCommand(text string) (cmd string, args []string, ok bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || !strings.HasPrefix(trimmed, "/") {
@@ -24,18 +42,18 @@ func ParseSlashCommand(text string) (cmd string, args []string, ok bool) {
 	}
 	fields := strings.Fields(body)
 	name := fields[0]
-	switch name {
-	case "spawn", "jobs", "cancel":
-		return name, fields[1:], true
+	if _, hit := knownSlashCommands[name]; !hit {
+		return "", nil, false
 	}
-	return "", nil, false
+	return name, fields[1:], true
 }
 
 // ParseSpawnFlags handles the argument tail of a /spawn command. Accepted
 // flags (in any order, preceding the prompt):
-//   --provider <slug>
-//   --model    <id>
-//   --write
+//
+//	--provider <slug>
+//	--model    <id>
+//	--write
 //
 // After the last flag value, every remaining token (joined by single
 // spaces) forms the prompt. An empty prompt is a user error.
@@ -73,4 +91,116 @@ func ParseSpawnFlags(args []string) (provSlug, modelID string, allowWrite bool, 
 		return "", "", false, "", errors.New("prompt is required")
 	}
 	return provSlug, modelID, allowWrite, prompt, nil
+}
+
+// parseCompactFlags reads the optional `--keep <N>` flag for /compact.
+// Default keep is 10. Extra positional tokens are an error so typos like
+// "/compact 5" (missing --keep) don't silently succeed.
+func parseCompactFlags(args []string) (keep int, err error) {
+	keep = 10
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "--keep":
+			if i+1 >= len(args) {
+				return 0, errors.New("--keep requires a value")
+			}
+			n, convErr := strconv.Atoi(args[i+1])
+			if convErr != nil {
+				return 0, fmt.Errorf("--keep must be a positive integer")
+			}
+			if n <= 0 {
+				return 0, fmt.Errorf("--keep must be a positive integer")
+			}
+			keep = n
+			i += 2
+		default:
+			return 0, fmt.Errorf("unexpected argument %q", args[i])
+		}
+	}
+	return keep, nil
+}
+
+// parseSessionsArgs parses the /sessions argument tail. Accepted shapes:
+//
+//	<nothing>
+//	resume <id>
+//	delete <id>
+//	delete <id> --yes
+//
+// The handler resolves <id> to a full session ID; this parser only cares
+// about shape.
+func parseSessionsArgs(args []string) (sub, id string, yes bool, err error) {
+	if len(args) == 0 {
+		return "", "", false, nil
+	}
+	sub = args[0]
+	if sub != "resume" && sub != "delete" {
+		return "", "", false, fmt.Errorf("unknown subcommand %q (want \"resume\" or \"delete\")", sub)
+	}
+	if len(args) < 2 {
+		return "", "", false, fmt.Errorf("%s: missing session id", sub)
+	}
+	id = args[1]
+	for _, a := range args[2:] {
+		switch a {
+		case "--yes":
+			yes = true
+		default:
+			return "", "", false, fmt.Errorf("unexpected argument %q", a)
+		}
+	}
+	return sub, id, yes, nil
+}
+
+// parseCostArgs parses the /cost argument tail. Accepted shapes:
+//
+//	<nothing>
+//	reset
+//	reset --yes
+func parseCostArgs(args []string) (reset, yes bool, err error) {
+	if len(args) == 0 {
+		return false, false, nil
+	}
+	if args[0] != "reset" {
+		return false, false, fmt.Errorf("unknown subcommand %q (want \"reset\")", args[0])
+	}
+	reset = true
+	for _, a := range args[1:] {
+		switch a {
+		case "--yes":
+			yes = true
+		default:
+			return false, false, fmt.Errorf("unexpected argument %q", a)
+		}
+	}
+	return reset, yes, nil
+}
+
+// parseTrustArgs parses the /trust argument tail. Accepted shapes:
+//
+//	<nothing>      — query current state
+//	on             — enable trust mode
+//	off            — disable trust mode
+//
+// When args is empty, set=false; otherwise set=true and value encodes
+// the on/off choice.
+func parseTrustArgs(args []string) (set, value bool, err error) {
+	if len(args) == 0 {
+		return false, false, nil
+	}
+	switch args[0] {
+	case "on":
+		if len(args) > 1 {
+			return false, false, fmt.Errorf("unexpected argument %q", args[1])
+		}
+		return true, true, nil
+	case "off":
+		if len(args) > 1 {
+			return false, false, fmt.Errorf("unexpected argument %q", args[1])
+		}
+		return true, false, nil
+	default:
+		return false, false, fmt.Errorf("unknown value %q (want \"on\" or \"off\")", args[0])
+	}
 }

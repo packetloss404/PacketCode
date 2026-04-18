@@ -14,49 +14,9 @@ the UI already hints at), and rounds 5–7 are bigger architectural bets.
 
 ## Round 1 — Slash-command parsing for the remaining commands
 
-**Scope.** Wire the rest of the slash commands the UI keymap and README
-already advertise: `/provider`, `/model`, `/sessions`, `/undo`,
-`/compact`, `/cost`, `/trust`, `/help`, `/clear`.
-
-**Why first.** The parser (`internal/app/slashcmd.go`) and interception
-point in `App.Update` already exist from the background-agents round.
-Adding nine more verbs is mostly extending the switch statement and
-wiring existing backend APIs — low risk, high visible payoff.
-
-**File-by-file sketch.**
-
-- `internal/app/slashcmd.go` — extend `ParseSlashCommand` switch;
-  per-command flag parsers where needed.
-- `internal/app/app.go` — add handlers:
-  - `/provider [<slug>]` — no arg lists available; slug switches. Calls
-    `registry.SetActive`.
-  - `/model [<id>]` — no arg lists available; id switches active.
-  - `/sessions` / `/sessions resume <id>` / `/sessions delete <id>` —
-    calls into `session.Manager.List/Load/Delete`.
-  - `/undo` — pops the active backup stack via the existing
-    `BackupManager.Undo`; prints the path restored.
-  - `/compact` — calls `agent.ContextManager.Compact` on the current
-    session; replaces `sessions.Current().Messages`.
-  - `/cost` and `/cost reset` — renders `cost.Tracker.Breakdown`,
-    totals, top N sessions; reset calls `Tracker.Reset`.
-  - `/trust [on|off]` — toggles `uiApprover.SetTrust`.
-  - `/help` — renders the union of `GlobalKeys`, `ConversationKeys`,
-    `ApprovalKeys`, `InputKeys`, `SlashCommands` as an inline system
-    message.
-  - `/clear` — already Ctrl+L; alias via slash command for parity.
-- `internal/app/keymap.go` — extend `SlashCommands` list.
-- `CHANGELOG.md` — remove the deferred line.
-
-**Agents.**
-1. **Plan** — per-command UX (arg parsing, error messages, confirmation
-   prompts for destructive ones like `/sessions delete`, `/cost reset`).
-2. **Implement** — one agent does all nine; each is ~20 lines.
-3. **Docs + tests + commit** — README section "Slash commands" with a
-   table; `slashcmd_test.go` coverage for every command's parse cases;
-   `app_slashcmd_test.go` integration verifying each handler fires the
-   right backend call.
-
-**Estimated effort.** Single session, ~3 agents.
+**Landed.** See `docs/feature-slash-commands.md` for the spec and the
+git log for the commit that shipped `/provider`, `/model`, `/sessions`,
+`/undo`, `/compact`, `/cost`, `/trust`, `/help`, and `/clear`.
 
 ---
 

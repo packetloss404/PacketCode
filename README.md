@@ -80,6 +80,35 @@ background_default_model     = ""        # e.g. "gemini-2.5-flash"
 
 Job metadata persists to `~/.packetcode/jobs/<id>.json`; orphans from a crash surface on next launch as `cancelled (previous app exit)`.
 
+### Slash commands
+
+Twelve verbs are wired into the input bar. Each handler is a thin adapter over the existing backend APIs (`provider.Registry`, `session.Manager`, `session.BackupManager`, `cost.Tracker`, `agent.ContextManager`, `uiApprover`) and appends its output as a monospace system message inside the conversation, reusing the ASCII-table aesthetic `/jobs` introduced.
+
+| Command                                                         | Effect                                                                               |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `/spawn [--provider <slug>] [--model <id>] [--write] <prompt>`  | Queue a background agent.                                                            |
+| `/jobs`                                                         | List active + recent jobs.                                                           |
+| `/jobs <id>`                                                    | Open a job's transcript modal.                                                       |
+| `/cancel <id\|all>`                                             | Cancel a single job, or every running / queued job.                                  |
+| `/provider`                                                     | List registered providers; active one marked `*`.                                    |
+| `/provider <slug>`                                              | Switch active provider. Uses the configured default model, falling back to the provider's first `ListModels` entry. |
+| `/model`                                                        | List models available on the active provider, with context window and pricing.      |
+| `/model <id>`                                                   | Switch the active model on the current provider.                                     |
+| `/sessions`                                                     | List the 20 most recent sessions; current one marked `*`.                            |
+| `/sessions resume <id>`                                         | Resume a session by full ID or a unique 8-char prefix.                               |
+| `/sessions delete <id> --yes`                                   | Permanently delete a session. Requires `--yes`.                                      |
+| `/undo`                                                         | Pop the active session's backup stack and restore the most recent snapshot.         |
+| `/compact`                                                      | Summarise older messages via the active provider, keeping the last 10 verbatim.     |
+| `/compact --keep <N>`                                           | Keep the last `<N>` messages verbatim instead.                                       |
+| `/cost`                                                         | Show the cumulative USD total and the top-5 session breakdown.                       |
+| `/cost reset --yes`                                             | Clear the cost tally and reset the start time. Requires `--yes`.                     |
+| `/trust`                                                        | Report whether trust mode is on or off.                                              |
+| `/trust on` / `/trust off`                                      | Enable or disable auto-approval of destructive tools for the current session.        |
+| `/help`                                                         | Render every keybinding group and every slash command as a sectioned system message. |
+| `/clear`                                                        | Clear the transcript pane. Identical to `Ctrl+L`; the on-disk session is untouched.  |
+
+Output from every verb renders as a system message in the conversation — the same look as `/jobs`. Destructive verbs (`/sessions delete` and `/cost reset`) require an explicit `--yes` flag rather than popping a confirmation modal; everything else executes immediately. `/compact` blocks the UI while it runs (one LLM round trip, 120 s timeout). `/help` lists every keybinding group and every slash command in one place.
+
 ### Keyboard-driven TUI
 
 - **Welcome splash** with the packetcode wordmark when the conversation is empty.

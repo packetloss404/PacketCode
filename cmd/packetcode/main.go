@@ -246,6 +246,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		Sessions:     sessions,
 		CostTracker:  tracker,
 		Jobs:         jobsMgr,
+		Backups:      bk,
 		WorkingDir:   root,
 		SystemPrompt: systemPrompt,
 		Version:      welcomeVersion(),

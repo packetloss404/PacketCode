@@ -31,6 +31,15 @@ var (
 		{"/jobs", "List background jobs"},
 		{"/jobs <id>", "View a job's transcript"},
 		{"/cancel <id|all>", "Cancel a job"},
+		{"/provider [slug]", "List providers or switch active"},
+		{"/model [id]", "List models or switch active"},
+		{"/sessions", "List sessions (resume|delete subcommands)"},
+		{"/undo", "Undo the most recent file change"},
+		{"/compact [--keep N]", "Summarise older messages to reclaim context"},
+		{"/cost", "Show cost breakdown (reset --yes to clear)"},
+		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
+		{"/help", "Show this help message"},
+		{"/clear", "Clear the transcript pane"},
 	}
 )
 

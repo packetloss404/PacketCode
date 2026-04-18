@@ -69,6 +69,7 @@ type Deps struct {
 	Sessions     *session.Manager
 	CostTracker  *cost.Tracker
 	Jobs         *jobs.Manager
+	Backups      *session.BackupManager
 	WorkingDir   string
 	SystemPrompt string
 	Version      string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
@@ -92,6 +93,14 @@ type App struct {
 	// Background-agents manager. Non-nil when deps.Jobs is set. All
 	// job-related UI code paths guard on `a.jobs != nil`.
 	jobs *jobs.Manager
+
+	// backups is the session's BackupManager. Non-nil when deps.Backups
+	// is set. /undo guards on it.
+	backups *session.BackupManager
+
+	// contextMgr handles /compact token accounting and summary round-
+	// trips. Constructed in New from cfg.Behavior.AutoCompactThreshold.
+	contextMgr *agent.ContextManager
 
 	// sendMsg is the tea.Program.Send bridge set by the host (main.go)
 	// after tea.NewProgram so callbacks originating off the Bubble Tea
@@ -138,6 +147,14 @@ func New(deps Deps) (*App, error) {
 		conv.SetVersion("v1")
 	}
 
+	// Context manager threshold comes from config; fall back to the
+	// library default (80%) when no config is wired (tests).
+	threshold := 0
+	if deps.Config != nil {
+		threshold = deps.Config.Behavior.AutoCompactThreshold
+	}
+	ctxMgr := agent.NewContextManager(threshold)
+
 	app := &App{
 		deps:         deps,
 		topbar:       topbar.New(),
@@ -149,6 +166,8 @@ func New(deps Deps) (*App, error) {
 		agent:        a,
 		approver:     approver,
 		jobs:         deps.Jobs,
+		backups:      deps.Backups,
+		contextMgr:   ctxMgr,
 	}
 
 	if deps.Jobs != nil {
@@ -281,11 +300,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Quit
 	case "ctrl+l":
-		fresh := conversation.New()
-		fresh.SetVersion(a.deps.Version)
-		a.conversation = fresh
-		// Conversation will pick up its size on the next View() call.
-		return a, nil
+		return a.handleClearCommand(nil)
 	}
 	if a.approval.Visible() {
 		var cmd tea.Cmd
@@ -607,12 +622,12 @@ func roundedDuration(d time.Duration) string {
 // handleSlashCommand dispatches a parsed slash command from the input
 // line. Returns the tea.Model / tea.Cmd pair so the caller can thread
 // it back through Update.
+//
+// The jobs-manager guard is per-handler (each of the three jobs verbs
+// checks `a.jobs == nil` itself) so the new non-jobs verbs still work
+// when background agents are disabled.
 func (a *App) handleSlashCommand(cmd string, args []string, original string) (tea.Model, tea.Cmd) {
 	a.input.Reset()
-	if a.jobs == nil {
-		a.conversation.AppendSystem("background jobs are disabled (no jobs.Manager wired)")
-		return a, nil
-	}
 
 	switch cmd {
 	case "spawn":
@@ -621,15 +636,37 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleJobsCommand(args)
 	case "cancel":
 		return a.handleCancelCommand(args)
+	case "provider":
+		return a.handleProviderCommand(args)
+	case "model":
+		return a.handleModelCommand(args)
+	case "sessions":
+		return a.handleSessionsCommand(args)
+	case "undo":
+		return a.handleUndoCommand(args)
+	case "compact":
+		return a.handleCompactCommand(args)
+	case "cost":
+		return a.handleCostCommand(args)
+	case "trust":
+		return a.handleTrustCommand(args)
+	case "help":
+		return a.handleHelpCommand(args)
+	case "clear":
+		return a.handleClearCommand(args)
 	}
-	// ParseSlashCommand only returns ok=true for the three names above,
-	// so this branch is unreachable — but render a friendly fallback
-	// for forward compatibility.
+	// ParseSlashCommand only returns ok=true for the names above, so
+	// this branch is unreachable — but render a friendly fallback for
+	// forward compatibility.
 	a.conversation.AppendSystem("unknown command: " + original)
 	return a, nil
 }
 
 func (a *App) handleSpawnCommand(args []string) (tea.Model, tea.Cmd) {
+	if a.jobs == nil {
+		a.conversation.AppendSystem("spawn: background jobs are disabled (no jobs.Manager wired)")
+		return a, nil
+	}
 	provSlug, modelID, allowWrite, prompt, err := ParseSpawnFlags(args)
 	if err != nil {
 		a.conversation.AppendSystem("spawn: " + err.Error())
@@ -665,6 +702,10 @@ func (a *App) handleSpawnCommand(args []string) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleJobsCommand(args []string) (tea.Model, tea.Cmd) {
+	if a.jobs == nil {
+		a.conversation.AppendSystem("jobs: background jobs are disabled (no jobs.Manager wired)")
+		return a, nil
+	}
 	if len(args) == 0 {
 		a.conversation.AppendSystem(renderJobsTable(a.jobs.List()))
 		return a, nil
@@ -685,6 +726,10 @@ func (a *App) handleJobsCommand(args []string) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleCancelCommand(args []string) (tea.Model, tea.Cmd) {
+	if a.jobs == nil {
+		a.conversation.AppendSystem("cancel: background jobs are disabled (no jobs.Manager wired)")
+		return a, nil
+	}
 	if len(args) == 0 {
 		a.conversation.AppendSystem("cancel: missing job id (or 'all')")
 		return a, nil
