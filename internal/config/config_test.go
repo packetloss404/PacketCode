@@ -147,6 +147,70 @@ func TestIsFirstRun(t *testing.T) {
 	assert.False(t, IsFirstRun(), "after Save the config should exist")
 }
 
+// TestConfig_MCPBlockRoundTrip writes two [mcp.<name>] blocks (one
+// disabled, one with default-true) and reads them back verbatim. The
+// pointer-bool round-trip is the load-bearing assertion.
+func TestConfig_MCPBlockRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	contents := `
+[mcp.git]
+command = "uvx"
+args = ["mcp-server-git", "--repository", "."]
+timeout_sec = 20
+
+[mcp.disabled-example]
+command = "echo"
+enabled = false
+`
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Contains(t, cfg.MCP, "git")
+	require.Contains(t, cfg.MCP, "disabled-example")
+
+	gitEntry := cfg.MCP["git"]
+	assert.Equal(t, "uvx", gitEntry.Command)
+	assert.Equal(t, []string{"mcp-server-git", "--repository", "."}, gitEntry.Args)
+	assert.Equal(t, 20, gitEntry.TimeoutSec)
+	assert.True(t, gitEntry.IsEnabled(), "missing enabled key should default to true")
+	assert.Nil(t, gitEntry.Enabled)
+
+	disabled := cfg.MCP["disabled-example"]
+	require.NotNil(t, disabled.Enabled)
+	assert.False(t, *disabled.Enabled)
+	assert.False(t, disabled.IsEnabled())
+
+	// Save + reload preserves the blocks.
+	roundTripPath := filepath.Join(dir, "config-out.toml")
+	require.NoError(t, cfg.SaveTo(roundTripPath))
+	cfg2, err := LoadFrom(roundTripPath)
+	require.NoError(t, err)
+	require.Contains(t, cfg2.MCP, "git")
+	require.Contains(t, cfg2.MCP, "disabled-example")
+	assert.Equal(t, gitEntry.Command, cfg2.MCP["git"].Command)
+	require.NotNil(t, cfg2.MCP["disabled-example"].Enabled)
+	assert.False(t, *cfg2.MCP["disabled-example"].Enabled)
+}
+
+// TestConfig_MCPMapInitialisedOnLoad confirms loading a config file
+// with no [mcp] section still yields a non-nil MCP map.
+func TestConfig_MCPMapInitialisedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	contents := `
+[default]
+provider = "openai"
+model = "gpt-4.1"
+`
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.MCP)
+	assert.Empty(t, cfg.MCP)
+}
+
 func TestEnsureDir_CreatesNested(t *testing.T) {
 	dir := t.TempDir()
 	nested := filepath.Join(dir, "a", "b", "c")

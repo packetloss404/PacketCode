@@ -82,7 +82,7 @@ Job metadata persists to `~/.packetcode/jobs/<id>.json`; orphans from a crash su
 
 ### Slash commands
 
-Twelve verbs are wired into the input bar. Each handler is a thin adapter over the existing backend APIs (`provider.Registry`, `session.Manager`, `session.BackupManager`, `cost.Tracker`, `agent.ContextManager`, `uiApprover`) and appends its output as a monospace system message inside the conversation, reusing the ASCII-table aesthetic `/jobs` introduced.
+Thirteen verbs are wired into the input bar. Each handler is a thin adapter over the existing backend APIs (`provider.Registry`, `session.Manager`, `session.BackupManager`, `cost.Tracker`, `agent.ContextManager`, `uiApprover`, `mcp.Manager`) and appends its output as a monospace system message inside the conversation, reusing the ASCII-table aesthetic `/jobs` introduced.
 
 | Command                                                         | Effect                                                                               |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -106,6 +106,8 @@ Twelve verbs are wired into the input bar. Each handler is a thin adapter over t
 | `/trust on` / `/trust off`                                      | Enable or disable auto-approval of destructive tools for the current session.        |
 | `/help`                                                         | Render every keybinding group and every slash command as a sectioned system message. |
 | `/clear`                                                        | Clear the transcript pane. Identical to `Ctrl+L`; the on-disk session is untouched.  |
+| `/mcp`                                                          | List configured MCP servers with state, tool count, pid.                             |
+| `/mcp logs <name>`                                              | Tail the last 50 lines of `~/.packetcode/mcp-<name>.log`.                            |
 
 Output from every verb renders as a system message in the conversation — the same look as `/jobs`. Destructive verbs (`/sessions delete` and `/cost reset`) require an explicit `--yes` flag rather than popping a confirmation modal; everything else executes immediately. `/compact` blocks the UI while it runs (one LLM round trip, 120 s timeout). `/help` lists every keybinding group and every slash command in one place.
 
@@ -151,6 +153,37 @@ the popup for the input line.
 With no matches the popup renders as empty so an unknown command like
 `/xyz` falls through to the normal submit path and reaches the LLM as a
 regular user message.
+
+### MCP servers
+
+packetcode can extend its tool surface with external **MCP (Model
+Context Protocol) servers**. Declare a server under `[mcp.<name>]` in
+`~/.packetcode/config.toml` and packetcode will spawn it at startup,
+handshake over stdio JSON-RPC 2.0 (protocol version `2025-06-18`), list
+the tools it exposes, and register each as `<server>.<tool>` in the
+main tool registry. Every MCP tool is approval-gated (trust mode
+auto-approves).
+
+```toml
+[mcp.filesystem]
+command = "npx"
+args    = ["-y", "@modelcontextprotocol/server-filesystem", "/home/alice/projects"]
+```
+
+Two slash commands cover day-to-day use:
+
+| Command              | Effect                                                       |
+| -------------------- | ------------------------------------------------------------ |
+| `/mcp`               | List configured servers — name, state, tool count, pid.      |
+| `/mcp logs <name>`   | Tail the last 50 lines of `~/.packetcode/mcp-<name>.log`.    |
+
+Stdio transport only; HTTP+SSE / WebSocket / StreamableHTTP remotes are
+deferred. Misbehaving servers (missing binary, handshake timeout, crash
+mid-session) are logged but never block startup; native tools and other
+MCP servers keep working.
+
+See [`docs/mcp.md`](docs/mcp.md) for the full config schema, worked
+examples (filesystem, git, fetch), and debugging tips.
 
 ### Keyboard-driven TUI
 
@@ -321,11 +354,7 @@ CI lints, tests, and cross-compiles on every push (`.github/workflows/ci.yml`). 
 
 ### Shipped (v1)
 
-Foundation, all five providers, hot-switching, six tools with approval gating, session/backup/cost/git, agent loop with parallel tool calls + `/compact`, runnable TUI with welcome splash + status bar + approval modal.
-
-### Next
-
-- MCP / plugin system (deferred from MVP)
+Foundation, all five providers, hot-switching, six tools with approval gating, session/backup/cost/git, agent loop with parallel tool calls + `/compact`, runnable TUI with welcome splash + status bar + approval modal, background / parallel agents, twelve slash commands with autocomplete, Ctrl+P/M picker modals, standalone diff component with richer approvals, real HTTP cancellation on Ctrl+C, user-customisable theme, and MCP server support.
 
 ---
 

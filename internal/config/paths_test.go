@@ -12,6 +12,18 @@ import (
 // `<home>/.packetcode/theme.toml`. `t.Setenv` on both HOME and
 // USERPROFILE keeps the test cross-platform (Windows prefers
 // USERPROFILE; Unix prefers HOME).
+// TestMCPLogPath asserts the log path resolves under the packetcode
+// home directory and that the home directory is created on demand.
+func TestMCPLogPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	got, err := MCPLogPath("git")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, ".packetcode", "mcp-git.log"), got)
+}
+
 func TestThemePath_UnderHomeDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

@@ -10,6 +10,7 @@ func Default() *Config {
 			Model:    "",
 		},
 		Providers: map[string]ProviderConfig{},
+		MCP:       map[string]MCPServerConfig{},
 		Behavior: BehaviorConfig{
 			TrustMode:            false,
 			AutoCompactThreshold: 80,

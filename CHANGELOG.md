@@ -172,6 +172,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the geometry and dismiss semantics are different); entries are
   built once from `keymap.SlashCommands` with verb dedup so `/jobs`
   and `/jobs <id>` collapse into a single row.
+- **MCP (Model Context Protocol) server support — Round 7.**
+  packetcode now spawns external MCP servers declared under
+  `[mcp.<name>]` in `~/.packetcode/config.toml`, handshakes over
+  newline-delimited JSON-RPC 2.0 stdio (protocol version
+  `2025-06-18`), lists the server's tools, and registers each as a
+  `<server>.<tool>` in the main tool registry so the Agent's first
+  turn already sees them. Every MCP tool is approval-gated and
+  always-prefixed, so native tools and MCP tools never collide. A
+  new `internal/mcp` package owns the per-server stdio driver
+  (synchronous writer + async reader + reaper + stderr-tee to
+  `~/.packetcode/mcp-<name>.log`), the tools.Tool adapter, and a
+  `Manager` that parallel-spawns up to 8 at a time and surfaces a
+  per-server `StartupReport` (running / disabled / failed). Two new
+  slash commands land: `/mcp` renders a monospace table of servers +
+  state + tool count + pid, and `/mcp logs <name>` tails the last 50
+  lines of the server's stderr log. Misbehaving servers are logged
+  but never block startup; crashed servers short-circuit with a
+  friendly "restart packetcode to reconnect" error while native +
+  other MCP tools keep working. `/mcp restart <name>` is deferred to
+  Round 8. Worked examples (filesystem, git, fetch) live in
+  `docs/mcp.md`.
 
 ### Design
 
@@ -187,11 +208,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- MCP / plugin system.
+- (Nothing left from the original Round 1–7 roadmap — every item has
+  landed.)
 
 ### Test coverage
 
-25 test-bearing packages, all green. Round 6 added
+26 test-bearing packages, all green. Round 7 added
+`internal/mcp` as a test-bearing package (21 tests: framing
+round-trip + 2 MB payload; client initialize handshake / init
+timeout / tools/call success + isError / 20-way concurrent dispatch
+/ stdout-EOF-unblocks-pending / server-initiated request replied
+`method not found` / server notification ignored / Close-closes-
+stdin-and-waits / Close-kills-hanging; manager mixed-statuses /
+parallel-spawn-under-8s / shutdown-all-clients; McpTool prefixed
+naming / dead-client friendly error / flattens content / null
+params → `{}` / ctx cancellation / inputSchema passthrough).
+`internal/config` gained `TestConfig_MCPBlockRoundTrip`,
+`TestConfig_MCPMapInitialisedOnLoad`, and `TestMCPLogPath`.
+`cmd/packetcode` gained 4 `TestMCPConfigFlatten_*` tests pinning
+alphabetic ordering, default timeout, nil safety, and the
+`IsEnabled` pointer-bool contract. `internal/app` gained 6 slash-
+level tests: `TestParseSlashCommand_MCP` (bare / logs+name /
+missing name / restart defers / unknown sub), `TestRenderMCPTable_
+NoServers`, `TestRenderMCPTable_MixedStatuses`, `TestTailMCPLog_
+MissingFile` (home-isolated), `TestTailMCPLog_TruncatesToLast50
+Lines` (writes 100 lines, asserts lines 51-100 with header +
+footer), and `TestSlashHelp_IncludesMCP`. +34 new tests, all
+green; no regressions. Round 6 added
 `internal/ui/theme` as a test-bearing package (new
 `loader_test.go` with 14 tests covering Load missing/valid/malformed/
 unknown-field, Apply nil-no-op / mutation / short-hex expansion /
@@ -253,9 +296,9 @@ fall-through, and the keymap dedup. A
 "accept leaves a trailing space" invariant; the layout and input
 component tests absorbed the new 5-arg `Frame` signature and
 `input.SetValue` helper. Packages: agent, app, config, cost, git,
-jobs, provider (registry + 5 providers + openaicompat shared
+jobs, mcp, provider (registry + 5 providers + openaicompat shared
 client), session, tools (registry + safefs + 6 tools +
 spawn_agent), ui/components/approval, ui/components/autocomplete,
 ui/components/conversation, ui/components/diff, ui/components/input,
 ui/components/jobs, ui/components/picker, ui/components/topbar,
-ui/layout.
+ui/layout, ui/theme.

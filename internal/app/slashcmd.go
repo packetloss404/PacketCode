@@ -24,6 +24,7 @@ var knownSlashCommands = map[string]struct{}{
 	"trust":    {},
 	"help":     {},
 	"clear":    {},
+	"mcp":      {},
 }
 
 // ParseSlashCommand inspects a raw input line and, if it starts with "/"
@@ -175,6 +176,34 @@ func parseCostArgs(args []string) (reset, yes bool, err error) {
 		}
 	}
 	return reset, yes, nil
+}
+
+// parseMCPArgs parses the /mcp argument tail. Accepted shapes:
+//
+//	<nothing>             — list configured servers
+//	logs <name>           — tail the named server's stderr log
+//
+// /mcp restart <name> is deferred to Round 8; it is parsed just enough
+// to return a friendly "not yet supported" error rather than falling
+// through to "unknown subcommand".
+func parseMCPArgs(args []string) (sub, name string, err error) {
+	if len(args) == 0 {
+		return "", "", nil
+	}
+	switch args[0] {
+	case "logs":
+		if len(args) < 2 {
+			return "", "", fmt.Errorf("logs requires a server name")
+		}
+		if len(args) > 2 {
+			return "", "", fmt.Errorf("unexpected argument %q", args[2])
+		}
+		return "logs", args[1], nil
+	case "restart":
+		return "", "", fmt.Errorf("restart not yet supported — restart packetcode to reconnect")
+	default:
+		return "", "", fmt.Errorf("unknown subcommand %q", args[0])
+	}
 }
 
 // parseTrustArgs parses the /trust argument tail. Accepted shapes:

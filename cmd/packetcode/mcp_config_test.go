@@ -1,0 +1,100 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/mcp"
+)
+
+// TestMCPConfigFlatten_SortedByName asserts the flattener returns a
+// slice in alphabetic order regardless of the map's insertion order.
+// Go map iteration is randomised, so even though we insert in a
+// deliberately non-alphabetic sequence the returned slice must be
+// sorted.
+func TestMCPConfigFlatten_SortedByName(t *testing.T) {
+	cfg := &config.Config{
+		MCP: map[string]config.MCPServerConfig{
+			"zulu":   {Command: "z"},
+			"alpha":  {Command: "a"},
+			"mike":   {Command: "m"},
+			"bravo":  {Command: "b"},
+			"yankee": {Command: "y"},
+		},
+	}
+	got := mcpServerConfigsFrom(cfg)
+	if len(got) != 5 {
+		t.Fatalf("len = %d, want 5", len(got))
+	}
+	want := []string{"alpha", "bravo", "mike", "yankee", "zulu"}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("got[%d].Name = %q, want %q (full: %v)", i, got[i].Name, name, names(got))
+		}
+	}
+}
+
+// TestMCPConfigFlatten_DefaultsTimeout asserts zero/missing TimeoutSec
+// defaults to the 10-second per-server budget.
+func TestMCPConfigFlatten_DefaultsTimeout(t *testing.T) {
+	cfg := &config.Config{
+		MCP: map[string]config.MCPServerConfig{
+			"zero":    {Command: "a"},
+			"explicit": {Command: "b", TimeoutSec: 42},
+		},
+	}
+	got := mcpServerConfigsFrom(cfg)
+	byName := map[string]int{}
+	for _, sc := range got {
+		byName[sc.Name] = sc.TimeoutSec
+	}
+	if byName["zero"] != defaultMCPTimeoutSec {
+		t.Errorf("zero.TimeoutSec = %d, want %d", byName["zero"], defaultMCPTimeoutSec)
+	}
+	if byName["explicit"] != 42 {
+		t.Errorf("explicit.TimeoutSec = %d, want 42", byName["explicit"])
+	}
+}
+
+// TestMCPConfigFlatten_Empty covers the nil-safe and zero-entry paths.
+func TestMCPConfigFlatten_Empty(t *testing.T) {
+	if got := mcpServerConfigsFrom(nil); got != nil {
+		t.Errorf("nil cfg -> %v, want nil", got)
+	}
+	cfg := &config.Config{MCP: map[string]config.MCPServerConfig{}}
+	if got := mcpServerConfigsFrom(cfg); got != nil {
+		t.Errorf("empty map -> %v, want nil", got)
+	}
+}
+
+// TestMCPConfigFlatten_IsEnabledPreserved proves the Enabled pointer-
+// bool contract (nil = enabled) is honoured when flattening.
+func TestMCPConfigFlatten_IsEnabledPreserved(t *testing.T) {
+	disabled := false
+	enabled := true
+	cfg := &config.Config{
+		MCP: map[string]config.MCPServerConfig{
+			"on":      {Command: "a", Enabled: &enabled},
+			"off":     {Command: "b", Enabled: &disabled},
+			"default": {Command: "c"}, // nil pointer → enabled
+		},
+	}
+	got := mcpServerConfigsFrom(cfg)
+	byName := map[string]bool{}
+	for _, sc := range got {
+		byName[sc.Name] = sc.Enabled
+	}
+	if !byName["on"] || byName["off"] || !byName["default"] {
+		t.Errorf("Enabled map = %v; want on=true off=false default=true", byName)
+	}
+}
+
+// names returns the slice of server names from the flattened config —
+// helper for error messages.
+func names(cfgs []mcp.ServerConfig) []string {
+	out := make([]string, len(cfgs))
+	for i, sc := range cfgs {
+		out[i] = sc.Name
+	}
+	return out
+}

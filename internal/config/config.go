@@ -15,10 +15,29 @@ import (
 )
 
 type Config struct {
-	Default   DefaultConfig             `toml:"default"`
-	Providers map[string]ProviderConfig `toml:"providers"`
-	Behavior  BehaviorConfig            `toml:"behavior"`
+	Default   DefaultConfig              `toml:"default"`
+	Providers map[string]ProviderConfig  `toml:"providers"`
+	Behavior  BehaviorConfig             `toml:"behavior"`
+	MCP       map[string]MCPServerConfig `toml:"mcp"`
 }
+
+// MCPServerConfig is the per-server entry for [mcp.<name>] in the user's
+// config.toml. The map key is the server name; this struct holds the
+// command, args, env, and lifecycle knobs.
+//
+// Enabled is a *bool so the absent / nil state means "default on" — set
+// `enabled = false` explicitly to opt out.
+type MCPServerConfig struct {
+	Command    string            `toml:"command"`
+	Args       []string          `toml:"args,omitempty"`
+	Env        map[string]string `toml:"env,omitempty"`
+	Enabled    *bool             `toml:"enabled,omitempty"`
+	TimeoutSec int               `toml:"timeout_sec,omitempty"`
+}
+
+// IsEnabled returns true when the user has not explicitly disabled the
+// server. nil pointer → enabled.
+func (c MCPServerConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
 type DefaultConfig struct {
 	Provider string `toml:"provider"`
@@ -71,6 +90,9 @@ func LoadFrom(path string) (*Config, error) {
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
+	}
+	if cfg.MCP == nil {
+		cfg.MCP = map[string]MCPServerConfig{}
 	}
 	return cfg, nil
 }

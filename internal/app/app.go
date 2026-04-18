@@ -29,6 +29,7 @@ import (
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
 	"github.com/packetcode/packetcode/internal/jobs"
+	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
@@ -73,6 +74,7 @@ type Deps struct {
 	CostTracker  *cost.Tracker
 	Jobs         *jobs.Manager
 	Backups      *session.BackupManager
+	MCP          *mcp.Manager
 	WorkingDir   string
 	SystemPrompt string
 	Version      string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
@@ -102,6 +104,10 @@ type App struct {
 	// backups is the session's BackupManager. Non-nil when deps.Backups
 	// is set. /undo guards on it.
 	backups *session.BackupManager
+
+	// mcp is the MCP manager. Non-nil when deps.MCP is set. /mcp slash
+	// commands guard on it.
+	mcp *mcp.Manager
 
 	// contextMgr handles /compact token accounting and summary round-
 	// trips. Constructed in New from cfg.Behavior.AutoCompactThreshold.
@@ -189,6 +195,7 @@ func New(deps Deps) (*App, error) {
 		approver:     approver,
 		jobs:         deps.Jobs,
 		backups:      deps.Backups,
+		mcp:          deps.MCP,
 		contextMgr:   ctxMgr,
 	}
 
@@ -859,6 +866,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleHelpCommand(args)
 	case "clear":
 		return a.handleClearCommand(args)
+	case "mcp":
+		return a.handleMCPCommand(args)
 	}
 	// ParseSlashCommand only returns ok=true for the names above, so
 	// this branch is unreachable — but render a friendly fallback for

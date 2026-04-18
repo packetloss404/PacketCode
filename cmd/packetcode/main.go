@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
 	"github.com/packetcode/packetcode/internal/jobs"
+	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/gemini"
 	"github.com/packetcode/packetcode/internal/provider/minimax"
@@ -198,6 +200,30 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		return err
 	}
 
+	// MCP servers — spawn external tool processes declared in
+	// ~/.packetcode/config.toml. Failures are logged but never block
+	// startup. We spawn here (after theme + tool registry bootstrap,
+	// before jobs.NewManager) so tools are discovered in time to land
+	// in toolReg before the first Agent turn.
+	mcpLogDir, _ := config.HomeDir()
+	mcpMgr := mcp.NewManager(mcp.Config{
+		Servers:    mcpServerConfigsFrom(cfg),
+		LogDir:     mcpLogDir,
+		ClientInfo: mcp.ClientInfo{Name: "packetcode", Version: welcomeVersion()},
+	})
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
+	mcpReports := mcpMgr.Start(startupCtx)
+	cancelStartup()
+	for _, r := range mcpReports {
+		switch r.Status {
+		case "running":
+			fmt.Fprintf(os.Stderr, "packetcode: mcp %s: %d tools, pid %d\n", r.Name, r.ToolCount, r.PID)
+		case "failed":
+			fmt.Fprintf(os.Stderr, "packetcode: mcp %s: failed — %s\n", r.Name, r.Err)
+		}
+	}
+	defer mcpMgr.Shutdown(2 * time.Second)
+
 	// Background-agents manager. Constructed before app.New so Deps can
 	// carry it in; the Approver and SpawnTool factory are wired post-
 	// construction because they depend on pieces we won't have until
@@ -253,6 +279,14 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 	// session spawns.
 	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))
 
+	// Register MCP tools AFTER every native tool + spawn_agent so the
+	// Agent's initial tool enumeration (on its first turn) sees them.
+	for _, c := range mcpMgr.Clients() {
+		for _, st := range c.Tools() {
+			toolReg.Register(mcp.NewMcpTool(c, st))
+		}
+	}
+
 	a, err := app.New(app.Deps{
 		Config:       cfg,
 		Registry:     reg,
@@ -261,6 +295,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		CostTracker:  tracker,
 		Jobs:         jobsMgr,
 		Backups:      bk,
+		MCP:          mcpMgr,
 		WorkingDir:   root,
 		SystemPrompt: systemPrompt,
 		Version:      welcomeVersion(),

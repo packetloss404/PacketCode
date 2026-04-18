@@ -1,0 +1,190 @@
+package app
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/mcp"
+)
+
+// tailLogLineCount is the number of trailing stderr log lines shown by
+// /mcp logs <name>. Matches the spec's 50-line window.
+const tailLogLineCount = 50
+
+// handleMCPCommand routes the /mcp slash command. Empty args renders
+// the configured-servers table; `logs <name>` tails the named server's
+// stderr log.
+func (a *App) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
+	if a.mcp == nil {
+		a.conversation.AppendSystem("mcp: manager not available")
+		return a, nil
+	}
+	sub, name, err := parseMCPArgs(args)
+	if err != nil {
+		a.conversation.AppendSystem("mcp: " + err.Error())
+		return a, nil
+	}
+	switch sub {
+	case "":
+		a.conversation.AppendSystem(renderMCPTable(a.mcp.Reports(), a.mcp.Clients()))
+		return a, nil
+	case "logs":
+		if _, ok := a.mcp.Client(name); !ok {
+			a.conversation.AppendSystem(fmt.Sprintf("mcp logs: no server named %s", name))
+			return a, nil
+		}
+		out, err := tailMCPLog(name, tailLogLineCount)
+		if err != nil {
+			a.conversation.AppendSystem("mcp logs: " + err.Error())
+			return a, nil
+		}
+		a.conversation.AppendSystem(out)
+		return a, nil
+	}
+	// Unreachable: parseMCPArgs rejects any other shape.
+	a.conversation.AppendSystem("mcp: unexpected subcommand")
+	return a, nil
+}
+
+// renderMCPTable formats a monospace ASCII table of configured MCP
+// servers. Widths: NAME 12, STATE 10, TOOLS 6, PID 7, COMMAND fills
+// the remainder (truncated with "..." on overflow). Empty reports
+// produces the "nothing configured" sentinel.
+func renderMCPTable(reports []mcp.StartupReport, clients []*mcp.Client) string {
+	if len(reports) == 0 {
+		return "no MCP servers configured (add [mcp.<name>] to ~/.packetcode/config.toml)"
+	}
+	// Build a name→client map so we can pull live pid + command details
+	// from the Client (rather than rely solely on the static report).
+	byName := map[string]*mcp.Client{}
+	for _, c := range clients {
+		if c != nil {
+			byName[c.Name()] = c
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("MCP servers\n")
+	b.WriteString(padRight("NAME", 12))
+	b.WriteString(" ")
+	b.WriteString(padRight("STATE", 10))
+	b.WriteString(" ")
+	b.WriteString(padRight("TOOLS", 6))
+	b.WriteString(" ")
+	b.WriteString(padRight("PID", 7))
+	b.WriteString(" ")
+	b.WriteString("COMMAND")
+	b.WriteString("\n")
+
+	for _, r := range reports {
+		pid := "-"
+		if r.Status == "running" && r.PID > 0 {
+			pid = fmt.Sprintf("%d", r.PID)
+		}
+		tools := fmt.Sprintf("%d", r.ToolCount)
+
+		command := commandForReport(r)
+
+		fmt.Fprintf(&b, "%s %s %s %s %s\n",
+			padRight(trunc(r.Name, 12), 12),
+			padRight(trunc(r.Status, 10), 10),
+			padRight(tools, 6),
+			padRight(pid, 7),
+			command,
+		)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// commandForReport returns the COMMAND column text for a StartupReport.
+// Running servers don't carry their command/args in the report — but
+// the Err field is empty, so fall back to a terse state description.
+// Failed servers surface their error message; disabled servers show
+// "(disabled)".
+func commandForReport(r mcp.StartupReport) string {
+	const maxWidth = 48
+	switch r.Status {
+	case "failed":
+		msg := r.Err
+		if msg == "" {
+			msg = "failed"
+		}
+		return trunc(msg, maxWidth)
+	case "disabled":
+		return "(disabled)"
+	default:
+		// Running: report is silent on command — caller wiring knows it
+		// but we don't leak it into the report. Show a concise "alive"
+		// placeholder so the column is not empty.
+		return ""
+	}
+}
+
+// trunc is defined in app.go. padRight lives in slashcmd_help.go. Both
+// are package-level helpers and are reused here.
+
+// tailMCPLog reads the per-server stderr log file and returns its last
+// `n` lines framed by a header + footer so the user can see where the
+// snippet starts and ends. Missing-log-file produces an error whose
+// message includes the expected path.
+func tailMCPLog(name string, n int) (string, error) {
+	path, err := config.MCPLogPath(name)
+	if err != nil {
+		return "", fmt.Errorf("resolve log path: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no log file at %s", path)
+		}
+		return "", fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s is a directory, not a log file", path)
+	}
+	lines, err := readLastLines(path, n)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "── mcp-%s.log (last %d lines) ──\n", name, n)
+	for _, ln := range lines {
+		b.WriteString(ln)
+		b.WriteString("\n")
+	}
+	b.WriteString("── end ──")
+	return b.String(), nil
+}
+
+// readLastLines reads the file at `path` and returns its last `n` lines
+// as a slice (in original order). Implementation is a scan-all-then-
+// tail — stderr logs are append-only + manually rotated, so this stays
+// fast for typical sessions.
+func readLastLines(path string, n int) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	// Match mcp.Client's reader buffer so a server that logs very long
+	// lines doesn't trip a "bufio.Scanner: token too long" here either.
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 8*1024*1024)
+	var all []string
+	for scanner.Scan() {
+		all = append(all, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(all) <= n {
+		return all, nil
+	}
+	return all[len(all)-n:], nil
+}

@@ -1,14 +1,17 @@
 # Roadmap — deferred items, organised into rounds
 
-This is the execution plan for the items still listed under **Deferred to
-a future release** in `CHANGELOG.md`. Each round is a cohesive,
-independently-shippable slice: a planning agent + 1–3 implementation
-agents + a commit, mirroring the pipeline used for the background-agents
-feature.
+This is the execution plan for the items that were listed under
+**Deferred to a future release** in `CHANGELOG.md`. Each round was a
+cohesive, independently-shippable slice: a planning agent + 1–3
+implementation agents + a commit, mirroring the pipeline used for the
+background-agents feature.
 
-Rounds are ordered by a mix of user value and dependency chain — the
-first two are "pay off the promise" rounds (finishing slash commands
-the UI already hints at), and rounds 5–7 are bigger architectural bets.
+**All seven rounds complete — see git log for the commits.**
+
+Rounds were ordered by a mix of user value and dependency chain — the
+first two were "pay off the promise" rounds (finishing slash commands
+the UI already hinted at), and rounds 5–7 were bigger architectural
+bets.
 
 ---
 
@@ -79,41 +82,15 @@ solarized-dark).
 
 ## Round 7 — MCP / plugin system
 
-**Scope.** Support external tools via the Model Context Protocol. Users
-configure MCP servers in `config.toml`; packetcode spawns them as child
-processes, handshakes over stdio, proxies tool calls from the LLM into
-the MCP server.
-
-**Why last.** Biggest architectural bet — crosses process boundaries,
-brings in a new wire protocol, needs sandboxing decisions. Best tackled
-when the rest of the app is stable.
-
-**File-by-file sketch.**
-
-- `internal/mcp/` — client package implementing the MCP JSON-RPC
-  protocol (list_tools, call_tool, plus lifecycle).
-- `internal/mcp/process.go` — child-process lifecycle, stdin/stdout
-  framing, graceful shutdown.
-- `internal/tools/mcp_tool.go` — adapter that exposes an MCP-advertised
-  tool as a native `tools.Tool`. Approval is always required (external
-  code!).
-- `internal/config/config.go` — `[mcp]` blocks with command, args,
-  env, enabled.
-- `cmd/packetcode/main.go` — on startup, spawn each enabled MCP server,
-  register its tools in `toolReg`.
-- `docs/mcp.md` — how to configure a server, a couple of example
-  configs (filesystem, git, fetch).
-
-**Agents.**
-1. **Plan** — protocol version target, process-lifecycle contract,
-   approval policy (is there a "trusted MCP servers" list?), failure
-   semantics (server crashes mid-call).
-2. **Implement backend** — client + process management.
-3. **Implement integration** — tool adapter + config + main wiring.
-4. **Docs + examples + tests + commit**.
-
-**Estimated effort.** Multi-session. Probably 2–3 sessions, 4 agents
-per session.
+**Landed — final round.** See `docs/feature-mcp.md` for the full
+design spec, `docs/mcp.md` for the user-facing guide with worked
+examples, and the git log for the commit that shipped the
+`internal/mcp` package (Client + Manager + McpTool adapter + stdio
+JSON-RPC driver), the `[mcp.<name>]` config block with the
+`IsEnabled` pointer-bool contract, the startup wire-up in
+`cmd/packetcode/main.go` (parallel spawn, bounded concurrency,
+graceful shutdown), and the `/mcp` + `/mcp logs <name>` slash
+commands.
 
 ---
 

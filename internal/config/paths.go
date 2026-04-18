@@ -94,6 +94,16 @@ func ThemePath() (string, error) {
 	return filepath.Join(dir, "theme.toml"), nil
 }
 
+// MCPLogPath returns ~/.packetcode/mcp-<name>.log. The directory is
+// created if missing; the file is not.
+func MCPLogPath(name string) (string, error) {
+	dir, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mcp-"+name+".log"), nil
+}
+
 // EnsureDir creates the directory (with parents) at 0700 if it does not exist.
 // On Windows the perm bits are best-effort; the OS does not enforce POSIX modes.
 func EnsureDir(path string) error {
