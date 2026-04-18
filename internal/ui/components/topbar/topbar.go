@@ -1,11 +1,17 @@
 // Package topbar renders the always-visible status row at the top of the
 // TUI: brand, active provider/model, context-window gauge, project name,
-// git branch, cumulative cost, session duration.
+// git branch, cumulative cost, session duration, and (when any
+// background agents are alive) an active-jobs counter.
 //
 // The top bar is responsive — when the terminal is narrow, it sheds
-// segments in this priority order (least important first):
+// segments in this priority order (right-most first):
 //   duration → cost → git branch → project name → context %
-// Provider/model and the brand are always shown.
+// Provider/model and the brand are always shown. The jobs segment is
+// deliberately placed LAST (after duration) in the droppable slice —
+// active background jobs are time-sensitive information the user wants
+// to see as long as any chrome survives. See
+// TestTopbar_JobsSegment_DropsBeforeDuration and
+// docs/feature-background-agents.md for the choice.
 package topbar
 
 import (
@@ -33,6 +39,8 @@ type Model struct {
 	gitBranch   string
 	costUSD     float64
 	startTime   time.Time
+
+	activeJobs int
 }
 
 func New() Model {
@@ -71,6 +79,20 @@ func (m *Model) SetProject(name, branch string) {
 
 func (m *Model) SetCost(usd float64) { m.costUSD = usd }
 
+// SetJobs updates the active-background-jobs counter. n ≤ 0 hides the
+// segment entirely; positive values render as "⚙ N job(s)".
+func (m *Model) SetJobs(n int) {
+	if n < 0 {
+		n = 0
+	}
+	m.activeJobs = n
+}
+
+// Jobs returns the most recently set active-jobs count. Primarily used
+// by tests to assert the App has called SetJobs after a jobs.Manager
+// state transition without having to parse the rendered view.
+func (m Model) Jobs() int { return m.activeJobs }
+
 // View renders the top bar. Width must be set first; if it's 0, a sane
 // minimum is used so the call doesn't panic during early initialisation.
 func (m Model) View() string {
@@ -106,9 +128,29 @@ func (m Model) View() string {
 	}
 	durSeg := theme.StyleDim.Render("⏱ " + formatDuration(time.Since(m.startTime)))
 
-	// Always-shown vs droppable in priority order.
+	jobsSeg := ""
+	if m.activeJobs > 0 {
+		noun := "jobs"
+		if m.activeJobs == 1 {
+			noun = "job"
+		}
+		jobsSeg = lipgloss.NewStyle().
+			Foreground(theme.AccentPrimary).
+			Bold(true).
+			Render(fmt.Sprintf("⚙ %d %s", m.activeJobs, noun))
+	}
+
+	// Always-shown vs droppable in priority order. The right-most entry
+	// in `droppable` is dropped first when the terminal is too narrow,
+	// so lower-priority segments live at the TAIL and higher-priority
+	// ones at the HEAD. We place jobsSeg first — it survives longer
+	// than every other droppable because an active background agent is
+	// time-sensitive, so we'd rather shed duration / cost / git /
+	// project / context than hide the ⚙ N jobs counter. Concretely,
+	// the narrow-mode drop sequence becomes:
+	//   duration → cost → git → project → context → jobs
 	required := []string{brand, providerSeg}
-	droppable := []string{contextSeg, projectSeg, gitSeg, costSeg, durSeg}
+	droppable := []string{jobsSeg, contextSeg, projectSeg, gitSeg, costSeg, durSeg}
 
 	// Drop right-most droppable segments until the line fits inside the
 	// content area (width minus border + padding budget).

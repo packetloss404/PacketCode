@@ -72,6 +72,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on `v*` tags (`.github/workflows/release.yml`, `.goreleaser.yml`).
 - **`install.sh`** for one-line Linux/macOS install from GitHub
   Releases; honours `INSTALL_DIR` and `VERSION` env vars.
+- **Background / parallel agents** — spawn independent agent loops
+  alongside the foreground conversation via `/spawn`, `/jobs`,
+  `/cancel`, or the `spawn_agent` tool. Each job is a fully isolated
+  mini-agent with its own session, cost tally, backup stack, and
+  provider/model; results stream back as a system message plus an
+  auto-injected context message on the next turn. Read-only by
+  default (with `--write` / `wait=true` opt-in for destructive
+  tools, approval-gated through the main session). The `⚙ N jobs`
+  top-bar counter and a dedicated transcript modal round out the
+  UX. Caps and defaults tunable under `[behavior]`:
+  `background_max_concurrent` (4), `background_max_depth` (2),
+  `background_max_total` (32), `background_default_provider`,
+  `background_default_model`.
 
 ### Design
 
@@ -97,7 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Streaming-generation HTTP cancellation on Ctrl+C — today the spinner
   stops but the request continues until the provider closes the stream.
 - MCP / plugin system.
-- Background / parallel agents.
 - User-customisable theme via `~/.packetcode/theme.toml`.
 
 ### Test coverage

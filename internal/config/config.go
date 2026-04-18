@@ -35,6 +35,13 @@ type BehaviorConfig struct {
 	TrustMode            bool `toml:"trust_mode"`
 	AutoCompactThreshold int  `toml:"auto_compact_threshold"`
 	MaxInputRows         int  `toml:"max_input_rows"`
+
+	// Background agents (see docs/feature-background-agents.md).
+	BackgroundMaxConcurrent   int    `toml:"background_max_concurrent"`
+	BackgroundMaxDepth        int    `toml:"background_max_depth"`
+	BackgroundMaxTotal        int    `toml:"background_max_total"`
+	BackgroundDefaultProvider string `toml:"background_default_provider"`
+	BackgroundDefaultModel    string `toml:"background_default_model"`
 }
 
 // Load reads ~/.packetcode/config.toml and returns the parsed config.

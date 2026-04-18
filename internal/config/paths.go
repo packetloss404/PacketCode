@@ -58,6 +58,20 @@ func BackupsDir() (string, error) {
 	return backups, nil
 }
 
+// JobsDir returns ~/.packetcode/jobs/, creating it if missing.
+// Background-job metadata snapshots live here; see internal/jobs.
+func JobsDir() (string, error) {
+	dir, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	jobs := filepath.Join(dir, "jobs")
+	if err := EnsureDir(jobs); err != nil {
+		return "", err
+	}
+	return jobs, nil
+}
+
 // CostTallyPath returns ~/.packetcode/cost-tally.json.
 // The directory is created if missing; the file is not.
 func CostTallyPath() (string, error) {

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
+	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/gemini"
 	"github.com/packetcode/packetcode/internal/provider/minimax"
@@ -182,12 +184,68 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		return err
 	}
 
+	// Background-agents manager. Constructed before app.New so Deps can
+	// carry it in; the Approver and SpawnTool factory are wired post-
+	// construction because they depend on pieces we won't have until
+	// app.New returns and the Manager itself exists, respectively.
+	jobsDir, err := config.JobsDir()
+	if err != nil {
+		return err
+	}
+	jobsMgr, recovered, err := jobs.NewManager(jobs.Config{
+		Registry:     reg,
+		Tools:        toolReg,
+		MainSessions: sessions,
+		SessionsDir:  sessionsDir,
+		BackupsDir:   backupsDir,
+		JobsDir:      jobsDir,
+		CostTracker:  tracker,
+		PricingFor: func(slug, modelID string) (float64, float64) {
+			if p, ok := reg.Get(slug); ok {
+				return p.Pricing(modelID)
+			}
+			return 0, 0
+		},
+		SystemPromptFor: func(parentDepth int) string {
+			return systemPrompt + "\n\nYou are a background sub-agent. Be concise and direct. Do not ask the user clarifying questions — make reasonable assumptions and act. Your final assistant message becomes your delivered result."
+		},
+		MaxConcurrent:   cfg.Behavior.BackgroundMaxConcurrent,
+		MaxDepth:        cfg.Behavior.BackgroundMaxDepth,
+		MaxTotal:        cfg.Behavior.BackgroundMaxTotal,
+		DefaultProvider: cfg.Behavior.BackgroundDefaultProvider,
+		DefaultModel:    cfg.Behavior.BackgroundDefaultModel,
+		Root:            root,
+		// Approver and SpawnTool are set below, once jobsMgr and the
+		// App's uiApprover exist. Leaving them nil here is fine: the
+		// manager guards both before use.
+	})
+	if err != nil {
+		return err
+	}
+	if recovered > 0 {
+		fmt.Fprintf(os.Stderr, "packetcode: recovered %d orphan job(s) from previous run\n", recovered)
+	}
+	// Install the SpawnTool factory: each per-job tool registry gets its
+	// own spawn_agent tool bound to the spawning job's id/depth so the
+	// Manager can enforce recursion limits and annotate child-of-child
+	// approvals correctly.
+	jobsMgr.SetSpawnToolFactory(func(parentJobID string, parentDepth int) tools.Tool {
+		return tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth)
+	})
+	defer jobsMgr.Shutdown(5 * time.Second)
+
+	// Register spawn_agent into the main tool registry so the foreground
+	// LLM can call it too. ParentJobID="" / ParentDepth=0 for main-
+	// session spawns.
+	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))
+
 	a, err := app.New(app.Deps{
 		Config:       cfg,
 		Registry:     reg,
 		Tools:        toolReg,
 		Sessions:     sessions,
 		CostTracker:  tracker,
+		Jobs:         jobsMgr,
 		WorkingDir:   root,
 		SystemPrompt: systemPrompt,
 		Version:      welcomeVersion(),
@@ -196,7 +254,15 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		return err
 	}
 
+	// The App owns the uiApprover; pipe it into the jobs.Manager so
+	// destructive sub-agent tool calls (when AllowWrite is on) prompt
+	// the main user through the existing modal.
+	jobsMgr.SetApprover(a.Approver())
+
 	prog := tea.NewProgram(a, tea.WithAltScreen()) // explicitly NO mouse support
+	// Let the App post async messages (jobs.Manager Subscribe callbacks)
+	// into the Bubble Tea Update loop.
+	a.SetSendFunc(func(m tea.Msg) { prog.Send(m) })
 	if _, err := prog.Run(); err != nil {
 		return err
 	}

@@ -58,3 +58,66 @@ func (m Model) copyWith(width int) Model {
 	m.width = width
 	return m
 }
+
+// TestTopbar_JobsSegment_HiddenWhenZero verifies that the ⚙ N jobs
+// counter is elided entirely when no background jobs are active, so
+// the status bar isn't cluttered for the common no-spawn case.
+func TestTopbar_JobsSegment_HiddenWhenZero(t *testing.T) {
+	m := New()
+	m.SetWidth(200)
+	m.SetProvider("openai", "OpenAI", "gpt-4.1")
+	m.SetJobs(0)
+
+	out := m.View()
+	assert.NotContains(t, out, "⚙")
+	assert.NotContains(t, out, "jobs")
+}
+
+// TestTopbar_JobsSegment_ShownWhenActive verifies the plural rendering
+// when two or more jobs are active.
+func TestTopbar_JobsSegment_ShownWhenActive(t *testing.T) {
+	m := New()
+	m.SetWidth(200)
+	m.SetProvider("openai", "OpenAI", "gpt-4.1")
+	m.SetJobs(3)
+
+	out := m.View()
+	assert.Contains(t, out, "⚙ 3 jobs")
+}
+
+// TestTopbar_JobsSegment_Singular verifies English pluralisation: 1
+// job renders as "job" (no trailing 's'), so the counter reads
+// naturally while still drawing the user's attention.
+func TestTopbar_JobsSegment_Singular(t *testing.T) {
+	m := New()
+	m.SetWidth(200)
+	m.SetProvider("openai", "OpenAI", "gpt-4.1")
+	m.SetJobs(1)
+
+	out := m.View()
+	assert.Contains(t, out, "⚙ 1 job")
+	// Must not accidentally render as the plural "jobs".
+	assert.NotContains(t, out, "⚙ 1 jobs")
+}
+
+// TestTopbar_JobsSegment_SurvivesNarrowDrops asserts the design
+// decision: because an active background agent is time-sensitive, the
+// jobs segment survives longer than every other droppable on a narrow
+// terminal. In the implementation the droppable slice is ordered so
+// that `jobsSeg` is the last entry (right-most drops first), meaning
+// duration / cost / git / project / context all get shed before the
+// jobs counter.
+func TestTopbar_JobsSegment_SurvivesNarrowDrops(t *testing.T) {
+	m := New()
+	m.SetProvider("openai", "OpenAI", "gpt-4.1")
+	m.SetContext(50_000, 200_000)
+	m.SetProject("very-long-project-name-here", "feature/long-branch-name-here")
+	m.SetCost(123.45)
+	m.SetJobs(2)
+
+	// Narrow enough that at least one droppable (duration) gets dropped.
+	narrow := m.copyWith(50).View()
+
+	assert.Contains(t, narrow, "⚙ 2 jobs",
+		"jobs segment should survive narrow rendering (last-to-drop)")
+}

@@ -81,3 +81,21 @@ func TestTracker_Breakdown(t *testing.T) {
 	rows := tr.Breakdown()
 	require.Len(t, rows, 2)
 }
+
+func TestTracker_SessionCostsForIDs(t *testing.T) {
+	tr, _ := NewTracker(filepath.Join(t.TempDir(), "tally.json"), fixedPricing)
+	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 1_000_000, 0))   // $2
+	require.NoError(t, tr.RecordUsage("s2", "openai", "gpt-4.1", 0, 1_000_000))   // $8
+	require.NoError(t, tr.RecordUsage("s3", "openai", "gpt-4.1", 500_000, 0))     // $1
+
+	// Two known ids → sum.
+	got := tr.SessionCostsForIDs([]string{"s1", "s2"})
+	assert.InDelta(t, 10.00, got, 1e-9)
+
+	// Including an unknown id contributes 0, no error.
+	got = tr.SessionCostsForIDs([]string{"s1", "missing", "s3"})
+	assert.InDelta(t, 3.00, got, 1e-9)
+
+	// Empty input → 0.
+	assert.InDelta(t, 0.0, tr.SessionCostsForIDs(nil), 1e-9)
+}

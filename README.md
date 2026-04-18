@@ -49,6 +49,37 @@ Six tools are wired in by default. Filesystem mutations and shell commands requi
 
 The agent loops `LLM → tool → LLM → tool → …` until the model has nothing more to call. Parallel tool calls in a single response are dispatched in order. Rejections are fed back to the LLM as tool-role messages so it can adapt.
 
+### Background agents
+
+Spawn independent agent loops that run in parallel with the foreground conversation. Each job is a fully isolated mini-agent: its own session, cost tally, backup stack, and provider/model selection. Results stream back into the main conversation as a system message plus an auto-injected context message on the next turn.
+
+| Command                                                         | Effect                                                                           |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `/spawn [--provider <slug>] [--model <id>] [--write] <prompt>`  | Queue a background agent. Echoes `[job:<id> queued — prov/model] <prompt>`.    |
+| `/jobs`                                                         | List active + recent jobs in an inline ASCII table.                              |
+| `/jobs <id>`                                                    | Open the job's transcript modal. `Esc` / `q` to close, `j/k` to scroll.         |
+| `/cancel <id>`                                                  | Cancel a single running job.                                                     |
+| `/cancel all`                                                   | Cancel every running / queued job.                                               |
+
+The top bar shows `⚙ N jobs` in cyan while jobs are active — it's the last segment to drop on narrow terminals.
+
+**Approval policy.** Background jobs default to a **read-only** tool subset (`read_file`, `search_codebase`, `list_directory`, plus `spawn_agent` up to `background_max_depth`). Pass `--write` to enable `write_file` / `patch_file` / `execute_command`; destructive calls still route through the main session's approval prompt, annotated with `[job:<id>]` so you can see which background agent is asking.
+
+**Agent-initiated parallelism.** The main agent can call the `spawn_agent` tool autonomously. It's approval-gated (trust mode auto-approves) and supports `wait=true` for a synchronous fan-out/fan-in pattern.
+
+Caps live under `[behavior]` in `~/.packetcode/config.toml`:
+
+```toml
+[behavior]
+background_max_concurrent    = 4         # at most N workers running at once
+background_max_depth         = 2         # main → spawn → spawn
+background_max_total         = 32        # lifetime spawns per app run
+background_default_provider  = ""        # e.g. "gemini" for cheap scouts
+background_default_model     = ""        # e.g. "gemini-2.5-flash"
+```
+
+Job metadata persists to `~/.packetcode/jobs/<id>.json`; orphans from a crash surface on next launch as `cancelled (previous app exit)`.
+
 ### Keyboard-driven TUI
 
 - **Welcome splash** with the packetcode wordmark when the conversation is empty.
@@ -221,7 +252,6 @@ Foundation, all five providers, hot-switching, six tools with approval gating, s
 ### Later
 
 - MCP / plugin system (deferred from MVP)
-- Background / parallel agents (deferred from MVP)
 - User-customisable theme via `~/.packetcode/theme.toml`
 
 ---

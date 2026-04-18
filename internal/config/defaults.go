@@ -14,6 +14,12 @@ func Default() *Config {
 			TrustMode:            false,
 			AutoCompactThreshold: 80,
 			MaxInputRows:         10,
+
+			BackgroundMaxConcurrent:   4,
+			BackgroundMaxDepth:        2,
+			BackgroundMaxTotal:        32,
+			BackgroundDefaultProvider: "",
+			BackgroundDefaultModel:    "",
 		},
 	}
 }

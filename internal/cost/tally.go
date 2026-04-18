@@ -165,6 +165,23 @@ func (t *Tracker) TotalCost() float64 {
 	return total
 }
 
+// SessionCostsForIDs sums the cost of every named session id. Unknown
+// ids contribute 0 silently — used by the /jobs panel to subtotal the
+// cost across a job's sub-session ids.
+func (t *Tracker) SessionCostsForIDs(ids []string) float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var total float64
+	for _, id := range ids {
+		sc, ok := t.tally.Sessions[id]
+		if !ok {
+			continue
+		}
+		total += t.priced(sc)
+	}
+	return total
+}
+
 // SessionTokens returns the (input, output) token counts for a session.
 func (t *Tracker) SessionTokens(sessionID string) (int, int) {
 	t.mu.Lock()
