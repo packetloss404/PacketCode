@@ -32,6 +32,7 @@ import (
 	"github.com/packetcode/packetcode/internal/provider/openrouter"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
+	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
 // version/commit are populated at build time via -ldflags. Defaults are
@@ -68,6 +69,19 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Optional user theme. A missing file is silent; a parse error
+	// logs one stderr line and falls through to the built-in Terminal
+	// Noir defaults — a bad theme never prevents packetcode from
+	// starting.
+	themePath, err := config.ThemePath()
+	if err == nil {
+		if t, err := theme.Load(themePath); err != nil {
+			fmt.Fprintf(os.Stderr, "packetcode: failed to load theme: %v; falling back to defaults\n", err)
+		} else {
+			theme.Apply(t)
+		}
 	}
 
 	factories := app.FactoryMap{

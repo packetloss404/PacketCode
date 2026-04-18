@@ -1,0 +1,32 @@
+# Terminal Noir (default). Documents the full schema — every field is
+# optional, omitted fields keep their built-in default.
+[base]
+bg              = "#0F0F0F"
+surface         = "#1A1A2E"
+surface_bright  = "#232340"
+border          = "#2A2A3D"
+border_bright   = "#3D3D5C"
+
+[text]
+primary   = "#E1E1E8"
+secondary = "#8888A0"
+dim       = "#4A4A60"
+inverse   = "#0F0F0F"
+
+[accent]
+primary     = "#00D9FF"
+primary_dim = "#0891B2"
+secondary   = "#FF6B6B"
+
+[semantic]
+success = "#4ADE80"
+warning = "#FBBF24"
+error   = "#F87171"
+info    = "#60A5FA"
+
+[provider]
+openai     = "#10A37F"
+gemini     = "#4285F4"
+minimax    = "#FF8C00"
+openrouter = "#EC4899"
+ollama     = "#E1E1E8"

@@ -135,6 +135,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ctx.Err()` guard inside `parseSSE` / `parseGeminiSSE` /
   `parseOllamaStream`. Background `/spawn`'d jobs are NOT cascaded —
   their ctx tree derives from the `jobs.Manager` root, not `agent.Run`.
+- **User-customisable theme — Round 6.** packetcode now reads an
+  optional `~/.packetcode/theme.toml` at startup and overrides the
+  Terminal Noir colour tokens with any fields it finds. The loader
+  (`internal/ui/theme/loader.go`) parses a flat TOML mirroring the
+  five design-system groups (`[base]`, `[text]`, `[accent]`,
+  `[semantic]`, `[provider.<slug>]`), validates each hex value
+  (`#RRGGBB` or `#RGB`; invalid values log a one-line warning and
+  keep the default), merges the provider map into the new
+  `providerColors` lookup (ProviderColor refactored from a switch
+  so users can theme arbitrary slugs), and rebuilds every pre-built
+  `Style*` value so they pick up the new palette. A missing file is
+  silent; a parse error logs `packetcode: failed to load theme:
+  <err>; falling back to defaults` and continues. Apply is
+  additive — calling it with an empty `Theme` does NOT reset to the
+  built-in defaults. Four example presets ship under `docs/themes/`:
+  `dark-terminal-noir.toml` (baseline + schema doc), `light.toml`
+  (light-terminal variant), `high-contrast.toml` (pure black/white +
+  saturated accents), and `solarized-dark.toml` (Solarized Dark
+  mapped onto the tokens). Install a preset with
+  `cp docs/themes/high-contrast.toml ~/.packetcode/theme.toml`.
 - **Slash-command autocomplete — Round 3.** Typing `/` as the first
   character of the input buffer opens a borderless filter-as-you-type
   popup above the input listing every slash command. A two-tier sort
@@ -168,11 +188,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deferred to a future release
 
 - MCP / plugin system.
-- User-customisable theme via `~/.packetcode/theme.toml`.
 
 ### Test coverage
 
-24 test-bearing packages, all green. Round 5 added
+25 test-bearing packages, all green. Round 6 added
+`internal/ui/theme` as a test-bearing package (new
+`loader_test.go` with 14 tests covering Load missing/valid/malformed/
+unknown-field, Apply nil-no-op / mutation / short-hex expansion /
+invalid-hex-warns-and-keeps-default / provider map merge /
+partial-override / additive-not-replacing, the
+`TestApply_RebuildsAllTwentyStyles` drift guard against the
+rebuild-list, and a `TestProviderColor_UnknownSlug_ReturnsTextPrimary`
+map-refactor regression; every test snapshots the full colour-var,
+providerColors, and Style* state via `t.Cleanup` for hermeticity).
+`internal/config` gained `TestThemePath_UnderHomeDir` with HOME /
+USERPROFILE isolation. +15 new tests, all green; no regressions.
+Round 5 added
 `internal/provider/openaicompat` as a test-bearing package (new
 `client_test.go` with a slow-trickle httptest server asserting the
 stream goroutine exits within 1s of ctx cancel and emits

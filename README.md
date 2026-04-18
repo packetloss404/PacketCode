@@ -267,6 +267,16 @@ max_input_rows = 10
 
 The file is created with `0600` permissions (user-read-write only).
 
+### Custom themes
+
+packetcode reads an optional `~/.packetcode/theme.toml` at startup and overrides the built-in Terminal Noir colour tokens with any fields it finds. Every field is optional — absent fields keep their defaults, invalid hex values log a one-line warning and fall back to the default. Four ready-to-use presets live in [`docs/themes/`](docs/themes/) (baseline, light, high-contrast, solarized-dark). Installing one is a single copy:
+
+```bash
+cp docs/themes/high-contrast.toml ~/.packetcode/theme.toml
+```
+
+See `docs/feature-theming.md` for the full schema and design notes.
+
 ---
 
 ## Architecture at a glance
@@ -314,10 +324,6 @@ CI lints, tests, and cross-compiles on every push (`.github/workflows/ci.yml`). 
 Foundation, all five providers, hot-switching, six tools with approval gating, session/backup/cost/git, agent loop with parallel tool calls + `/compact`, runnable TUI with welcome splash + status bar + approval modal.
 
 ### Next
-
-- User-customisable theme via `~/.packetcode/theme.toml`
-
-### Later
 
 - MCP / plugin system (deferred from MVP)
 

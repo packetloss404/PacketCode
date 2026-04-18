@@ -1,0 +1,24 @@
+# High-contrast theme. Pure black/white surfaces and saturated accents.
+[base]
+bg              = "#000000"
+surface         = "#000000"
+surface_bright  = "#1A1A1A"
+border          = "#FFFFFF"
+border_bright   = "#FFFFFF"
+
+[text]
+primary   = "#FFFFFF"
+secondary = "#FFFF00"
+dim       = "#C0C0C0"
+inverse   = "#000000"
+
+[accent]
+primary     = "#FFFF00"
+primary_dim = "#CCCC00"
+secondary   = "#FF00FF"
+
+[semantic]
+success = "#00FF00"
+warning = "#FFFF00"
+error   = "#FF0000"
+info    = "#00FFFF"

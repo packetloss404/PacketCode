@@ -38,25 +38,28 @@ var (
 	Info    = lipgloss.Color("#60A5FA")
 )
 
+// providerColors maps a provider slug to its brand colour. Populated
+// with the five built-in providers; the theme loader merges user
+// overrides (and additional slugs) into this map at startup.
+//
+// OpenRouter was originally #9B59B6 (purple); switched to rose (#EC4899)
+// to keep the palette purple-free.
+var providerColors = map[string]lipgloss.Color{
+	"openai":     lipgloss.Color("#10A37F"),
+	"gemini":     lipgloss.Color("#4285F4"),
+	"minimax":    lipgloss.Color("#FF8C00"),
+	"openrouter": lipgloss.Color("#EC4899"),
+	"ollama":     lipgloss.Color("#E1E1E8"),
+}
+
 // ProviderColor returns the brand color for a provider slug. Falls back
 // to TextPrimary for unknown slugs (defensive — every registered
-// provider should be in this map).
+// provider should be in the map).
 func ProviderColor(slug string) lipgloss.Color {
-	switch slug {
-	case "openai":
-		return lipgloss.Color("#10A37F")
-	case "gemini":
-		return lipgloss.Color("#4285F4")
-	case "minimax":
-		return lipgloss.Color("#FF8C00")
-	case "openrouter":
-		// Was #9B59B6 (purple); switched to rose to keep palette purple-free.
-		return lipgloss.Color("#EC4899")
-	case "ollama":
-		return lipgloss.Color("#E1E1E8")
-	default:
-		return TextPrimary
+	if c, ok := providerColors[slug]; ok {
+		return c
 	}
+	return TextPrimary
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,24 @@
+# Solarized Dark (Ethan Schoonover) mapped onto packetcode tokens.
+[base]
+bg              = "#002B36"
+surface         = "#073642"
+surface_bright  = "#0A4554"
+border          = "#586E75"
+border_bright   = "#657B83"
+
+[text]
+primary   = "#EEE8D5"
+secondary = "#93A1A1"
+dim       = "#586E75"
+inverse   = "#002B36"
+
+[accent]
+primary     = "#268BD2"
+primary_dim = "#2AA198"
+secondary   = "#DC322F"
+
+[semantic]
+success = "#859900"
+warning = "#B58900"
+error   = "#DC322F"
+info    = "#268BD2"

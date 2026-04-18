@@ -82,6 +82,18 @@ func CostTallyPath() (string, error) {
 	return filepath.Join(dir, "cost-tally.json"), nil
 }
 
+// ThemePath returns ~/.packetcode/theme.toml.
+// The directory is created if missing; the file is not. When the file
+// is absent, the theme loader falls back to the built-in Terminal Noir
+// palette.
+func ThemePath() (string, error) {
+	dir, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "theme.toml"), nil
+}
+
 // EnsureDir creates the directory (with parents) at 0700 if it does not exist.
 // On Windows the perm bits are best-effort; the OS does not enforce POSIX modes.
 func EnsureDir(path string) error {

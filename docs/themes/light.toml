@@ -1,0 +1,24 @@
+# Light theme for terminals with a light background.
+[base]
+bg              = "#FFFFFF"
+surface         = "#F4F4F7"
+surface_bright  = "#E8E8EE"
+border          = "#D0D0DA"
+border_bright   = "#A8A8B8"
+
+[text]
+primary   = "#1A1A2E"
+secondary = "#5A5A70"
+dim       = "#9A9AB0"
+inverse   = "#FFFFFF"
+
+[accent]
+primary     = "#0891B2"
+primary_dim = "#0E7490"
+secondary   = "#DC2626"
+
+[semantic]
+success = "#15803D"
+warning = "#B45309"
+error   = "#B91C1C"
+info    = "#1D4ED8"

@@ -67,32 +67,13 @@ makes double Ctrl+C during shutdown a safe no-op. Background
 
 ## Round 6 — User-customisable theme via `~/.packetcode/theme.toml`
 
-**Scope.** Load a user theme file at startup that overrides the
-Terminal Noir tokens in `internal/ui/theme/theme.go`. All component code
-already goes through the token layer, so this is mostly plumbing +
-loader + sensible defaults + validation.
-
-**Why sixth.** Lower priority than correctness items above. Nice polish
-once the core is stable.
-
-**File-by-file sketch.**
-
-- `internal/ui/theme/loader.go` — parse `~/.packetcode/theme.toml`,
-  override exported vars (or refactor to a `Theme` struct the
-  components read from — cleaner but a wider change).
-- `internal/config/paths.go` — add `ThemePath()`.
-- `docs/theming.md` — document every token and give a couple of
-  example themes (light / high-contrast / solarized-ish).
-
-**Agents.**
-1. **Plan** — refactor decision: keep exported vars (`theme.AccentPrimary`
-   etc.) or move to a `theme.Current()` getter? The refactor touches
-   every component but is cleaner long-term.
-2. **Implement** — loader + refactor if chosen.
-3. **Docs + commit**.
-
-**Estimated effort.** Single session, 3 agents — possibly two if the
-refactor is deep.
+**Landed.** See `docs/feature-theming.md` for the full design spec and
+the git log for the commit that shipped the `internal/ui/theme/loader.go`
+loader (Load + Apply + parseHex + rebuildStyles), the `providerColors`
+map refactor of `ProviderColor`, `config.ThemePath()`, the startup
+wire-up in `cmd/packetcode/main.go`, and the four example presets under
+`docs/themes/` (dark-terminal-noir / light / high-contrast /
+solarized-dark).
 
 ---
 
