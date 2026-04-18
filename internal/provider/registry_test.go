@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -76,6 +77,64 @@ func TestRegistry_ActiveBeforeSet(t *testing.T) {
 	p, model := r.Active()
 	assert.Nil(t, p)
 	assert.Equal(t, "", model)
+}
+
+func TestRegistry_CacheRoundtrip(t *testing.T) {
+	r := NewRegistry()
+	models := []Model{{ID: "m1"}, {ID: "m2"}}
+	r.SetCachedModels("openai", models)
+
+	got, ok := r.CachedModels("openai")
+	require.True(t, ok)
+	assert.Equal(t, []Model{{ID: "m1"}, {ID: "m2"}}, got)
+
+	// Defensive copy: mutating the returned slice must not affect the
+	// cache.
+	got[0].ID = "mutated"
+	again, _ := r.CachedModels("openai")
+	assert.Equal(t, "m1", again[0].ID)
+}
+
+func TestRegistry_CacheMiss(t *testing.T) {
+	r := NewRegistry()
+	_, ok := r.CachedModels("openai")
+	assert.False(t, ok)
+}
+
+func TestRegistry_CacheInvalidate(t *testing.T) {
+	r := NewRegistry()
+	r.SetCachedModels("openai", []Model{{ID: "m1"}})
+	_, ok := r.CachedModels("openai")
+	require.True(t, ok)
+
+	r.InvalidateCachedModels("openai")
+	_, ok = r.CachedModels("openai")
+	assert.False(t, ok)
+
+	// Invalidating an absent slug is a no-op.
+	r.InvalidateCachedModels("gemini")
+}
+
+func TestRegistry_CacheConcurrent(t *testing.T) {
+	r := NewRegistry()
+	// Seed so readers always see *something*; writers overwrite.
+	r.SetCachedModels("openai", []Model{{ID: "seed"}})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			r.SetCachedModels("openai", []Model{{ID: "w"}})
+		}(i)
+		go func() {
+			defer wg.Done()
+			if got, ok := r.CachedModels("openai"); ok {
+				_ = got
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestRegistry_InitializeAllAggregatesFailures(t *testing.T) {

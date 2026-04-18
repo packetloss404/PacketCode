@@ -109,6 +109,28 @@ Twelve verbs are wired into the input bar. Each handler is a thin adapter over t
 
 Output from every verb renders as a system message in the conversation — the same look as `/jobs`. Destructive verbs (`/sessions delete` and `/cost reset`) require an explicit `--yes` flag rather than popping a confirmation modal; everything else executes immediately. `/compact` blocks the UI while it runs (one LLM round trip, 120 s timeout). `/help` lists every keybinding group and every slash command in one place.
 
+### Keyboard
+
+Two global shortcuts open filter-as-you-type picker modals that mirror the `/provider` and `/model` slash commands:
+
+| Shortcut   | Effect                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `Ctrl+P`   | Open the provider picker. Shows all registered providers with brand dots and key status. |
+| `Ctrl+M`   | Open the model picker for the active provider. Loads async, cached after first open.     |
+
+Inside a picker modal:
+
+| Key                              | Effect                                   |
+| -------------------------------- | ---------------------------------------- |
+| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` / `Ctrl+J` / `Ctrl+K` | Move cursor                 |
+| `PgUp` / `PgDn`                  | Move by a half page                      |
+| `Home` / `End`                   | Jump to first / last                     |
+| `Enter`                          | Select                                   |
+| `Esc`                            | Close without changing anything          |
+| any printable rune               | Append to the filter (case-insensitive)  |
+| `Ctrl+U`                         | Clear the filter                         |
+| `r`                              | Retry the loader (error state only)      |
+
 ### Keyboard-driven TUI
 
 - **Welcome splash** with the packetcode wordmark when the conversation is empty.
@@ -272,8 +294,6 @@ Foundation, all five providers, hot-switching, six tools with approval gating, s
 
 ### Next
 
-- Slash command parsing wired to input (`/provider`, `/model`, `/sessions`, `/undo`, `/compact`, `/cost`, `/trust`, `/help`, `/clear`)
-- Provider + model selector modals (Ctrl+P / Ctrl+M)
 - Slash-command autocomplete popup
 - Standalone diff component (currently rendered inline in tool-call blocks)
 - Streaming generation cancellation via `Ctrl+C` (today it stops the spinner; we should also cancel the in-flight HTTP request)

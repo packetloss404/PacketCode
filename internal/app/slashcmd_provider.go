@@ -12,54 +12,25 @@ import (
 )
 
 // handleProviderCommand lists providers (0 args) or switches the active
-// provider (1 arg). When switching without a model already known, the
-// handler falls back to the config default model then the first model
-// reported by ListModels.
+// provider (1 arg). Switching is delegated to applyProviderSwitch so the
+// picker and the slash command share a single code path; this handler
+// is responsible only for the "provider: " error prefix.
 func (a *App) handleProviderCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
 		a.conversation.AppendSystem(a.renderProvidersTable())
 		return a, nil
 	}
-	slug := args[0]
-	prov, ok := a.deps.Registry.Get(slug)
-	if !ok {
-		a.conversation.AppendSystem(fmt.Sprintf("provider: unknown provider %q", slug))
-		return a, nil
-	}
-
-	// Pick a model: config default first, then ListModels[0], else
-	// surface an actionable error.
-	modelID := ""
-	if a.deps.Config != nil {
-		if pc, ok := a.deps.Config.Providers[slug]; ok {
-			modelID = pc.DefaultModel
-		}
-	}
-	if modelID == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		models, err := prov.ListModels(ctx)
-		cancel()
-		if err == nil && len(models) > 0 {
-			modelID = models[0].ID
-		}
-	}
-	if modelID == "" {
-		a.conversation.AppendSystem(fmt.Sprintf("provider: %s has no default model; run /model <id> after switching", slug))
-		return a, nil
-	}
-
-	if err := a.deps.Registry.SetActive(slug, modelID); err != nil {
+	if err := a.applyProviderSwitch(args[0]); err != nil {
 		a.conversation.AppendSystem("provider: " + err.Error())
-		return a, nil
 	}
-	a.refreshTopBar()
-	a.conversation.AppendSystem(fmt.Sprintf("switched provider: %s (%s)", slug, modelID))
 	return a, nil
 }
 
 // handleModelCommand lists models available on the active provider (0
-// args) or switches to a specific model (1 arg). Model IDs are not
-// validated against ListModels — matches Registry.SetActive's contract.
+// args) or switches to a specific model (1 arg). Switching is delegated
+// to applyModelSwitch so the model picker shares behaviour; the list
+// branch additionally warms Registry.cachedModels so a subsequent Ctrl+M
+// is synchronous.
 func (a *App) handleModelCommand(args []string) (tea.Model, tea.Cmd) {
 	prov, activeModel := a.deps.Registry.Active()
 	if prov == nil {
@@ -75,17 +46,14 @@ func (a *App) handleModelCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("model: list failed: " + err.Error())
 			return a, nil
 		}
+		a.deps.Registry.SetCachedModels(prov.Slug(), models)
 		a.conversation.AppendSystem(renderModelsTable(models, activeModel))
 		return a, nil
 	}
 
-	modelID := args[0]
-	if err := a.deps.Registry.SetActive(prov.Slug(), modelID); err != nil {
+	if err := a.applyModelSwitch(args[0]); err != nil {
 		a.conversation.AppendSystem("model: " + err.Error())
-		return a, nil
 	}
-	a.refreshTopBar()
-	a.conversation.AppendSystem(fmt.Sprintf("switched model: %s/%s", prov.Slug(), modelID))
 	return a, nil
 }
 

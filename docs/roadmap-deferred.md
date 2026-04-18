@@ -22,32 +22,10 @@ git log for the commit that shipped `/provider`, `/model`, `/sessions`,
 
 ## Round 2 — Provider and model selector modals (Ctrl+P / Ctrl+M)
 
-**Scope.** Replace the stub Ctrl+P / Ctrl+M keybindings with full modal
-pickers. Mirrors the design from `02-design.md` (the original Provider
-Selector and Model Selector modals that were cut from the TUI MVP).
-
-**Why second.** Pairs naturally with Round 1's `/provider` and `/model`
-slash commands — same behaviour, different entry point. Also the last
-major gap before the TUI feels "complete" visually.
-
-**File-by-file sketch.**
-
-- `internal/ui/components/picker/picker.go` — new generic list-picker
-  modal. Columns: bullet, label, right-aligned detail, selected
-  indicator. Filter-as-you-type. Esc closes, Enter selects.
-- `internal/ui/components/picker/picker_test.go`.
-- `internal/app/app.go` — wire Ctrl+P → providerPicker (items from
-  `registry.List`), Ctrl+M → modelPicker (items from the active
-  provider's `ListModels`). Selection calls `registry.SetActive` or
-  the provider-specific model-set equivalent.
-
-**Agents.**
-1. **Plan** — picker component API, focus precedence against approval
-   and jobs panels.
-2. **Implement** — picker component + App wiring.
-3. **Tests + docs + commit**.
-
-**Estimated effort.** Single session, ~3 agents.
+**Landed.** See `docs/feature-picker-modals.md` for the spec and the
+git log for the commit that shipped Ctrl+P / Ctrl+M selector modals,
+the generic `picker` component, and the shared `applyProviderSwitch` /
+`applyModelSwitch` helpers.
 
 ---
 

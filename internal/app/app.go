@@ -35,6 +35,7 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/components/conversation"
 	"github.com/packetcode/packetcode/internal/ui/components/input"
 	jobs_ui "github.com/packetcode/packetcode/internal/ui/components/jobs"
+	"github.com/packetcode/packetcode/internal/ui/components/picker"
 	"github.com/packetcode/packetcode/internal/ui/components/spinner"
 	"github.com/packetcode/packetcode/internal/ui/components/topbar"
 	"github.com/packetcode/packetcode/internal/ui/layout"
@@ -84,6 +85,7 @@ type App struct {
 	input        input.Model
 	approval     approval.Model
 	jobsPanel    jobs_ui.Model
+	picker       picker.Model
 	spinner      spinner.Model
 
 	// Agent + bridge.
@@ -162,6 +164,7 @@ func New(deps Deps) (*App, error) {
 		input:        input.New(),
 		approval:     approval.New(),
 		jobsPanel:    jobs_ui.New(),
+		picker:       picker.New("", ""),
 		spinner:      spinner.New(),
 		agent:        a,
 		approver:     approver,
@@ -248,6 +251,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case picker.SelectMsg:
+		switch msg.PickerID {
+		case "provider":
+			if err := a.applyProviderSwitch(msg.Item.ID); err != nil {
+				a.conversation.AppendSystem("provider: " + err.Error())
+			}
+		case "model":
+			if err := a.applyModelSwitch(msg.Item.ID); err != nil {
+				a.conversation.AppendSystem("model: " + err.Error())
+			}
+		}
+		return a, nil
+
+	case picker.CloseMsg:
+		return a, nil
+
 	case pollApproverMsg:
 		if req, ok := a.approver.Pending(); ok {
 			a.approval.Show(req.Tool, req.ToolCall)
@@ -260,14 +279,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tickTopbar()
 	}
 
-	// Delegate to the focused subcomponent. The approval prompt wins
-	// (it blocks the agent loop); the jobs transcript modal is next
-	// (keyboard input while open should scroll the transcript, not
-	// the input bar); otherwise the conversation + input consume.
+	// Delegate to the focused subcomponent. Focus precedence:
+	//   approval > picker > jobsPanel > conversation/input.
+	// The approval prompt blocks the agent loop; the picker covers
+	// everything beneath it while it owns the keyboard; the jobs
+	// transcript modal scrolls on j/k when open; otherwise the
+	// conversation + input consume.
 	var cmds []tea.Cmd
 	if a.approval.Visible() {
 		var cmd tea.Cmd
 		a.approval, cmd = a.approval.Update(msg)
+		cmds = append(cmds, cmd)
+	} else if a.picker.Visible() {
+		var cmd tea.Cmd
+		a.picker, cmd = a.picker.Update(msg)
 		cmds = append(cmds, cmd)
 	} else if a.jobsPanel.Visible() {
 		var cmd tea.Cmd
@@ -290,6 +315,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+p":
+		// Refuse to stack on approval (more urgent) or an existing picker.
+		// Ctrl+P DOES open over the jobs panel — picker's higher
+		// precedence masks it until dismissed.
+		if a.approval.Visible() || a.picker.Visible() {
+			return a, nil
+		}
+		return a, a.openProviderPicker()
+	case "ctrl+m":
+		if a.approval.Visible() || a.picker.Visible() {
+			return a, nil
+		}
+		return a, a.openModelPicker()
 	case "ctrl+c":
 		if a.streaming {
 			// Streaming: cancel current generation by stopping spinner;
@@ -305,6 +343,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.approval.Visible() {
 		var cmd tea.Cmd
 		a.approval, cmd = a.approval.Update(msg)
+		return a, cmd
+	}
+	if a.picker.Visible() {
+		var cmd tea.Cmd
+		a.picker, cmd = a.picker.Update(msg)
 		return a, cmd
 	}
 	if a.jobsPanel.Visible() {
@@ -328,12 +371,15 @@ func (a *App) View() string {
 	status := a.topbar.View()
 	in := a.input.View()
 	overlay := ""
-	// Overlay precedence: the approval prompt is the most urgent
-	// (blocks the agent loop), the jobs transcript modal is
-	// user-opened and should hide the spinner while open, and the
-	// spinner fills the slot only when nothing else wants it.
+	// Overlay precedence: approval > picker > jobsPanel > spinner. The
+	// approval prompt is most urgent (blocks the agent loop); the
+	// picker covers everything underneath while visible; the jobs
+	// transcript modal masks the spinner; the spinner fills the slot
+	// only when nothing else wants it.
 	if a.approval.Visible() {
 		overlay = a.approval.View()
+	} else if a.picker.Visible() {
+		overlay = a.picker.View()
 	} else if a.jobsPanel.Visible() {
 		overlay = a.jobsPanel.View()
 	} else if a.spinner.Active() {
@@ -385,6 +431,7 @@ func (a *App) resize(w, h int) {
 		modalH = 8
 	}
 	a.jobsPanel.Resize(w, modalH)
+	a.picker.Resize(w, h)
 	// Conversation height is set in View() after measuring chrome.
 }
 
@@ -796,6 +843,59 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// openProviderPicker constructs the provider picker synchronously
+// (Registry.List is in-memory) and returns the tea.Cmd produced by
+// Open. Appends a system message and returns nil if no providers are
+// registered — we never want to show an empty modal.
+func (a *App) openProviderPicker() tea.Cmd {
+	provs := a.deps.Registry.List()
+	if len(provs) == 0 {
+		a.conversation.AppendSystem("provider picker: no providers configured")
+		return nil
+	}
+	activeSlug := ""
+	if p, _ := a.deps.Registry.Active(); p != nil {
+		activeSlug = p.Slug()
+	}
+	a.picker = picker.New("provider", "Select provider")
+	a.picker.Resize(a.width, a.height)
+	a.picker.SetItems(providerItems(provs, a.deps.Config, activeSlug))
+	a.picker.SetActive(activeSlug)
+	return a.picker.Open(nil)
+}
+
+// openModelPicker constructs the model picker. When Registry has a
+// fresh cache for the active provider the modal opens synchronously;
+// otherwise it opens in the loading state and the returned tea.Cmd
+// fires a ListModels on a background goroutine, warming the cache on
+// success.
+func (a *App) openModelPicker() tea.Cmd {
+	prov, active := a.deps.Registry.Active()
+	if prov == nil {
+		a.conversation.AppendSystem("model picker: no active provider")
+		return nil
+	}
+	a.picker = picker.New("model", fmt.Sprintf("Select model — %s", prov.Name()))
+	a.picker.Resize(a.width, a.height)
+	if cached, ok := a.deps.Registry.CachedModels(prov.Slug()); ok {
+		a.picker.SetItems(modelItems(cached, active, prov))
+		a.picker.SetActive(active)
+		return a.picker.Open(nil)
+	}
+	slug := prov.Slug()
+	loader := func(ctx context.Context) ([]picker.Item, error) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		models, err := prov.ListModels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		a.deps.Registry.SetCachedModels(slug, models)
+		return modelItems(models, active, prov), nil
+	}
+	return a.picker.Open(loader)
 }
 
 func pollApprover() tea.Cmd {

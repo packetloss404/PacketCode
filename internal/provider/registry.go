@@ -15,16 +15,18 @@ var displayOrder = []string{"openai", "gemini", "minimax", "openrouter", "ollama
 // (provider, model) pair. Hot-switching mutates only the active fields;
 // the underlying Provider instances are long-lived.
 type Registry struct {
-	mu          sync.RWMutex
-	providers   map[string]Provider
-	active      Provider
-	activeModel string
+	mu           sync.RWMutex
+	providers    map[string]Provider
+	active       Provider
+	activeModel  string
+	cachedModels map[string][]Model
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		providers: map[string]Provider{},
+		providers:    map[string]Provider{},
+		cachedModels: map[string][]Model{},
 	}
 }
 
@@ -103,6 +105,42 @@ func (r *Registry) Active() (Provider, string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.active, r.activeModel
+}
+
+// CachedModels returns the most recent cached ListModels result for a
+// provider slug, if one has been stored via SetCachedModels. The
+// returned slice is a defensive copy so callers cannot mutate the
+// cached entry.
+func (r *Registry) CachedModels(slug string) ([]Model, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ms, ok := r.cachedModels[slug]
+	if !ok {
+		return nil, false
+	}
+	out := make([]Model, len(ms))
+	copy(out, ms)
+	return out, true
+}
+
+// SetCachedModels stores a snapshot of ms under the provider slug. A
+// defensive copy is made so callers can re-use their slice afterwards.
+// Passing a nil slice stores an empty entry — use InvalidateCachedModels
+// to remove the key entirely.
+func (r *Registry) SetCachedModels(slug string, ms []Model) {
+	cp := make([]Model, len(ms))
+	copy(cp, ms)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cachedModels[slug] = cp
+}
+
+// InvalidateCachedModels drops the cached entry for slug, forcing the
+// next CachedModels call to miss.
+func (r *Registry) InvalidateCachedModels(slug string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cachedModels, slug)
 }
 
 // InitResult records what happened when initializing a single provider.

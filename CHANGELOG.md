@@ -95,6 +95,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent.ContextManager`, and `uiApprover`. Destructive verbs
   (`/sessions delete`, `/cost reset`) require an explicit `--yes`
   flag instead of a confirmation modal.
+- **Picker modals — Round 2.** `Ctrl+P` and `Ctrl+M` now open live
+  filter-as-you-type list modals backed by a new generic
+  `internal/ui/components/picker` component (reused by the upcoming
+  slash-autocomplete and theme-picker rounds). Model lookups are async
+  with a per-provider in-memory cache on `provider.Registry` — the
+  first `Ctrl+M` triggers a `ListModels` round trip, subsequent opens
+  are instant. Both the slash handlers and the picker dispatch through
+  the same `applyProviderSwitch` / `applyModelSwitch` helpers in
+  `internal/app`, so the side effects (Registry.SetActive, top-bar
+  refresh, `switched …` system message) stay identical.
 
 ### Design
 
@@ -110,7 +120,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deferred to a future release
 
-- Provider + model selector modals (Ctrl+P / Ctrl+M today open nothing).
 - Slash-command autocomplete popup.
 - Standalone diff component — diffs render inline in tool-call blocks
   for now.
@@ -121,10 +130,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Test coverage
 
-17 test-bearing packages, all green. `internal/app` carries the bulk
-of UX test coverage after Round 1: parse-layer + handler-integration
-for all 12 slash-command verbs (~48 new top-level test functions,
-expanding to ~84 cases with subtests). Packages: agent, app, config,
-cost, git, jobs, provider (registry + 5 providers), session, tools
-(registry + safefs + 6 tools + spawn_agent), ui/components/jobs,
-ui/components/topbar, ui/layout.
+18 test-bearing packages, all green. Round 2 added
+`internal/ui/components/picker` (the new package) plus 50 new top-level
+test functions: 18 picker component + 6 filter + 4 registry cache
+(including a 100-goroutine concurrent-access test) + 22 App-level
+integration tests for `Ctrl+P` / `Ctrl+M` (cache hits, fresh loads,
+error + retry, stacking guards against approval / self, and
+slash-command regressions). Packages: agent, app, config, cost, git,
+jobs, provider (registry + 5 providers), session, tools (registry +
+safefs + 6 tools + spawn_agent), ui/components/jobs,
+ui/components/picker, ui/components/topbar, ui/layout.

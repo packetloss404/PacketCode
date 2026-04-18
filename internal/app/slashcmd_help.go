@@ -27,6 +27,7 @@ func renderHelp() string {
 		{"Conversation", ConversationKeys},
 		{"Approval", ApprovalKeys},
 		{"Input", InputKeys},
+		{"Picker", PickerKeys},
 		{"Slash commands", SlashCommands},
 	}
 	var b strings.Builder
