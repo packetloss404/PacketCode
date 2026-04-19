@@ -258,10 +258,8 @@ Ollama needs no key — packetcode probes `http://localhost:11434` (or whatever'
 - `Ctrl+C` — cancel current generation; press twice to exit
 - `Ctrl+L` — clear screen (keep session)
 
-**Conversation pane**
-- `↑` / `k` — scroll up · `↓` / `j` — scroll down
-- `g` — top · `G` — bottom
-- `Tab` — toggle collapse on the most recent tool output
+**Conversation transcript**
+- Finalised user turns, assistant replies, and tool results are committed to your terminal's native scrollback. Use your terminal's own scroll (mouse wheel, `Shift+PageUp` / `Ctrl+Shift+PageUp`, or `tmux` copy mode) to review prior output — packetcode renders inline rather than taking over the screen, so there are no in-app scroll keys.
 
 **Approval prompt**
 - `Y` — approve · `N` / `Esc` — reject

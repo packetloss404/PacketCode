@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 // applyProviderSwitch mirrors the side-effect chain of `/provider <slug>`:
@@ -27,7 +30,7 @@ func (a *App) applyProviderSwitch(slug string) error {
 		if cached, ok := a.deps.Registry.CachedModels(slug); ok && len(cached) > 0 {
 			modelID = cached[0].ID
 		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			models, err := prov.ListModels(ctx)
 			cancel()
 			if err == nil && len(models) > 0 {
@@ -47,13 +50,18 @@ func (a *App) applyProviderSwitch(slug string) error {
 	return nil
 }
 
-// applyModelSwitch sets the active model on the current provider and
-// announces the change. Returns an error (no "model: " prefix) when no
-// provider is active or Registry.SetActive refuses.
+// applyModelSwitch validates modelID against the provider's catalog
+// (so the user can't set a phantom ID that silently fails every turn)
+// and, if valid, sets it active. Validation is skipped only when the
+// catalog can't be fetched — we don't want a transient network blip
+// to prevent the user from changing models.
 func (a *App) applyModelSwitch(modelID string) error {
 	prov, _ := a.deps.Registry.Active()
 	if prov == nil {
 		return fmt.Errorf("no active provider")
+	}
+	if err := a.validateModelID(prov, modelID); err != nil {
+		return err
 	}
 	if err := a.deps.Registry.SetActive(prov.Slug(), modelID); err != nil {
 		return err
@@ -61,4 +69,54 @@ func (a *App) applyModelSwitch(modelID string) error {
 	a.refreshTopBar()
 	a.conversation.AppendSystem(fmt.Sprintf("switched model: %s/%s", prov.Slug(), modelID))
 	return nil
+}
+
+// validateModelID returns nil if modelID appears in the provider's
+// model catalog, a descriptive error with near-match suggestions if
+// not. If the catalog can't be reached (offline, rate-limited, etc.)
+// we return nil so the user isn't stuck behind a transient failure —
+// the runtime chat completion will surface a real API error then.
+func (a *App) validateModelID(prov provider.Provider, modelID string) error {
+	var models []provider.Model
+	if cached, ok := a.deps.Registry.CachedModels(prov.Slug()); ok && len(cached) > 0 {
+		models = cached
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		fetched, err := prov.ListModels(ctx)
+		cancel()
+		if err != nil {
+			return nil // trust the user; runtime will surface API errors
+		}
+		a.deps.Registry.SetCachedModels(prov.Slug(), fetched)
+		models = fetched
+	}
+	for _, m := range models {
+		if m.ID == modelID {
+			return nil
+		}
+	}
+	suggestions := findNearMatches(modelID, models, 3)
+	if len(suggestions) > 0 {
+		return fmt.Errorf("unknown model %q for %s; did you mean: %s?",
+			modelID, prov.Slug(), strings.Join(suggestions, ", "))
+	}
+	return fmt.Errorf("unknown model %q for %s; run /model to list available",
+		modelID, prov.Slug())
+}
+
+// findNearMatches returns up to n catalog IDs whose string contains the
+// query (or vice versa) — cheap typo hints for validateModelID.
+func findNearMatches(query string, models []provider.Model, n int) []string {
+	q := strings.ToLower(query)
+	out := make([]string, 0, n)
+	for _, m := range models {
+		lower := strings.ToLower(m.ID)
+		if strings.Contains(lower, q) || (len(q) > 4 && strings.Contains(q, lower)) {
+			out = append(out, m.ID)
+			if len(out) >= n {
+				break
+			}
+		}
+	}
+	return out
 }

@@ -1,13 +1,25 @@
-// Package conversation renders the scrollable transcript pane: the
-// running list of user/assistant/tool messages with their tool-call
-// outputs and inline diffs.
+// Package conversation renders the transcript of a session. Each
+// finalised message (user turn, assistant reply, tool call + result,
+// system note) is committed to the terminal's native scrollback via
+// tea.Println; the component itself only holds a single "pending" slot
+// for the message currently being streamed or awaiting a tool result,
+// which the App renders into its live region below the topbar.
+//
+// Design:
+//   - Append* / Complete* / Finalise* mutate state and push a rendered
+//     string onto the internal emits queue.
+//   - The App calls DrainEmits() each Update tick and wraps each entry
+//     in tea.Println so they land in terminal scrollback above the live
+//     region.
+//   - PendingView() returns the live-region render of whatever is
+//     streaming or awaiting a tool result.
+//   - View() is retained for tests: concatenates queued emits + pending.
 package conversation
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -17,9 +29,7 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
-// MessageKind discriminates how a Message renders. We intentionally keep
-// the discriminator in the conversation package — provider.Role is the
-// data model, MessageKind is the visual model.
+// MessageKind discriminates how a Message renders.
 type MessageKind int
 
 const (
@@ -30,214 +40,219 @@ const (
 )
 
 // Message is the conversation's atomic display unit. Tool calls and tool
-// results are merged into a single ToolCallBlock so the output reads
-// linearly.
+// results are merged into a single block so the output reads linearly.
 type Message struct {
-	Kind     MessageKind
-	Author   string // "You" / "packetcode (gpt-4.1)" / "system"
-	Color    lipgloss.Color
-	Content  string
+	Kind    MessageKind
+	Author  string
+	Color   lipgloss.Color
+	Content string
 
 	// ToolCall fields populated when Kind == KindToolCall.
-	ToolName string
-	ToolArgs string
+	ToolName   string
+	ToolArgs   string
 	ToolResult string
 	IsError    bool
 	Collapsed  bool
 }
 
-// Model is the scrollable conversation pane.
+// Model is the conversation state: a pending in-flight message (if any)
+// and a queue of rendered emits awaiting DrainEmits.
 type Model struct {
-	messages   []Message
-	viewport   viewport.Model
-	width      int
-	height     int
-	autoScroll bool
-	version    string
+	width   int
+	height  int
+	version string
+
+	pending        *Message
+	welcomePrinted bool
+
+	// emits is the FIFO queue of rendered strings awaiting DrainEmits.
+	// Production: drained each Update cycle and each entry becomes a
+	// tea.Println that commits to terminal scrollback.
+	emits []string
+	// seen mirrors every entry that has ever passed through emit(), kept
+	// for test harnesses that want to assert against the cumulative
+	// transcript (production code never reads it). Unbounded growth is
+	// acceptable because /clear replaces the whole Model.
+	seen []string
 }
 
+// New constructs an empty conversation.
 func New() Model {
-	vp := viewport.New(0, 0)
-	return Model{
-		viewport:   vp,
-		autoScroll: true,
-	}
+	return Model{}
 }
 
-// SetVersion sets the version string shown on the welcome splash. Called
-// once at construction time by the App.
+// SetVersion sets the version label used on the welcome splash.
 func (m *Model) SetVersion(v string) { m.version = v }
 
-// IsEmpty reports whether the pane is in welcome-splash state. Used by
-// the App to decide whether to size for a splash or for the viewport.
+// IsEmpty reports whether nothing has been emitted yet and no message is
+// pending. Used by tests and by /clear to decide whether a splash is
+// needed.
 func (m *Model) IsEmpty() bool {
-	for _, msg := range m.messages {
-		if !(msg.Kind == KindSystem && msg.Content == "") {
-			return false
-		}
-	}
-	return true
+	return m.pending == nil && len(m.seen) == 0
 }
 
-// Resize updates the viewport dimensions. Conversation content is re-laid
-// out on next View().
+// Resize records the terminal dimensions. Width is used by render
+// helpers for wrapping; height is retained for API compatibility with
+// the previous viewport-based model but is otherwise unused.
 func (m *Model) Resize(width, height int) {
 	m.width = width
 	m.height = height
-	m.viewport.Width = width
-	m.viewport.Height = height
-	m.refresh()
 }
 
-// AppendUser adds a user message and scrolls to bottom.
+// EmitWelcomeSplash pushes the one-shot welcome splash onto the emits
+// queue so the App's DrainEmits wrapper commits it to scrollback via
+// tea.Println on the next Update cycle. No-op once already emitted, or
+// when width is not yet known (defer until first WindowSizeMsg).
+func (m *Model) EmitWelcomeSplash() {
+	if m.welcomePrinted || m.width <= 0 {
+		return
+	}
+	m.welcomePrinted = true
+	m.emit(welcome.RenderInline(m.width, m.version))
+}
+
+// AppendUser commits a user message to scrollback.
 func (m *Model) AppendUser(content string) {
-	m.append(Message{
+	m.emit(renderMessage(Message{
 		Kind:    KindUser,
 		Author:  "You",
 		Color:   theme.AccentPrimary,
 		Content: content,
-	})
+	}, m.contentWidth()))
 }
 
-// AppendAgentText starts a new agent message or appends to the most
-// recent in-progress one. Streaming chunks land here.
+// AppendAgentText appends a streaming chunk to the pending agent
+// message, creating it if absent. Not committed yet — the live region
+// shows the in-progress render via PendingView.
 func (m *Model) AppendAgentText(model, providerSlug, chunk string) {
-	if n := len(m.messages); n > 0 && m.messages[n-1].Kind == KindAgent {
-		m.messages[n-1].Content += chunk
-		m.refresh()
+	if m.pending != nil && m.pending.Kind == KindAgent {
+		m.pending.Content += chunk
 		return
 	}
-	m.append(Message{
+	m.flushPending()
+	m.pending = &Message{
 		Kind:    KindAgent,
 		Author:  fmt.Sprintf("packetcode (%s)", model),
 		Color:   theme.ProviderColor(providerSlug),
 		Content: chunk,
-	})
-}
-
-// FinaliseAgent forces any subsequent AppendAgentText to start a new
-// message instead of growing the previous one. Called after the agent
-// emits EventDone.
-func (m *Model) FinaliseAgent() {
-	// Insert a sentinel non-agent message... actually no: we just check
-	// "is the LAST message agent?" so to break the chain, we append an
-	// invisible terminator. Simpler: the caller invokes FinaliseAgent
-	// and the next AppendAgentText starts fresh because we mark the
-	// last agent message as finalised via a tiny content tweak. To keep
-	// the implementation honest, we append a no-render sentinel that
-	// gets filtered in View.
-	if n := len(m.messages); n > 0 && m.messages[n-1].Kind == KindAgent {
-		m.append(Message{Kind: KindSystem, Content: ""}) // terminator
 	}
 }
 
-// AppendToolCall starts a new tool call block (no result yet).
+// FinaliseAgent commits the pending agent message (if any) to
+// scrollback. Called after agent.EventDone.
+func (m *Model) FinaliseAgent() {
+	if m.pending != nil && m.pending.Kind == KindAgent {
+		m.emit(renderMessage(*m.pending, m.contentWidth()))
+		m.pending = nil
+	}
+}
+
+// AppendToolCall starts a pending tool call. Awaits CompleteToolCall.
+// If another message is pending, it is flushed first.
 func (m *Model) AppendToolCall(toolName, args string) {
-	m.append(Message{
+	m.flushPending()
+	m.pending = &Message{
 		Kind:     KindToolCall,
 		ToolName: toolName,
 		ToolArgs: args,
-	})
+	}
 }
 
-// CompleteToolCall fills in the result for the most recent in-progress
-// tool call block matching the given name. We match by the most recent
-// pending block to handle parallel tool calls in approximate order.
+// CompleteToolCall fills in the tool result and commits the tool-call
+// block to scrollback. Matches by name against the pending tool call.
+// Silently no-ops if there's no matching pending call.
 func (m *Model) CompleteToolCall(toolName string, res tools.ToolResult) {
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Kind != KindToolCall {
-			continue
-		}
-		if m.messages[i].ToolName != toolName || m.messages[i].ToolResult != "" {
-			continue
-		}
-		m.messages[i].ToolResult = res.Content
-		m.messages[i].IsError = res.IsError
-		m.messages[i].Collapsed = !res.IsError && len(res.Content) > 600
-		break
-	}
-	m.refresh()
-}
-
-// AppendSystem renders an inline system note.
-func (m *Model) AppendSystem(content string) {
-	m.append(Message{Kind: KindSystem, Content: content})
-}
-
-func (m *Model) append(msg Message) {
-	m.messages = append(m.messages, msg)
-	m.refresh()
-}
-
-// ToggleCollapseLast flips the collapsed state of the most recent
-// completed tool call. Bound to the Tab key on the conversation pane.
-func (m *Model) ToggleCollapseLast() {
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Kind == KindToolCall && m.messages[i].ToolResult != "" {
-			m.messages[i].Collapsed = !m.messages[i].Collapsed
-			m.refresh()
-			return
-		}
-	}
-}
-
-// Update handles scroll keys (j/k, ↑/↓, gg, G) and viewport mouse
-// (disabled — but Bubble Tea routes wheel events through here anyway).
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok {
-		switch km.String() {
-		case "G":
-			m.viewport.GotoBottom()
-			m.autoScroll = true
-			return m, nil
-		case "g":
-			m.viewport.GotoTop()
-			m.autoScroll = false
-			return m, nil
-		case "j", "down":
-			m.viewport.LineDown(1)
-			m.autoScroll = m.viewport.AtBottom()
-			return m, nil
-		case "k", "up":
-			m.viewport.LineUp(1)
-			m.autoScroll = false
-			return m, nil
-		case "tab":
-			m.ToggleCollapseLast()
-			return m, nil
-		}
-	}
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
-}
-
-func (m Model) View() string {
-	if m.IsEmpty() {
-		return welcome.Render(m.width, m.height, m.version)
-	}
-	return m.viewport.View()
-}
-
-// refresh re-renders all messages into the viewport content. Auto-scrolls
-// to the bottom when m.autoScroll is set.
-func (m *Model) refresh() {
-	if m.width <= 0 {
+	if m.pending == nil || m.pending.Kind != KindToolCall || m.pending.ToolName != toolName {
 		return
 	}
-	var b strings.Builder
-	contentWidth := m.width - 2
-	for _, msg := range m.messages {
-		if msg.Kind == KindSystem && msg.Content == "" {
-			continue
-		}
-		b.WriteString(renderMessage(msg, contentWidth))
-		b.WriteString("\n")
+	m.pending.ToolResult = res.Content
+	m.pending.IsError = res.IsError
+	m.emit(renderMessage(*m.pending, m.contentWidth()))
+	m.pending = nil
+}
+
+// AppendSystem commits a system note to scrollback.
+func (m *Model) AppendSystem(content string) {
+	m.emit(renderMessage(Message{Kind: KindSystem, Content: content}, m.contentWidth()))
+}
+
+// PendingView renders the current pending message for the live region.
+// Returns "" when nothing is pending.
+func (m Model) PendingView() string {
+	if m.pending == nil {
+		return ""
 	}
-	m.viewport.SetContent(b.String())
-	if m.autoScroll {
-		m.viewport.GotoBottom()
+	return renderMessage(*m.pending, m.contentWidth())
+}
+
+// DrainEmits returns the FIFO queue of finalised rendered messages and
+// clears it. The App wraps each entry in tea.Println to commit to
+// terminal scrollback.
+func (m *Model) DrainEmits() []string {
+	out := m.emits
+	m.emits = nil
+	return out
+}
+
+// View returns the cumulative transcript (every committed message ever
+// emitted, whether or not it has been drained for tea.Println) plus the
+// current pending message. Retained for test harnesses that snapshot
+// the full conversation; production uses DrainEmits + tea.Println for
+// committed content and PendingView for the live region.
+func (m Model) View() string {
+	if len(m.seen) == 0 && m.pending == nil {
+		return ""
 	}
+	parts := make([]string, 0, len(m.seen)+1)
+	parts = append(parts, m.seen...)
+	if m.pending != nil {
+		parts = append(parts, renderMessage(*m.pending, m.contentWidth()))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// Update consumes Bubble Tea messages. Inline rendering relies on native
+// terminal scrollback — no in-app scroll keys, no viewport — so this is
+// a no-op. Kept so the component still participates in Bubble Tea's
+// Update routing without needing a special case in the App.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) { return m, nil }
+
+// ToggleCollapseLast used to flip the collapse state of the last tool
+// call. In inline rendering mode tool calls are committed to scrollback
+// at completion and cannot be toggled afterwards — the method is kept
+// as a no-op so the Tab keybinding continues to compile.
+func (m *Model) ToggleCollapseLast() {}
+
+// emit pushes a rendered string onto the FIFO queue. No-op for empty
+// strings (e.g. system message with empty content).
+func (m *Model) emit(rendered string) {
+	if rendered == "" {
+		return
+	}
+	m.emits = append(m.emits, rendered)
+	m.seen = append(m.seen, rendered)
+}
+
+// flushPending commits any pending message to scrollback. Used when a
+// new pending slot is about to overwrite the current one (e.g. a tool
+// call proposed while agent text was still streaming).
+func (m *Model) flushPending() {
+	if m.pending == nil {
+		return
+	}
+	m.emit(renderMessage(*m.pending, m.contentWidth()))
+	m.pending = nil
+}
+
+// contentWidth is the effective render width for a message bubble —
+// terminal width minus a small gutter. Falls back to a sane default
+// before the first WindowSizeMsg arrives.
+func (m Model) contentWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	return w - 2
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -251,7 +266,14 @@ func renderMessage(msg Message, width int) string {
 	case KindAgent:
 		return renderBubble(msg.Author, msg.Color, msg.Content, theme.StyleAgentMessage, width)
 	case KindSystem:
-		return theme.StyleSystemMessage.Render(msg.Content)
+		if msg.Content == "" {
+			return ""
+		}
+		w := width - 4
+		if w < 10 {
+			w = 10
+		}
+		return theme.StyleSystemMessage.Width(w).Render(msg.Content)
 	case KindToolCall:
 		return renderToolCall(msg, width)
 	}
@@ -264,9 +286,6 @@ func renderBubble(author string, color lipgloss.Color, body string, base lipglos
 	return base.Width(width - 2).Render(content)
 }
 
-// renderToolCall renders a tool invocation + (optionally) its result.
-// Long results collapse to a single "▶ Expand" line that the user can
-// pop open with Tab.
 func renderToolCall(msg Message, width int) string {
 	header := theme.LabelBadge(msg.ToolName, theme.AccentPrimary)
 	args := truncate(msg.ToolArgs, 200)
@@ -279,16 +298,13 @@ func renderToolCall(msg Message, width int) string {
 	return theme.StyleToolCall.Width(width - 2).Render(strings.Join(parts, "\n"))
 }
 
-// renderToolResultBody picks the right rendering for the result body
-// (error / collapsed / diff / plain). Extracted from renderToolCall so
-// the diff path stays testable in isolation.
 func renderToolResultBody(msg Message, width int) string {
 	if msg.IsError {
 		return theme.StyleError.Render(msg.ToolResult)
 	}
 	if msg.Collapsed {
 		lines := strings.Count(msg.ToolResult, "\n") + 1
-		return theme.StyleDim.Render(fmt.Sprintf("▶ Output collapsed (%d lines) — press Tab to expand", lines))
+		return theme.StyleDim.Render(fmt.Sprintf("▶ Output collapsed (%d lines)", lines))
 	}
 	if msg.ToolName == "patch_file" {
 		if rendered, ok := tryRenderDiffResult(msg.ToolResult, width); ok {
@@ -300,13 +316,7 @@ func renderToolResultBody(msg Message, width int) string {
 
 // tryRenderDiffResult looks for a unified-diff marker inside a tool
 // result and, if found, renders everything after it via the diff
-// component. Anything before the marker (patch_file's "Applied N
-// patches" preamble) is preserved dim above the diff so the user
-// still sees the summary line.
-//
-// Conversation uses a 200-row cap — the viewport is scrollable so
-// truncation is only about keeping gigantic diffs from hanging
-// lipgloss.
+// component.
 func tryRenderDiffResult(content string, width int) (string, bool) {
 	idx := strings.Index(content, "--- ")
 	if idx < 0 {

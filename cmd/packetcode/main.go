@@ -309,7 +309,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 	// the main user through the existing modal.
 	jobsMgr.SetApprover(a.Approver())
 
-	prog := tea.NewProgram(a, tea.WithAltScreen()) // explicitly NO mouse support
+	prog := tea.NewProgram(a) // inline rendering — native terminal scrollback, no mouse support
 	// Let the App post async messages (jobs.Manager Subscribe callbacks)
 	// into the Bubble Tea Update loop.
 	a.SetSendFunc(func(m tea.Msg) { prog.Send(m) })

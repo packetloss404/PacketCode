@@ -96,3 +96,29 @@ loop:
 	}
 	assert.True(t, sawCancelErr, "expected EventError wrapping context.Canceled; got events: %+v", events)
 }
+
+// TestExtractAPIErrorMessage_JSONBody confirms the OpenAI-style wrapper
+// is unwrapped to just the message string, so UI error rendering shows
+// "This is not a chat model..." instead of the full JSON blob.
+func TestExtractAPIErrorMessage_JSONBody(t *testing.T) {
+	body := []byte(`{
+		"error": {
+			"message": "This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/responses?",
+			"type": "invalid_request_error",
+			"param": "model",
+			"code": null
+		}
+	}`)
+	got := extractAPIErrorMessage(body)
+	assert.Equal(t, "This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/responses?", got)
+}
+
+// TestExtractAPIErrorMessage_FallsBackToRaw — non-JSON or malformed
+// bodies return the trimmed raw bytes so the user still sees something.
+func TestExtractAPIErrorMessage_FallsBackToRaw(t *testing.T) {
+	assert.Equal(t, "internal server error", extractAPIErrorMessage([]byte("  internal server error  ")))
+	assert.Equal(t, "", extractAPIErrorMessage([]byte("")))
+	// Valid JSON but no error.message → fall back to raw.
+	raw := `{"ok": true}`
+	assert.Equal(t, raw, extractAPIErrorMessage([]byte(raw)))
+}

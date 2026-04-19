@@ -149,6 +149,23 @@ func stripModelsPrefix(name string) string {
 	return strings.TrimPrefix(name, "models/")
 }
 
+// extractGeminiErrorMessage unwraps the {error:{message:...}} envelope
+// Google returns on non-2xx responses so the UI shows a one-line reason
+// instead of the raw JSON blob. Falls back to the trimmed raw bytes on
+// parse failure.
+func extractGeminiErrorMessage(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	var wrapper struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err == nil && wrapper.Error.Message != "" {
+		return wrapper.Error.Message
+	}
+	return trimmed
+}
+
 func (p *Provider) Pricing(modelID string) (float64, float64) {
 	if entry, ok := pricingTable[modelID]; ok {
 		return entry.Input, entry.Output
@@ -339,12 +356,12 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("chat completion request: %w", err)
+		return nil, fmt.Errorf("request: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
 		errBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("chat completion: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, extractGeminiErrorMessage(errBody))
 	}
 
 	ch := make(chan provider.StreamEvent, 8)

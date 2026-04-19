@@ -22,7 +22,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/config"
@@ -236,6 +235,27 @@ func (a *App) Init() tea.Cmd {
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := a.updateInner(msg)
+	// Convert any rendered messages the inner handlers queued on the
+	// conversation into tea.Println commands so they commit to the
+	// terminal's native scrollback above the live region. This is the
+	// single choke-point that knows about Println; all call sites stay
+	// as plain `a.conversation.Append*` etc.
+	drained := a.conversation.DrainEmits()
+	if len(drained) == 0 {
+		return model, cmd
+	}
+	cmds := make([]tea.Cmd, 0, len(drained)+1)
+	for _, s := range drained {
+		cmds = append(cmds, tea.Println(s))
+	}
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return model, tea.Batch(cmds...)
+}
+
+func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.resize(msg.Width, msg.Height)
@@ -498,17 +518,16 @@ func (a *App) View() string {
 		return ""
 	}
 
-	// Render the chrome regions first so we can measure their actual
-	// rendered heights — those vary with multi-line input, narrow-mode
-	// shedding in the status bar, etc.
+	// Inline rendering: finalised messages live in the terminal's native
+	// scrollback (committed via tea.Println on DrainEmits). The View()
+	// return is only the live region that redraws at the bottom of the
+	// terminal: pending streaming content, any overlay modal, the
+	// autocomplete popup, input, and topbar.
 	status := a.topbar.View()
 	in := a.input.View()
+	pending := a.conversation.PendingView()
+
 	overlay := ""
-	// Overlay precedence: approval > picker > jobsPanel > spinner. The
-	// approval prompt is most urgent (blocks the agent loop); the
-	// picker covers everything underneath while visible; the jobs
-	// transcript modal masks the spinner; the spinner fills the slot
-	// only when nothing else wants it.
 	if a.approval.Visible() {
 		overlay = a.approval.View()
 	} else if a.picker.Visible() {
@@ -519,39 +538,12 @@ func (a *App) View() string {
 		overlay = a.spinner.View()
 	}
 
-	// aboveInput lives in its own layout slot — below overlay so a
-	// visible modal always covers it, above the input so it reads as
-	// "attached to" the input chrome. Today the only tenant is the
-	// slash-command autocomplete popup.
 	aboveInput := ""
 	if overlay == "" && a.autocomplete.Visible() {
 		aboveInput = a.autocomplete.View()
 	}
 
-	statusH := lipgloss.Height(status)
-	inputH := lipgloss.Height(in)
-	overlayH := 0
-	if overlay != "" {
-		overlayH = lipgloss.Height(overlay)
-	}
-	aboveH := 0
-	if aboveInput != "" {
-		aboveH = lipgloss.Height(aboveInput)
-	}
-
-	bodyH := a.height - statusH - inputH - overlayH - aboveH
-	if bodyH < 3 {
-		bodyH = 3
-	}
-
-	// Now that we know the exact body height, size the conversation
-	// pane (which owns its own viewport) to match. Rendering after this
-	// resize guarantees no content gets clipped by post-hoc trimming —
-	// the previous bug that ate the user's first message.
-	a.conversation.Resize(a.width, bodyH)
-	body := a.conversation.View()
-
-	return layout.Frame(body, overlay, aboveInput, in, status)
+	return layout.Frame(pending, overlay, aboveInput, in, status)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -559,19 +551,16 @@ func (a *App) View() string {
 // ────────────────────────────────────────────────────────────────────────────
 
 // resize stores the new terminal dimensions and propagates width to
-// components that wrap text. Heights are recomputed in View() based on
-// the rendered chrome — this avoids the trap of guessing border + padding
-// row counts and getting clipped content.
+// components that wrap text. Inline rendering means the live region is
+// just its natural height at the bottom of the terminal — the
+// conversation no longer owns a fullscreen viewport, so we don't need
+// to compute a body budget.
 func (a *App) resize(w, h int) {
 	a.width = w
 	a.height = h
 	a.topbar.SetWidth(w)
 	a.input.Resize(w, 0)
 	a.approval.SetWidth(w)
-	// Give the jobs modal a generous but not fullscreen body budget —
-	// header + footer + border eat a few lines in the component
-	// itself. Matches the approval prompt's "full-width, modest
-	// height" shape.
 	modalH := h - 8
 	if modalH < 8 {
 		modalH = 8
@@ -579,7 +568,11 @@ func (a *App) resize(w, h int) {
 	a.jobsPanel.Resize(w, modalH)
 	a.picker.Resize(w, h)
 	a.autocomplete.SetWidth(w)
-	// Conversation height is set in View() after measuring chrome.
+	a.conversation.Resize(w, h)
+	// First WindowSizeMsg after startup: commit the welcome splash to
+	// scrollback via the conversation's emit queue (picked up by
+	// DrainEmits in Update).
+	a.conversation.EmitWelcomeSplash()
 }
 
 func (a *App) refreshTopBar() {

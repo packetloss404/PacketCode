@@ -162,17 +162,13 @@ func promptKey(r *bufio.Reader, out io.Writer, slug string) (string, error) {
 }
 
 func promptModel(r *bufio.Reader, out io.Writer, models []provider.Model) (string, error) {
-	fmt.Fprintln(out, "  Available models:")
+	fmt.Fprintf(out, "  Available models (%d):\n", len(models))
 	for i, m := range models {
 		fmt.Fprintf(out, "    %d) %s", i+1, m.ID)
 		if m.ContextWindow > 0 {
 			fmt.Fprintf(out, "  (%d ctx)", m.ContextWindow)
 		}
 		fmt.Fprintln(out, "")
-		if i >= 19 {
-			fmt.Fprintf(out, "    ... %d more not shown\n", len(models)-20)
-			break
-		}
 	}
 	for {
 		fmt.Fprint(out, "  Choice [1]: ")

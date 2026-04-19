@@ -53,9 +53,11 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	return p.client.ValidateKey(ctx, apiKey)
 }
 
-// ListModels filters the upstream catalog to chat-capable models we know
-// about. Anything outside supportedPrefixes is hidden so the selector
-// modal doesn't drown in embeddings, TTS, etc.
+// ListModels filters the upstream catalog to chat-capable models by
+// dropping known non-chat types (embeddings, TTS, whisper, dall-e, etc.).
+// Everything else passes through — including model families we don't
+// have pricing for yet — so newly-released chat models appear in the
+// selector without requiring a code release here.
 func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 	raw, err := p.client.ListModels(ctx)
 	if err != nil {
@@ -63,7 +65,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 	}
 	out := make([]provider.Model, 0, len(raw))
 	for _, m := range raw {
-		if !isSupported(m.ID) {
+		if !isChatModel(m.ID) {
 			continue
 		}
 		entry, hasPricing := pricingTable[m.ID]
@@ -71,7 +73,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 			ID:            m.ID,
 			DisplayName:   m.ID,
 			ContextWindow: entry.ContextWindow,
-			SupportsTools: !hasPricing || entry.SupportsTools, // unknown but supported-prefix → assume yes
+			SupportsTools: !hasPricing || entry.SupportsTools, // unknown → assume yes; runtime API will complain if wrong
 			InputPer1M:    entry.Input,
 			OutputPer1M:   entry.Output,
 		})
@@ -102,14 +104,20 @@ func (p *Provider) SupportsTools(modelID string) bool {
 	if entry, ok := pricingTable[modelID]; ok {
 		return entry.SupportsTools
 	}
-	return isSupported(modelID)
+	// Unknown model: assume yes for chat models, no for non-chat.
+	// A live chat completion will surface any mismatch as an API error.
+	return isChatModel(modelID)
 }
 
-func isSupported(id string) bool {
-	for _, prefix := range supportedPrefixes {
-		if strings.HasPrefix(id, prefix) {
-			return true
+// isChatModel returns true unless the ID matches a known non-chat
+// pattern. Intentionally permissive: drop the embeddings / audio /
+// image / legacy-completion families, let everything else through.
+func isChatModel(id string) bool {
+	lower := strings.ToLower(id)
+	for _, bad := range nonChatIndicators {
+		if strings.Contains(lower, bad) {
+			return false
 		}
 	}
-	return false
+	return true
 }

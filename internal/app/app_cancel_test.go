@@ -162,6 +162,14 @@ func (p *drainPump) RunUntil(deadline time.Duration, pred func() bool) {
 		if msg == nil {
 			continue
 		}
+		// tea.Batch produces a BatchMsg holding sub-commands. The real
+		// Bubble Tea runtime unwraps these and runs each; our pump
+		// needs to do the same so follow-up cmds (like the next agent
+		// event read) aren't lost inside a Println+event batch.
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			p.cmds = append(p.cmds, batch...)
+			continue
+		}
 		_, follow := p.app.Update(msg)
 		if follow != nil {
 			p.cmds = append(p.cmds, follow)

@@ -39,7 +39,7 @@ func (a *App) handleModelCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 
 	if len(args) == 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		models, err := prov.ListModels(ctx)
 		cancel()
 		if err != nil {

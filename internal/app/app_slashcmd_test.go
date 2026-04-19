@@ -273,6 +273,42 @@ func TestApp_Model_ListModelsError(t *testing.T) {
 	convContains(t, r.app, "model: list failed: boom")
 }
 
+// TestApp_Model_Switch_RejectsUnknownID ensures validateModelID blocks
+// phantom IDs that would otherwise fail silently on every turn. Also
+// confirms near-match suggestions surface when the typo is a substring
+// of a real model.
+func TestApp_Model_Switch_RejectsUnknownID(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("model", []string{"fake-mega"}, "/model fake-mega")
+	convContains(t, r.app, `unknown model "fake-mega"`)
+	// Active model must not have changed.
+	if _, m := r.reg.Active(); m != "fake-model" {
+		t.Fatalf("active model = %q, expected unchanged (fake-model)", m)
+	}
+}
+
+// TestApp_Model_Switch_SuggestsNearMatches confirms the substring-match
+// hint fires when the user types a prefix/suffix of a real model ID.
+func TestApp_Model_Switch_SuggestsNearMatches(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("model", []string{"mini"}, "/model mini")
+	convContains(t, r.app, "did you mean")
+	convContains(t, r.app, "fake-mini")
+}
+
+// TestApp_Model_Switch_SkipsValidationOnListError — if the catalog is
+// unreachable, we trust the user rather than locking them out of model
+// changes on a transient network blip.
+func TestApp_Model_Switch_SkipsValidationOnListError(t *testing.T) {
+	r := newTestApp(t)
+	// Drop any cache so validation would call ListModels, then force it
+	// to error.
+	r.reg.InvalidateCachedModels("fake")
+	r.prov.listErr = errors.New("boom")
+	r.app.handleSlashCommand("model", []string{"gpt-definitely-fake"}, "/model gpt-definitely-fake")
+	convContains(t, r.app, "switched model: fake/gpt-definitely-fake")
+}
+
 // ─── /sessions ─────────────────────────────────────────────────────────
 
 func TestApp_Sessions_List(t *testing.T) {

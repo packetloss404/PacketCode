@@ -83,7 +83,7 @@ func (c *Client) ListModels(ctx context.Context) ([]provider.Model, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("list models: status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("list models: status %d: %s", resp.StatusCode, extractAPIErrorMessage(body))
 	}
 
 	var parsed modelsResponse
@@ -127,7 +127,7 @@ func (c *Client) ValidateKey(ctx context.Context, apiKey string) error {
 
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("validate key: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("validate key: status %d: %s", resp.StatusCode, extractAPIErrorMessage(body))
 	}
 	return nil
 }
@@ -245,17 +245,35 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 
 	resp, err := c.httpClient().Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("chat completion request: %w", err)
+		return nil, fmt.Errorf("request: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
 		errBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("chat completion: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return nil, fmt.Errorf("status %d: %s",
+			resp.StatusCode, extractAPIErrorMessage(errBody))
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
 	go parseSSE(ctx, resp.Body, ch)
 	return ch, nil
+}
+
+// extractAPIErrorMessage pulls the human-readable message out of a JSON
+// error body if it has the canonical {error:{message:...}} shape (OpenAI,
+// MiniMax, OpenRouter all do). Falls back to the raw trimmed body so
+// non-JSON responses still render something useful.
+func extractAPIErrorMessage(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	var wrapper struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err == nil && wrapper.Error.Message != "" {
+		return wrapper.Error.Message
+	}
+	return trimmed
 }
 
 func (c *Client) applyHeaders(req *http.Request, json bool) {

@@ -100,6 +100,37 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 	assert.ElementsMatch(t, []string{"gpt-4.1", "gpt-4.1-mini", "o3"}, ids)
 }
 
+// TestProvider_ListModels_ExcludesProFamily confirms the "-pro" filter
+// that hides Responses-API-only models (o1-pro, o3-pro, gpt-5.4-pro).
+// Plain (non-pro) variants and their dated snapshots still pass.
+func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{"id": "gpt-5.4"},
+				{"id": "gpt-5.4-2026-03-05"},
+				{"id": "gpt-5.4-pro"},
+				{"id": "gpt-5.4-pro-2026-03-05"},
+				{"id": "o3-pro"},
+				{"id": "o4-mini"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "sk-test")
+	models, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+
+	ids := make([]string, len(models))
+	for i, m := range models {
+		ids[i] = m.ID
+	}
+	assert.ElementsMatch(t, []string{
+		"gpt-5.4", "gpt-5.4-2026-03-05", "o4-mini",
+	}, ids)
+}
+
 func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
