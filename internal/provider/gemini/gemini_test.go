@@ -215,6 +215,99 @@ func TestProvider_ChatCompletion_StreamsToolCall(t *testing.T) {
 	assert.JSONEq(t, `{"path":"main.go"}`, args)
 }
 
+func TestProvider_ChatCompletion_SuppressesTextOnToolCallParts(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"<|python_tag|>{\"path\":\"main.go\"}"},{"functionCall":{"name":"read_file","args":{"path":"main.go"}}}]}}]}`,
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP"}]}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read main.go"}},
+	})
+	require.NoError(t, err)
+
+	var text, args strings.Builder
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			text.WriteString(ev.TextDelta)
+		case provider.EventToolCallDelta:
+			args.WriteString(ev.ToolCall.ArgumentsDelta)
+		case provider.EventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+	assert.Empty(t, text.String())
+	assert.JSONEq(t, `{"path":"main.go"}`, args.String())
+}
+
+func TestProvider_ChatCompletion_MalformedFunctionCallFinishErrors(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"MALFORMED_FUNCTION_CALL"}]}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read main.go"}},
+	})
+	require.NoError(t, err)
+
+	var gotErr error
+	for ev := range ch {
+		if ev.Type == provider.EventError {
+			gotErr = ev.Error
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "MALFORMED_FUNCTION_CALL")
+}
+
+func TestProvider_ChatCompletion_FunctionCallArgsMustBeObject(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":["main.go"]}}]}}]}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read main.go"}},
+	})
+	require.NoError(t, err)
+
+	var gotErr error
+	for ev := range ch {
+		if ev.Type == provider.EventError {
+			gotErr = ev.Error
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "args must be a JSON object")
+}
+
 // TestGemini_ChatCompletion_CancellationStopsStream verifies the
 // per-iteration ctx.Err() guard in parseGeminiSSE: cancelling the ctx
 // passed to ChatCompletion closes the stream channel within 1s and

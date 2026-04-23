@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,45 @@ loop:
 		}
 	}
 	assert.True(t, sawCancelErr, "expected EventError wrapping context.Canceled; got events: %+v", events)
+}
+
+func TestParseSSE_SuppressesTextOnToolCallFrames(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"{\"path\":\"main.go\"}","tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"main.go\"}"}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "sk-test")
+	ch, err := c.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gpt-4.1",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read main.go"}},
+	})
+	require.NoError(t, err)
+
+	var text strings.Builder
+	var args strings.Builder
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			text.WriteString(ev.TextDelta)
+		case provider.EventToolCallDelta:
+			args.WriteString(ev.ToolCall.ArgumentsDelta)
+		case provider.EventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	assert.Empty(t, text.String(), "tool-call frames must not leak content as assistant text")
+	assert.JSONEq(t, `{"path":"main.go"}`, args.String())
 }
 
 // TestExtractAPIErrorMessage_JSONBody confirms the OpenAI-style wrapper

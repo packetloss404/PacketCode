@@ -67,6 +67,7 @@ var (
 		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
 		{"/help", "Show this help message"},
 		{"/clear", "Clear the transcript pane"},
+		{"/statusline", "Show or refresh the configured statusline command"},
 		{"/mcp", "List configured MCP servers"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
 	}

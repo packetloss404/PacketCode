@@ -11,6 +11,10 @@ func Default() *Config {
 		},
 		Providers: map[string]ProviderConfig{},
 		MCP:       map[string]MCPServerConfig{},
+		StatusLine: StatusLineConfig{
+			Command:    "",
+			TimeoutSec: 2,
+		},
 		Behavior: BehaviorConfig{
 			TrustMode:            false,
 			AutoCompactThreshold: 80,

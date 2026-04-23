@@ -24,9 +24,9 @@ func TestProvider_Identity(t *testing.T) {
 
 func TestProvider_PricingKnownAndUnknown(t *testing.T) {
 	p := New("")
-	in, out := p.Pricing("gpt-4.1")
-	assert.Equal(t, 2.00, in)
-	assert.Equal(t, 8.00, out)
+	in, out := p.Pricing(DefaultModel)
+	assert.Equal(t, 3.00, in)
+	assert.Equal(t, 15.00, out)
 
 	in, out = p.Pricing("totally-made-up")
 	assert.Equal(t, 3.00, in, "unknown models should hit conservative fallback")
@@ -35,8 +35,8 @@ func TestProvider_PricingKnownAndUnknown(t *testing.T) {
 
 func TestProvider_ContextWindowAndSupportsTools(t *testing.T) {
 	p := New("")
-	assert.Equal(t, 1_000_000, p.ContextWindow("gpt-4.1"))
-	assert.True(t, p.SupportsTools("gpt-4.1"))
+	assert.Equal(t, 400_000, p.ContextWindow(DefaultModel))
+	assert.True(t, p.SupportsTools(DefaultModel))
 
 	// Unknown but matching a supported prefix → assumes tools.
 	assert.True(t, p.SupportsTools("gpt-4o-2024-08-06"))
@@ -80,6 +80,7 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"data": [
 				{"id": "gpt-4.1"},
+				{"id": "gpt-5.5"},
 				{"id": "gpt-4.1-mini"},
 				{"id": "text-embedding-3-small"},
 				{"id": "tts-1"},
@@ -97,20 +98,22 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 	for i, m := range models {
 		ids[i] = m.ID
 	}
-	assert.ElementsMatch(t, []string{"gpt-4.1", "gpt-4.1-mini", "o3"}, ids)
+	assert.ElementsMatch(t, []string{"gpt-5.5", "gpt-4.1", "gpt-4.1-mini", "o3"}, ids)
+	assert.Equal(t, DefaultModel, models[0].ID)
+	assert.Equal(t, 400_000, models[0].ContextWindow)
 }
 
 // TestProvider_ListModels_ExcludesProFamily confirms the "-pro" filter
-// that hides Responses-API-only models (o1-pro, o3-pro, gpt-5.4-pro).
+// that hides Responses-API-only models (o1-pro, o3-pro, gpt-5.5-pro).
 // Plain (non-pro) variants and their dated snapshots still pass.
 func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"data": [
-				{"id": "gpt-5.4"},
-				{"id": "gpt-5.4-2026-03-05"},
-				{"id": "gpt-5.4-pro"},
-				{"id": "gpt-5.4-pro-2026-03-05"},
+				{"id": "gpt-5.5"},
+				{"id": "gpt-5.5-2026-04-23"},
+				{"id": "gpt-5.5-pro"},
+				{"id": "gpt-5.5-pro-2026-04-23"},
 				{"id": "o3-pro"},
 				{"id": "o4-mini"}
 			]
@@ -127,8 +130,9 @@ func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 		ids[i] = m.ID
 	}
 	assert.ElementsMatch(t, []string{
-		"gpt-5.4", "gpt-5.4-2026-03-05", "o4-mini",
+		"gpt-5.5", "gpt-5.5-2026-04-23", "o4-mini",
 	}, ids)
+	assert.Equal(t, DefaultModel, models[0].ID)
 }
 
 func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {

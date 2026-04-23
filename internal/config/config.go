@@ -15,10 +15,12 @@ import (
 )
 
 type Config struct {
-	Default   DefaultConfig              `toml:"default"`
-	Providers map[string]ProviderConfig  `toml:"providers"`
-	Behavior  BehaviorConfig             `toml:"behavior"`
-	MCP       map[string]MCPServerConfig `toml:"mcp"`
+	Default    DefaultConfig              `toml:"default"`
+	Providers  map[string]ProviderConfig  `toml:"providers"`
+	Behavior   BehaviorConfig             `toml:"behavior"`
+	MCP        map[string]MCPServerConfig `toml:"mcp"`
+	StatusLine StatusLineConfig           `toml:"statusline"`
+	Hooks      HooksConfig                `toml:"hooks"`
 }
 
 // MCPServerConfig is the per-server entry for [mcp.<name>] in the user's
@@ -61,6 +63,41 @@ type BehaviorConfig struct {
 	BackgroundMaxTotal        int    `toml:"background_max_total"`
 	BackgroundDefaultProvider string `toml:"background_default_provider"`
 	BackgroundDefaultModel    string `toml:"background_default_model"`
+}
+
+// StatusLineConfig declares an optional command that renders the bottom
+// status line. The command receives a JSON snapshot on stdin and packetcode
+// renders its stdout when it exits successfully.
+type StatusLineConfig struct {
+	Command    string `toml:"command"`
+	Enabled    *bool  `toml:"enabled,omitempty"`
+	TimeoutSec int    `toml:"timeout_sec,omitempty"`
+}
+
+func (c StatusLineConfig) IsEnabled() bool {
+	return c.Command != "" && (c.Enabled == nil || *c.Enabled)
+}
+
+// HooksConfig contains user-defined shell hooks. Use TOML arrays of tables:
+// [[hooks.user_prompt_submit]], [[hooks.pre_tool_use]], [[hooks.post_tool_use]].
+type HooksConfig struct {
+	UserPromptSubmit []HookConfig `toml:"user_prompt_submit"`
+	PreToolUse       []HookConfig `toml:"pre_tool_use"`
+	PostToolUse      []HookConfig `toml:"post_tool_use"`
+}
+
+// HookConfig describes one shell command hook. Matcher applies only to
+// tool hooks; empty or "*" matches every tool, otherwise it must equal the
+// tool name.
+type HookConfig struct {
+	Command    string `toml:"command"`
+	Matcher    string `toml:"matcher,omitempty"`
+	Enabled    *bool  `toml:"enabled,omitempty"`
+	TimeoutSec int    `toml:"timeout_sec,omitempty"`
+}
+
+func (c HookConfig) IsEnabled() bool {
+	return c.Command != "" && (c.Enabled == nil || *c.Enabled)
 }
 
 // Load reads ~/.packetcode/config.toml and returns the parsed config.

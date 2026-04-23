@@ -43,6 +43,17 @@ default_model = "qwen2.5-coder:14b"
 trust_mode = true
 auto_compact_threshold = 75
 max_input_rows = 8
+
+[statusline]
+command = "echo packetcode"
+timeout_sec = 3
+
+[[hooks.user_prompt_submit]]
+command = "echo prompt-context"
+
+[[hooks.pre_tool_use]]
+matcher = "execute_command"
+command = "echo guard"
 `
 	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
 
@@ -55,6 +66,12 @@ max_input_rows = 8
 	assert.True(t, cfg.Behavior.TrustMode)
 	assert.Equal(t, 75, cfg.Behavior.AutoCompactThreshold)
 	assert.Equal(t, 8, cfg.Behavior.MaxInputRows)
+	assert.Equal(t, "echo packetcode", cfg.StatusLine.Command)
+	assert.Equal(t, 3, cfg.StatusLine.TimeoutSec)
+	require.Len(t, cfg.Hooks.UserPromptSubmit, 1)
+	assert.Equal(t, "echo prompt-context", cfg.Hooks.UserPromptSubmit[0].Command)
+	require.Len(t, cfg.Hooks.PreToolUse, 1)
+	assert.Equal(t, "execute_command", cfg.Hooks.PreToolUse[0].Matcher)
 }
 
 func TestSaveTo_RoundTrip(t *testing.T) {

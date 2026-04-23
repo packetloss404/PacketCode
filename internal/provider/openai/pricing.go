@@ -16,8 +16,10 @@ type pricingEntry struct {
 // pessimistic cost estimates until the table catches up.
 //
 // Prices last verified against OpenAI's public price list as of Q1 2026.
-// TODO: add GPT-5.x entries when prices are confirmed.
+// GPT-5.5 uses packetcode's conservative fallback rates until public
+// pricing is confirmed.
 var pricingTable = map[string]pricingEntry{
+	"gpt-5.5":      {Input: 3.00, Output: 15.00, ContextWindow: 400_000, SupportsTools: true},
 	"gpt-4.1":      {Input: 2.00, Output: 8.00, ContextWindow: 1_000_000, SupportsTools: true},
 	"gpt-4.1-mini": {Input: 0.40, Output: 1.60, ContextWindow: 1_000_000, SupportsTools: true},
 	"gpt-4.1-nano": {Input: 0.10, Output: 0.40, ContextWindow: 1_000_000, SupportsTools: true},
@@ -32,7 +34,7 @@ var pricingTable = map[string]pricingEntry{
 // through the filter, so new chat families (GPT-5, GPT-6, o5, etc.)
 // surface automatically without a code change here.
 //
-// Note on "-pro": OpenAI ships o1-pro, o3-pro, gpt-5.4-pro and similar
+// Note on "-pro": OpenAI ships o1-pro, o3-pro, gpt-5.5-pro and similar
 // variants that only work via /v1/responses, not /v1/chat/completions
 // (the endpoint packetcode speaks). The /v1/models catalog doesn't
 // distinguish, so we exclude them by suffix. The plain (non-pro) model

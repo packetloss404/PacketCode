@@ -21,7 +21,7 @@ Extend packetcode's slash-command surface from the three verbs already wired (`/
 - **Output format (no arg).**
   ```
   PROVIDER   NAME           DEFAULT MODEL               ACTIVE
-  * openai   OpenAI         gpt-4.1                     yes
+  * openai   OpenAI         gpt-5.5                     yes
     gemini   Google Gemini  gemini-2.5-flash            no
     ollama   Ollama (local) (none)                      no
   ```
@@ -41,7 +41,8 @@ Extend packetcode's slash-command surface from the three verbs already wired (`/
 - **Output format (no arg).**
   ```
   MODEL                        CONTEXT    TOOLS  IN/1M    OUT/1M
-  * gpt-4.1                    1048576    yes    $2.00    $8.00
+  * gpt-5.5                    400000     yes    $3.00    $15.00
+    gpt-4.1                    1048576    yes    $2.00    $8.00
     gpt-4.1-mini               1048576    yes    $0.40    $1.60
   ```
   Active model marked with `*`. `IN/1M`/`OUT/1M` pulled from `Model.InputPer1M`/`OutputPer1M`; render as `$%.2f` or `free` when zero. Context column is the `Model.ContextWindow` integer, or `?` when 0.
@@ -61,7 +62,7 @@ Extend packetcode's slash-command surface from the three verbs already wired (`/
 - **Output format (bare `/sessions`).**
   ```
   ID        NAME                                     AGE    PROV/MODEL             ACTIVE
-  * 7f3a12ab refactor-userservice                    3m     openai/gpt-4.1         yes
+  * 7f3a12ab refactor-userservice                    3m     openai/gpt-5.5         yes
     9b21ff00 audit-test-suite                        2h     gemini/2.5-flash       no
     c4dd0001 rust-port-experiment                    1d     ollama/qwen2.5-coder   no
   ```
@@ -120,7 +121,7 @@ Extend packetcode's slash-command surface from the three verbs already wired (`/
   Total: $1.2345 (since 2026-04-10 14:30 UTC)
 
   SESSION   PROV/MODEL              TOK(IN/OUT)   USD
-  7f3a12ab  openai/gpt-4.1          84K/12K       $0.8400
+  7f3a12ab  openai/gpt-5.5          84K/12K       $0.8400
   9b21ff00  gemini/2.5-flash        120K/18K      $0.2100
   c4dd0001  openai/gpt-4.1-mini     30K/5K        $0.0800
   [showing top 5 of 14 sessions]

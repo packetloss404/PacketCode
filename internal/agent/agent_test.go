@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,20 +28,21 @@ import (
 // batch per ChatCompletion call. Lets us script multi-turn conversations
 // (LLM responds → tool runs → LLM responds again) without an HTTP server.
 type scriptedProvider struct {
-	turns       [][]provider.StreamEvent
-	turnIdx     int32
-	chatCount   int32
-	lastRequest provider.ChatRequest
+	turns        [][]provider.StreamEvent
+	turnIdx      int32
+	chatCount    int32
+	lastRequest  provider.ChatRequest
+	disableTools bool
 }
 
-func (s *scriptedProvider) Name() string                                                 { return "scripted" }
-func (s *scriptedProvider) Slug() string                                                 { return "scripted" }
-func (s *scriptedProvider) BrandColor() lipgloss.Color                                   { return lipgloss.Color("#000000") }
-func (s *scriptedProvider) ValidateKey(_ context.Context, _ string) error                { return nil }
-func (s *scriptedProvider) ListModels(_ context.Context) ([]provider.Model, error)       { return nil, nil }
-func (s *scriptedProvider) Pricing(string) (float64, float64)                            { return 1.0, 5.0 }
-func (s *scriptedProvider) ContextWindow(string) int                                     { return 100_000 }
-func (s *scriptedProvider) SupportsTools(string) bool                                    { return true }
+func (s *scriptedProvider) Name() string                                           { return "scripted" }
+func (s *scriptedProvider) Slug() string                                           { return "scripted" }
+func (s *scriptedProvider) BrandColor() lipgloss.Color                             { return lipgloss.Color("#000000") }
+func (s *scriptedProvider) ValidateKey(_ context.Context, _ string) error          { return nil }
+func (s *scriptedProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
+func (s *scriptedProvider) Pricing(string) (float64, float64)                      { return 1.0, 5.0 }
+func (s *scriptedProvider) ContextWindow(string) int                               { return 100_000 }
+func (s *scriptedProvider) SupportsTools(string) bool                              { return !s.disableTools }
 
 func (s *scriptedProvider) ChatCompletion(_ context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	atomic.AddInt32(&s.chatCount, 1)
@@ -68,10 +70,10 @@ type recordingTool struct {
 	result    tools.ToolResult
 }
 
-func (r *recordingTool) Name() string             { return r.name }
-func (r *recordingTool) Description() string      { return "test tool" }
-func (r *recordingTool) Schema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
-func (r *recordingTool) RequiresApproval() bool   { return r.approval }
+func (r *recordingTool) Name() string            { return r.name }
+func (r *recordingTool) Description() string     { return "test tool" }
+func (r *recordingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (r *recordingTool) RequiresApproval() bool  { return r.approval }
 func (r *recordingTool) Execute(_ context.Context, p json.RawMessage) (tools.ToolResult, error) {
 	atomic.AddInt32(&r.executed, 1)
 	r.lastInput = string(p)
@@ -211,6 +213,82 @@ func TestAgent_ToolCallApprovedAndExecuted(t *testing.T) {
 	assert.Equal(t, "tool ran", cur.Messages[2].Content)
 	assert.Equal(t, provider.RoleAssistant, cur.Messages[3].Role)
 	assert.Equal(t, "All done", cur.Messages[3].Content)
+}
+
+func TestAgent_DropsTextOnToolCallTurn(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventTextDelta, TextDelta: `<|python_tag|>{"path":"main.go"}`},
+			{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "do_thing"}},
+			{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":"main.go"}`}},
+			{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+			{Type: provider.EventDone},
+		},
+		{
+			{Type: provider.EventTextDelta, TextDelta: "done"},
+			{Type: provider.EventDone},
+		},
+	}}
+
+	rt := &recordingTool{name: "do_thing", result: tools.ToolResult{Content: "tool ran"}}
+	a, sm, _ := newAgentRig(t, prov, rt)
+
+	evs := collect(a.Run(context.Background(), "do it"))
+	var sawLeakedText bool
+	for _, ev := range evs {
+		if ev.Type == EventTextDelta && strings.Contains(ev.Text, "<|python_tag|>") {
+			sawLeakedText = true
+		}
+	}
+	assert.True(t, sawLeakedText, "text still streams live; UI/session drop it when a tool call follows")
+
+	cur := sm.Current()
+	require.Len(t, cur.Messages, 4)
+	assert.Equal(t, "", cur.Messages[1].Content)
+	require.Len(t, cur.Messages[1].ToolCalls, 1)
+	assert.Equal(t, "do_thing", cur.Messages[1].ToolCalls[0].Name)
+	assert.Equal(t, "done", cur.Messages[3].Content)
+}
+
+func TestAgent_UnsupportedModelOmitsNativeTools(t *testing.T) {
+	prov := &scriptedProvider{
+		turns: [][]provider.StreamEvent{{
+			{Type: provider.EventTextDelta, TextDelta: "plain response"},
+			{Type: provider.EventDone},
+		}},
+	}
+	prov.disableTools = true
+
+	rt := &recordingTool{name: "do_thing"}
+	a, _, _ := newAgentRig(t, prov, rt)
+
+	_ = collect(a.Run(context.Background(), "hi"))
+	assert.Empty(t, prov.lastRequest.Tools)
+}
+
+func TestAgent_InvalidToolCallArgumentsError(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "do_thing"}},
+			{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}},
+			{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+			{Type: provider.EventDone},
+		},
+	}}
+
+	rt := &recordingTool{name: "do_thing"}
+	a, _, _ := newAgentRig(t, prov, rt)
+
+	evs := collect(a.Run(context.Background(), "do it"))
+	var gotErr error
+	for _, ev := range evs {
+		if ev.Type == EventError {
+			gotErr = ev.Error
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "invalid JSON")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&rt.executed))
 }
 
 func TestAgent_ToolCallRejected(t *testing.T) {
@@ -399,14 +477,14 @@ func TestAgent_ParallelToolCallsDispatched(t *testing.T) {
 // providers do under the parser-level ctx.Err() guard added in Round 5.
 type cancellableProvider struct{}
 
-func (cancellableProvider) Name() string                                          { return "cancellable" }
-func (cancellableProvider) Slug() string                                          { return "cancellable" }
-func (cancellableProvider) BrandColor() lipgloss.Color                            { return lipgloss.Color("#000000") }
-func (cancellableProvider) ValidateKey(context.Context, string) error             { return nil }
-func (cancellableProvider) ListModels(context.Context) ([]provider.Model, error)  { return nil, nil }
-func (cancellableProvider) Pricing(string) (float64, float64)                     { return 1.0, 5.0 }
-func (cancellableProvider) ContextWindow(string) int                              { return 100_000 }
-func (cancellableProvider) SupportsTools(string) bool                             { return true }
+func (cancellableProvider) Name() string                                         { return "cancellable" }
+func (cancellableProvider) Slug() string                                         { return "cancellable" }
+func (cancellableProvider) BrandColor() lipgloss.Color                           { return lipgloss.Color("#000000") }
+func (cancellableProvider) ValidateKey(context.Context, string) error            { return nil }
+func (cancellableProvider) ListModels(context.Context) ([]provider.Model, error) { return nil, nil }
+func (cancellableProvider) Pricing(string) (float64, float64)                    { return 1.0, 5.0 }
+func (cancellableProvider) ContextWindow(string) int                             { return 100_000 }
+func (cancellableProvider) SupportsTools(string) bool                            { return true }
 
 func (cancellableProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	ch := make(chan provider.StreamEvent, 4)

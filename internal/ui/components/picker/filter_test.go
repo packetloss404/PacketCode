@@ -3,7 +3,7 @@ package picker
 import "testing"
 
 func TestMatches_EmptyFilter(t *testing.T) {
-	it := Item{ID: "openai", Label: "OpenAI", Detail: "gpt-4.1"}
+	it := Item{ID: "openai", Label: "OpenAI", Detail: "gpt-5.5"}
 	if !matches(it, "") {
 		t.Fatalf("empty filter must match every item")
 	}
@@ -13,7 +13,7 @@ func TestMatches_EmptyFilter(t *testing.T) {
 }
 
 func TestMatches_CaseInsensitiveSubstring(t *testing.T) {
-	it := Item{ID: "gpt-4.1", Label: "OpenAI gpt-4.1"}
+	it := Item{ID: "gpt-5.5", Label: "OpenAI gpt-5.5"}
 	if !matches(it, "GPT") {
 		t.Fatalf("uppercase filter should match lowercase id")
 	}
@@ -23,8 +23,8 @@ func TestMatches_CaseInsensitiveSubstring(t *testing.T) {
 }
 
 func TestMatches_WhitespaceToDash(t *testing.T) {
-	it := Item{ID: "gpt-4.1", Label: "OpenAI gpt-4.1"}
-	if !matches(it, "gpt 4.1") {
+	it := Item{ID: "gpt-5.5", Label: "OpenAI gpt-5.5"}
+	if !matches(it, "gpt 5.5") {
 		t.Fatalf("filter with space should match dashed id")
 	}
 }
@@ -37,7 +37,7 @@ func TestMatches_MultipleTokens(t *testing.T) {
 }
 
 func TestMatches_NoMatch(t *testing.T) {
-	it := Item{ID: "gpt-4.1", Label: "OpenAI gpt-4.1", Detail: "reasoning"}
+	it := Item{ID: "gpt-5.5", Label: "OpenAI gpt-5.5", Detail: "reasoning"}
 	if matches(it, "foo") {
 		t.Fatalf("filter %q should not match", "foo")
 	}
@@ -60,8 +60,8 @@ func TestMatches_SearchesAllFields(t *testing.T) {
 // Other packages (autocomplete) depend on this behaviour, so the
 // exported surface needs its own direct test.
 func TestNormalize_Exported(t *testing.T) {
-	if got := Normalize("GPT 4.1"); got != "gpt-4.1" {
-		t.Fatalf("Normalize(\"GPT 4.1\") = %q, want %q", got, "gpt-4.1")
+	if got := Normalize("GPT 5.5"); got != "gpt-5.5" {
+		t.Fatalf("Normalize(\"GPT 5.5\") = %q, want %q", got, "gpt-5.5")
 	}
 	if got := Normalize(""); got != "" {
 		t.Fatalf("Normalize(\"\") = %q, want empty", got)
@@ -71,7 +71,7 @@ func TestNormalize_Exported(t *testing.T) {
 // TestMatches_Exported smoke-tests the exported Matches wrapper
 // delegates to the existing substring logic.
 func TestMatches_Exported(t *testing.T) {
-	it := Item{ID: "gpt-4.1", Label: "OpenAI gpt-4.1"}
+	it := Item{ID: "gpt-5.5", Label: "OpenAI gpt-5.5"}
 	if !Matches(it, "GPT") {
 		t.Fatalf("exported Matches should be case-insensitive")
 	}

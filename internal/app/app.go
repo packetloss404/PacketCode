@@ -3,13 +3,13 @@
 // session actions.
 //
 // The flow is straightforward:
-//   1. User types in the input bar → Enter → SubmitMsg.
-//   2. App runs agent.Run(), which returns a channel of AgentEvent.
-//   3. A goroutine forwards each AgentEvent to the Bubble Tea program
-//      via Send(). Update() routes them to the conversation pane.
-//   4. When the agent needs approval, the uiApprover bridge posts the
-//      pending request, App raises the approval modal, the user hits y/n,
-//      and the decision is sent back to the agent.
+//  1. User types in the input bar → Enter → SubmitMsg.
+//  2. App runs agent.Run(), which returns a channel of AgentEvent.
+//  3. A goroutine forwards each AgentEvent to the Bubble Tea program
+//     via Send(). Update() routes them to the conversation pane.
+//  4. When the agent needs approval, the uiApprover bridge posts the
+//     pending request, App raises the approval modal, the user hits y/n,
+//     and the decision is sent back to the agent.
 package app
 
 import (
@@ -27,10 +27,12 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
+	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/statusline"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
 	"github.com/packetcode/packetcode/internal/ui/components/autocomplete"
@@ -57,6 +59,12 @@ type pollApproverMsg struct{}
 // tickTopbarMsg updates the duration counter in the top bar.
 type tickTopbarMsg struct{}
 
+type statusLineMsg struct {
+	seq  int
+	line string
+	err  error
+}
+
 // jobUpdateMsg is dispatched from the jobs.Manager Subscribe callback
 // (which runs in its own goroutine) into the Bubble Tea Update loop via
 // tea.Program.Send. The App uses it to refresh the top bar and, on
@@ -76,6 +84,7 @@ type Deps struct {
 	MCP          *mcp.Manager
 	WorkingDir   string
 	SystemPrompt string
+	Hooks        *hooks.Runner
 	Version      string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
 }
 
@@ -111,6 +120,7 @@ type App struct {
 	// contextMgr handles /compact token accounting and summary round-
 	// trips. Constructed in New from cfg.Behavior.AutoCompactThreshold.
 	contextMgr *agent.ContextManager
+	statusLine *statusline.Runner
 
 	// sendMsg is the tea.Program.Send bridge set by the host (main.go)
 	// after tea.NewProgram so callbacks originating off the Bubble Tea
@@ -119,10 +129,10 @@ type App struct {
 	// silently dropped (sync code paths still work).
 	sendMsg func(tea.Msg)
 
-	width    int
-	height   int
+	width     int
+	height    int
 	streaming bool
-	err      string
+	err       string
 
 	// cancelTurn cancels the in-flight agent.Run context for the current
 	// streaming turn. Set in startTurn, cleared in agentDoneMsg / on
@@ -131,6 +141,8 @@ type App struct {
 	// "cancel requested, waiting for goroutine drain" — in that window a
 	// second Ctrl+C is a no-op (not a quit). Single-writer from Update.
 	cancelTurn context.CancelFunc
+	startedAt  time.Time
+	statusSeq  int
 }
 
 // isCancellation reports whether err is (or wraps) a context cancellation
@@ -163,6 +175,7 @@ func New(deps Deps) (*App, error) {
 		CostTracker:  deps.CostTracker,
 		Approver:     approver,
 		SystemPrompt: deps.SystemPrompt,
+		Hooks:        deps.Hooks,
 	})
 
 	conv := conversation.New()
@@ -180,6 +193,11 @@ func New(deps Deps) (*App, error) {
 	}
 	ctxMgr := agent.NewContextManager(threshold)
 
+	var statusRunner *statusline.Runner
+	if deps.Config != nil {
+		statusRunner = statusline.New(deps.Config.StatusLine, deps.WorkingDir)
+	}
+
 	app := &App{
 		deps:         deps,
 		topbar:       topbar.New(),
@@ -196,6 +214,8 @@ func New(deps Deps) (*App, error) {
 		backups:      deps.Backups,
 		mcp:          deps.MCP,
 		contextMgr:   ctxMgr,
+		statusLine:   statusRunner,
+		startedAt:    time.Now(),
 	}
 
 	if deps.Jobs != nil {
@@ -231,6 +251,7 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		pollApprover(),
 		tickTopbar(),
+		a.renderStatusLine(),
 	)
 }
 
@@ -334,7 +355,17 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickTopbarMsg:
 		a.refreshTopBar()
-		return a, tickTopbar()
+		return a, tea.Batch(tickTopbar(), a.renderStatusLine())
+
+	case statusLineMsg:
+		if msg.seq == a.statusSeq {
+			if msg.err == nil {
+				a.topbar.SetCustomLine(msg.line)
+			} else {
+				a.topbar.SetCustomLine("")
+			}
+		}
+		return a, nil
 	}
 
 	// Delegate to the focused subcomponent. Focus precedence:
@@ -608,6 +639,69 @@ func (a *App) refreshTopBar() {
 	}
 }
 
+func (a *App) renderStatusLine() tea.Cmd {
+	if a.statusLine == nil || !a.statusLine.Enabled() {
+		return nil
+	}
+	a.statusSeq++
+	seq := a.statusSeq
+	snap := a.statusLineSnapshot()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		line, err := a.statusLine.Render(ctx, snap)
+		return statusLineMsg{seq: seq, line: line, err: err}
+	}
+}
+
+func (a *App) statusLineSnapshot() statusline.Snapshot {
+	root := a.deps.WorkingDir
+	project := filepath.Base(root)
+	branch := git.Branch(root)
+	var sessionID string
+	var used int
+	if cur := a.deps.Sessions.Current(); cur != nil {
+		sessionID = cur.ID
+		used = cur.TokenUsage.TotalInput
+	}
+	var provSlug, provName, modelID string
+	var max int
+	if prov, activeModel := a.deps.Registry.Active(); prov != nil {
+		provSlug = prov.Slug()
+		provName = prov.Name()
+		modelID = activeModel
+		max = prov.ContextWindow(activeModel)
+	}
+	pct := 0
+	if max > 0 {
+		pct = used * 100 / max
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	totalCost := 0.0
+	if a.deps.CostTracker != nil {
+		totalCost = a.deps.CostTracker.TotalCost()
+	}
+	activeJobs := 0
+	if a.jobs != nil {
+		activeJobs = a.jobs.ActiveCount()
+	}
+	return statusline.Snapshot{
+		SessionID:       sessionID,
+		WorkingDir:      root,
+		Project:         project,
+		GitBranch:       branch,
+		Provider:        statusline.ProviderInfo{Slug: provSlug, DisplayName: provName},
+		Model:           statusline.ModelInfo{ID: modelID},
+		ContextWindow:   statusline.ContextInfo{Used: used, Max: max, UsedPercentage: pct},
+		Cost:            statusline.CostInfo{TotalCostUSD: totalCost},
+		Jobs:            statusline.JobsInfo{Active: activeJobs},
+		DurationSeconds: int(time.Since(a.startedAt).Seconds()),
+		Version:         a.deps.Version,
+	}
+}
+
 func (a *App) startTurn(text string) (tea.Model, tea.Cmd) {
 	a.input.Reset()
 	a.conversation.AppendUser(text)
@@ -669,6 +763,11 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		a.conversation.CompleteToolCall(ev.ToolCall.Name, ev.ToolResult)
 
 	case agent.EventToolCallRejected:
+		reason := ev.Text
+		if reason == "" {
+			reason = "user rejected the proposed action"
+		}
+		a.conversation.CompleteToolCall(ev.ToolCall.Name, tools.ToolResult{Content: reason, IsError: true})
 		a.conversation.AppendSystem(fmt.Sprintf("✗ rejected %s", ev.ToolCall.Name))
 
 	case agent.EventUsageUpdate:
@@ -769,8 +868,9 @@ func (a *App) handleJobUpdate(snap jobs.Snapshot) (tea.Model, tea.Cmd) {
 
 // formatTerminalJobLine renders a single-line inline notification for a
 // job that has just reached a terminal state. Matches the spec:
-//   [job:7f3a — done · 12s · gemini/2.5-flash · $0.0031]
-//   14 call sites in 8 files; …
+//
+//	[job:7f3a — done · 12s · gemini/2.5-flash · $0.0031]
+//	14 call sites in 8 files; …
 func formatTerminalJobLine(snap jobs.Snapshot) string {
 	label := "done"
 	switch snap.State {
@@ -859,6 +959,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleHelpCommand(args)
 	case "clear":
 		return a.handleClearCommand(args)
+	case "statusline":
+		return a.handleStatusLineCommand(args)
 	case "mcp":
 		return a.handleMCPCommand(args)
 	}

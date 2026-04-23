@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Five LLM providers** behind a unified `Provider` interface: OpenAI
-  (GPT-4.1, o3, o4-mini, mini/nano), Google Gemini (2.5 Pro / Flash, 2.0
-  Flash), MiniMax, OpenRouter (with dynamic per-model pricing from
+  (GPT-5.5 default, GPT-4.1, o3, o4-mini, mini/nano), Google Gemini
+  (2.5 Pro / Flash, 2.0 Flash), MiniMax, OpenRouter (with dynamic per-model pricing from
   `/api/v1/models`), Ollama (local, NDJSON streaming, no API key).
 - **Shared `openaicompat` HTTP/SSE client** used by OpenAI, MiniMax, and
   OpenRouter — handles streaming text deltas, parallel tool calls,
@@ -176,10 +176,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packetcode now spawns external MCP servers declared under
   `[mcp.<name>]` in `~/.packetcode/config.toml`, handshakes over
   newline-delimited JSON-RPC 2.0 stdio (protocol version
-  `2025-06-18`), lists the server's tools, and registers each as a
-  `<server>.<tool>` in the main tool registry so the Agent's first
-  turn already sees them. Every MCP tool is approval-gated and
-  always-prefixed, so native tools and MCP tools never collide. A
+  `2025-06-18`), lists the server's tools, and registers each under a
+  provider-safe `<server>__<tool>` alias in the main tool registry so
+  the Agent's first turn already sees them. Every MCP tool is
+  approval-gated, so native tools and MCP tools never collide. A
   new `internal/mcp` package owns the per-server stdio driver
   (synchronous writer + async reader + reaper + stderr-tee to
   `~/.packetcode/mcp-<name>.log`), the tools.Tool adapter, and a
@@ -193,6 +193,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other MCP tools keep working. `/mcp restart <name>` is deferred to
   Round 8. Worked examples (filesystem, git, fetch) live in
   `docs/mcp.md`.
+- **Claude Code-inspired hooks + statusline.** Added opt-in
+  `[statusline]` support: packetcode runs a configured command with a
+  JSON session snapshot on stdin and renders stdout as the bottom bar,
+  falling back to the built-in provider/model/context/cost status bar
+  on failure. Added `/statusline` and `/statusline refresh`. Added
+  lifecycle hooks under `[[hooks.user_prompt_submit]]`,
+  `[[hooks.pre_tool_use]]`, and `[[hooks.post_tool_use]]`; prompt hook
+  stdout is injected as context, pre-tool hooks can block a tool call,
+  and post-tool stdout is appended to the tool result. Hook payloads are
+  JSON on stdin and are disabled unless explicitly configured.
 
 ### Design
 

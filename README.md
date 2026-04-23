@@ -26,7 +26,7 @@ packetcode combines the agentic capabilities of Claude Code with the multi-provi
 
 | Provider           | Access            | Notes                                                   |
 | ------------------ | ----------------- | ------------------------------------------------------- |
-| **OpenAI**         | API key           | GPT-4.1, o3, o4-mini, gpt-4.1-mini/nano                |
+| **OpenAI**         | API key           | GPT-5.5 default, GPT-4.1, o3, o4-mini, gpt-4.1-mini/nano |
 | **Google Gemini**  | API key           | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash                   |
 | **MiniMax**        | API key           | MiniMax-Text-01 (1M ctx), abab variants                |
 | **OpenRouter**     | API key           | Hundreds of models, dynamic per-model pricing          |
@@ -80,9 +80,58 @@ background_default_model     = ""        # e.g. "gemini-2.5-flash"
 
 Job metadata persists to `~/.packetcode/jobs/<id>.json`; orphans from a crash surface on next launch as `cancelled (previous app exit)`.
 
+### Statusline
+
+packetcode can render a Claude Code-style custom statusline at the bottom of
+the TUI. Add a `[statusline]` command to `~/.packetcode/config.toml`; the
+command receives a JSON snapshot on stdin and packetcode renders stdout when
+the command exits successfully. If the command fails or prints nothing, the
+built-in provider/model/context/cost bar remains the fallback.
+
+```toml
+[statusline]
+command = "jq -r '\"\\(.provider.display_name) / \\(.model.id) · \\(.context_window.used_percentage)% · $\\(.cost.total_cost_usd)\"'"
+timeout_sec = 2
+```
+
+The JSON payload includes `session_id`, `working_dir`, `project`,
+`git_branch`, `provider`, `model`, `context_window`, `cost`, `jobs`,
+`duration_seconds`, and `version`. Use `/statusline` to inspect the active
+line and `/statusline refresh` to force a refresh.
+
+### Hooks
+
+Opt-in shell hooks can run at a few agent lifecycle points:
+
+| Hook                 | When it runs                                                        |
+| -------------------- | ------------------------------------------------------------------- |
+| `user_prompt_submit` | Before the prompt is saved/sent. Successful stdout is injected as context. |
+| `pre_tool_use`       | Before approval/tool execution. Non-zero exit blocks the tool and tells the model. |
+| `post_tool_use`      | After a tool returns. Successful stdout is appended to the tool result. |
+
+```toml
+[[hooks.user_prompt_submit]]
+command = "cat .packetcode-context 2>/dev/null || true"
+timeout_sec = 2
+
+[[hooks.pre_tool_use]]
+matcher = "execute_command"
+command = "python scripts/guard-command.py"
+timeout_sec = 5
+
+[[hooks.post_tool_use]]
+matcher = "patch_file"
+command = "gofmt -w $(git diff --name-only -- '*.go') 2>/dev/null || true"
+timeout_sec = 10
+```
+
+Each hook receives a JSON payload on stdin. Tool hooks can match a specific
+tool name, `*`, or leave `matcher` empty to match all tools. Hooks are user
+configured code, so keep them small, deterministic, and project-owned.
+
 ### Slash commands
 
-Thirteen verbs are wired into the input bar. Each handler is a thin adapter over the existing backend APIs (`provider.Registry`, `session.Manager`, `session.BackupManager`, `cost.Tracker`, `agent.ContextManager`, `uiApprover`, `mcp.Manager`) and appends its output as a monospace system message inside the conversation, reusing the ASCII-table aesthetic `/jobs` introduced.
+Fourteen verbs are wired into the input bar. Each handler is a thin adapter over the existing backend APIs (`provider.Registry`, `session.Manager`, `session.BackupManager`, `cost.Tracker`, `agent.ContextManager`, `uiApprover`, `mcp.Manager`) and appends its output as a monospace system message inside the conversation, reusing the ASCII-table aesthetic `/jobs` introduced.
 
 | Command                                                         | Effect                                                                               |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -106,6 +155,8 @@ Thirteen verbs are wired into the input bar. Each handler is a thin adapter over
 | `/trust on` / `/trust off`                                      | Enable or disable auto-approval of destructive tools for the current session.        |
 | `/help`                                                         | Render every keybinding group and every slash command as a sectioned system message. |
 | `/clear`                                                        | Clear the transcript pane. Identical to `Ctrl+L`; the on-disk session is untouched.  |
+| `/statusline`                                                   | Show the active custom statusline output, or note that the built-in bar is in use.   |
+| `/statusline refresh`                                           | Force the configured statusline command to run immediately.                          |
 | `/mcp`                                                          | List configured MCP servers with state, tool count, pid.                             |
 | `/mcp logs <name>`                                              | Tail the last 50 lines of `~/.packetcode/mcp-<name>.log`.                            |
 
@@ -160,8 +211,8 @@ packetcode can extend its tool surface with external **MCP (Model
 Context Protocol) servers**. Declare a server under `[mcp.<name>]` in
 `~/.packetcode/config.toml` and packetcode will spawn it at startup,
 handshake over stdio JSON-RPC 2.0 (protocol version `2025-06-18`), list
-the tools it exposes, and register each as `<server>.<tool>` in the
-main tool registry. Every MCP tool is approval-gated (trust mode
+the tools it exposes, and register each under a provider-safe
+`<server>__<tool>` alias in the main tool registry. Every MCP tool is approval-gated (trust mode
 auto-approves).
 
 ```toml
@@ -276,11 +327,11 @@ Ollama needs no key — packetcode probes `http://localhost:11434` (or whatever'
 ```toml
 [default]
 provider = "openai"
-model = "gpt-4.1"
+model = "gpt-5.5"
 
 [providers.openai]
 api_key = "sk-..."
-default_model = "gpt-4.1"
+default_model = "gpt-5.5"
 
 [providers.gemini]
 api_key = "AI..."
@@ -294,6 +345,15 @@ default_model = "qwen2.5-coder:14b"
 trust_mode = false
 auto_compact_threshold = 80
 max_input_rows = 10
+
+[statusline]
+command = ""      # optional; receives JSON on stdin, renders stdout
+timeout_sec = 2
+
+# Optional hook blocks:
+# [[hooks.user_prompt_submit]]
+# command = "cat .packetcode-context 2>/dev/null || true"
+# timeout_sec = 2
 ```
 
 The file is created with `0600` permissions (user-read-write only).

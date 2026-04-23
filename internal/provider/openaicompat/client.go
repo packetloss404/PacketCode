@@ -134,10 +134,10 @@ func (c *Client) ValidateKey(ctx context.Context, apiKey string) error {
 
 // chatRequestBody is the wire format for POST /chat/completions.
 type chatRequestBody struct {
-	Model    string            `json:"model"`
-	Messages []wireMessage     `json:"messages"`
-	Tools    []wireTool        `json:"tools,omitempty"`
-	Stream   bool              `json:"stream"`
+	Model         string          `json:"model"`
+	Messages      []wireMessage   `json:"messages"`
+	Tools         []wireTool      `json:"tools,omitempty"`
+	Stream        bool            `json:"stream"`
 	StreamOptions *wireStreamOpts `json:"stream_options,omitempty"`
 }
 
@@ -154,9 +154,9 @@ type wireMessage struct {
 }
 
 type wireToolCall struct {
-	ID       string             `json:"id"`
-	Type     string             `json:"type"`
-	Function wireFunctionCall   `json:"function"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function wireFunctionCall `json:"function"`
 }
 
 type wireFunctionCall struct {
@@ -225,10 +225,10 @@ func toWireTools(tools []provider.ToolDefinition) []wireTool {
 // are returned synchronously; errors mid-stream surface as EventError.
 func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	body := chatRequestBody{
-		Model:    req.Model,
-		Messages: toWireMessages(req.Messages),
-		Tools:    toWireTools(req.Tools),
-		Stream:   true,
+		Model:         req.Model,
+		Messages:      toWireMessages(req.Messages),
+		Tools:         toWireTools(req.Tools),
+		Stream:        true,
 		StreamOptions: &wireStreamOpts{IncludeUsage: true},
 	}
 	buf, err := json.Marshal(body)
@@ -291,17 +291,17 @@ func (c *Client) applyHeaders(req *http.Request, json bool) {
 // chatStreamChunk is one SSE frame from /chat/completions.
 type chatStreamChunk struct {
 	Choices []struct {
-		Index        int                  `json:"index"`
-		Delta        chatStreamDelta      `json:"delta"`
-		FinishReason *string              `json:"finish_reason"`
+		Index        int             `json:"index"`
+		Delta        chatStreamDelta `json:"delta"`
+		FinishReason *string         `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *chatUsage `json:"usage,omitempty"`
 }
 
 type chatStreamDelta struct {
-	Role      string                  `json:"role,omitempty"`
-	Content   string                  `json:"content,omitempty"`
-	ToolCalls []chatStreamToolCall    `json:"tool_calls,omitempty"`
+	Role      string               `json:"role,omitempty"`
+	Content   string               `json:"content,omitempty"`
+	ToolCalls []chatStreamToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatStreamToolCall struct {
@@ -372,7 +372,8 @@ func parseSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.Stream
 		}
 
 		for _, choice := range chunk.Choices {
-			if choice.Delta.Content != "" {
+			hasToolCalls := len(choice.Delta.ToolCalls) > 0
+			if choice.Delta.Content != "" && !hasToolCalls {
 				ch <- provider.StreamEvent{
 					Type:      provider.EventTextDelta,
 					TextDelta: choice.Delta.Content,
@@ -403,6 +404,15 @@ func parseSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.Stream
 				}
 			}
 			if choice.FinishReason != nil {
+				reason := *choice.FinishReason
+				if reason == "length" || reason == "content_filter" {
+					ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}
+					return
+				}
+				if reason != "tool_calls" && len(activeCalls) > 0 {
+					ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}
+					return
+				}
 				for idx := range activeCalls {
 					ch <- provider.StreamEvent{
 						Type:     provider.EventToolCallEnd,
@@ -426,6 +436,10 @@ func parseSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.Stream
 	}
 	if err := scanner.Err(); err != nil {
 		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		return
+	}
+	if len(activeCalls) > 0 {
+		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream ended before completion")}
 		return
 	}
 	ch <- provider.StreamEvent{Type: provider.EventDone}

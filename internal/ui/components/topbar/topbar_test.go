@@ -43,9 +43,9 @@ func TestTopBar_DropsSegmentsWhenNarrow(t *testing.T) {
 
 func TestHumanTokens(t *testing.T) {
 	cases := map[int]string{
-		500:        "500",
-		1500:       "1K",
-		1_500_000:  "1.5M",
+		500:       "500",
+		1500:      "1K",
+		1_500_000: "1.5M",
 	}
 	for in, want := range cases {
 		assert.Equal(t, want, humanTokens(in), in)
@@ -120,4 +120,15 @@ func TestTopbar_JobsSegment_SurvivesNarrowDrops(t *testing.T) {
 
 	assert.Contains(t, narrow, "⚙ 2 jobs",
 		"jobs segment should survive narrow rendering (last-to-drop)")
+}
+
+func TestTopbar_CustomLineOverridesBuiltInSegments(t *testing.T) {
+	m := New()
+	m.SetWidth(120)
+	m.SetProvider("openai", "OpenAI", "gpt-5.5")
+	m.SetCustomLine("custom status")
+
+	out := m.View()
+	assert.Contains(t, out, "custom status")
+	assert.NotContains(t, out, "OpenAI")
 }

@@ -5,7 +5,9 @@
 //
 // The top bar is responsive — when the terminal is narrow, it sheds
 // segments in this priority order (right-most first):
-//   duration → cost → git branch → project name → context %
+//
+//	duration → cost → git branch → project name → context %
+//
 // Provider/model and the brand are always shown. The jobs segment is
 // deliberately placed FIRST in the droppable slice (so it's the last
 // thing dropped as the terminal narrows) — active background jobs are
@@ -31,9 +33,9 @@ type Model struct {
 	model        string
 	providerSlug string
 
-	contextPct  int
-	tokensUsed  int
-	tokensMax   int
+	contextPct int
+	tokensUsed int
+	tokensMax  int
 
 	projectName string
 	gitBranch   string
@@ -41,6 +43,7 @@ type Model struct {
 	startTime   time.Time
 
 	activeJobs int
+	customLine string
 }
 
 func New() Model {
@@ -93,12 +96,21 @@ func (m *Model) SetJobs(n int) {
 // state transition without having to parse the rendered view.
 func (m Model) Jobs() int { return m.activeJobs }
 
+func (m *Model) SetCustomLine(line string) {
+	m.customLine = strings.TrimRight(line, "\r\n")
+}
+
+func (m Model) CustomLine() string { return m.customLine }
+
 // View renders the top bar. Width must be set first; if it's 0, a sane
 // minimum is used so the call doesn't panic during early initialisation.
 func (m Model) View() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
+	}
+	if m.customLine != "" {
+		return theme.StyleTopBar.Width(width - 2).Render(m.customLine)
 	}
 
 	brand := theme.LabelBadge("⚡ packetcode", theme.AccentPrimary)
@@ -110,7 +122,7 @@ func (m Model) View() string {
 	dot := lipgloss.NewStyle().Foreground(theme.ProviderColor(m.providerSlug)).Render("●")
 	providerSeg := dot + " " + theme.StylePrimary.Render(provider)
 	if m.model != "" {
-		providerSeg += theme.StyleSecondary.Render(" / "+m.model)
+		providerSeg += theme.StyleSecondary.Render(" / " + m.model)
 	}
 
 	contextSeg := m.renderContext()

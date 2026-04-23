@@ -1,11 +1,11 @@
 // Package gemini implements provider.Provider for Google's Gemini API.
 //
 // Gemini's wire protocol differs from OpenAI's in three notable ways:
-//   1. Roles are "user" / "model" (not "assistant").
-//   2. System messages live under a separate top-level systemInstruction
-//      field, not in the contents array.
-//   3. Content is structured as parts ([{text}, {functionCall}, ...])
-//      rather than a flat string.
+//  1. Roles are "user" / "model" (not "assistant").
+//  2. System messages live under a separate top-level systemInstruction
+//     field, not in the contents array.
+//  3. Content is structured as parts ([{text}, {functionCall}, ...])
+//     rather than a flat string.
 //
 // This package handles all of that translation in one place so the rest
 // of packetcode can keep speaking the unified provider.Message format.
@@ -53,9 +53,9 @@ func NewWithBaseURL(baseURL, apiKey string) *Provider {
 	}
 }
 
-func (p *Provider) Name() string                { return displayName }
-func (p *Provider) Slug() string                { return slug }
-func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+func (p *Provider) Name() string               { return displayName }
+func (p *Provider) Slug() string               { return slug }
+func (p *Provider) BrandColor() lipgloss.Color { return brandColor }
 
 func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	if apiKey == "" {
@@ -190,9 +190,9 @@ func (p *Provider) SupportsTools(modelID string) bool {
 // ────────────────────────────────────────────────────────────────────────────
 
 type wirePart struct {
-	Text             string                  `json:"text,omitempty"`
-	FunctionCall     *wireFunctionCall       `json:"functionCall,omitempty"`
-	FunctionResponse *wireFunctionResponse   `json:"functionResponse,omitempty"`
+	Text             string                `json:"text,omitempty"`
+	FunctionCall     *wireFunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *wireFunctionResponse `json:"functionResponse,omitempty"`
 }
 
 type wireFunctionCall struct {
@@ -254,9 +254,9 @@ func toWireRequest(req provider.ChatRequest) (wireRequest, error) {
 				parts = append(parts, wirePart{Text: m.Content})
 			}
 			for _, tc := range m.ToolCalls {
-				args := json.RawMessage(tc.Arguments)
-				if len(args) == 0 {
-					args = json.RawMessage("{}")
+				args, err := normalizeToolArgs(tc.Name, json.RawMessage(tc.Arguments))
+				if err != nil {
+					return wr, err
 				}
 				parts = append(parts, wirePart{
 					FunctionCall: &wireFunctionCall{
@@ -412,14 +412,30 @@ func parseGeminiSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.
 		}
 
 		for _, cand := range chunk.Candidates {
+			if isMalformedFunctionCallFinish(cand.FinishReason) {
+				ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini returned %s", cand.FinishReason)}
+				return
+			}
+			hasFunctionCall := false
 			for _, part := range cand.Content.Parts {
-				if part.Text != "" {
+				if part.FunctionCall != nil {
+					hasFunctionCall = true
+					break
+				}
+			}
+			for _, part := range cand.Content.Parts {
+				if part.Text != "" && !hasFunctionCall {
 					ch <- provider.StreamEvent{
 						Type:      provider.EventTextDelta,
 						TextDelta: part.Text,
 					}
 				}
 				if part.FunctionCall != nil {
+					args, err := normalizeToolArgs(part.FunctionCall.Name, part.FunctionCall.Args)
+					if err != nil {
+						ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+						return
+					}
 					id := fmt.Sprintf("call_%d", toolCallIdx)
 					ch <- provider.StreamEvent{
 						Type: provider.EventToolCallStart,
@@ -435,7 +451,7 @@ func parseGeminiSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.
 							Index:          toolCallIdx,
 							ID:             id,
 							Name:           part.FunctionCall.Name,
-							ArgumentsDelta: string(part.FunctionCall.Args),
+							ArgumentsDelta: string(args),
 						},
 					}
 					ch <- provider.StreamEvent{
@@ -459,4 +475,31 @@ func parseGeminiSSE(ctx context.Context, body io.ReadCloser, ch chan<- provider.
 		return
 	}
 	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}
+}
+
+func normalizeToolArgs(name string, args json.RawMessage) (json.RawMessage, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("gemini function call missing name")
+	}
+	trimmed := strings.TrimSpace(string(args))
+	if trimmed == "" {
+		return json.RawMessage("{}"), nil
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, fmt.Errorf("gemini function call %q args must be a JSON object", name)
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+		return nil, fmt.Errorf("gemini function call %q args: %w", name, err)
+	}
+	return json.RawMessage(trimmed), nil
+}
+
+func isMalformedFunctionCallFinish(reason string) bool {
+	switch reason {
+	case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL":
+		return true
+	default:
+		return false
+	}
 }

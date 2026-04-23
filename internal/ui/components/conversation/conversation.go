@@ -150,7 +150,11 @@ func (m *Model) FinaliseAgent() {
 // AppendToolCall starts a pending tool call. Awaits CompleteToolCall.
 // If another message is pending, it is flushed first.
 func (m *Model) AppendToolCall(toolName, args string) {
-	m.flushPending()
+	if m.pending != nil && m.pending.Kind == KindAgent {
+		m.pending = nil
+	} else {
+		m.flushPending()
+	}
 	m.pending = &Message{
 		Kind:     KindToolCall,
 		ToolName: toolName,

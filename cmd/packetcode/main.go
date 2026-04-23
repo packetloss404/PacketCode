@@ -3,11 +3,11 @@
 //
 // Usage:
 //
-//   packetcode                              start the TUI in the cwd
-//   packetcode --version                    print version and exit
-//   packetcode --provider gemini --model gemini-2.5-pro
-//   packetcode --resume <session-id>        resume a saved session
-//   packetcode --trust                      auto-approve all tool actions
+//	packetcode                              start the TUI in the cwd
+//	packetcode --version                    print version and exit
+//	packetcode --provider gemini --model gemini-2.5-pro
+//	packetcode --resume <session-id>        resume a saved session
+//	packetcode --trust                      auto-approve all tool actions
 package main
 
 import (
@@ -24,6 +24,7 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
+	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -298,6 +299,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		MCP:          mcpMgr,
 		WorkingDir:   root,
 		SystemPrompt: systemPrompt,
+		Hooks:        hooks.New(cfg.Hooks, root),
 		Version:      welcomeVersion(),
 	})
 	if err != nil {

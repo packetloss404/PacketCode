@@ -94,7 +94,7 @@ type itemsLoadedMsg struct {
 
 Note: `ctrl+m` is `tea.KeyEnter` on many terminals — folds into Enter. `ctrl+p` inside the picker is cursor-up; the global handler refuses to stack a second picker anyway.
 
-Filter matching: case-insensitive substring on normalized haystack (ID + " " + Label + " " + Detail, whitespace collapsed to dashes). Multiple filter tokens are joined with dashes (so `"gpt 4.1"` becomes `"gpt-4.1"` substring match).
+Filter matching: case-insensitive substring on normalized haystack (ID + " " + Label + " " + Detail, whitespace collapsed to dashes). Multiple filter tokens are joined with dashes (so `"gpt 5.5"` becomes `"gpt-5.5"` substring match).
 
 ### View layout
 
@@ -102,7 +102,7 @@ Filter matching: case-insensitive substring on normalized haystack (ID + " " + L
 ╭─ Select provider ──────────────────────────────────╮
 │ > gpt                                              │
 │                                                    │
-│   ● openai       OpenAI           gpt-4.1    key ✓ │
+│   ● openai       OpenAI           gpt-5.5    key ✓ │
 │ ▶   gemini       Google Gemini    gemini…    key ✓ │
 │     minimax      MiniMax          abab6…     no key│
 │     openrouter   OpenRouter       auto       key ✓ │
@@ -377,10 +377,10 @@ case picker.CloseMsg:
 
 ### `internal/ui/components/picker/filter_test.go`
 - `TestMatches_EmptyFilter` — every non-empty item matches.
-- `TestMatches_CaseInsensitiveSubstring` — `"GPT"` matches `"gpt-4.1"`.
-- `TestMatches_WhitespaceToDash` — `"gpt 4.1"` matches `"gpt-4.1"`.
+- `TestMatches_CaseInsensitiveSubstring` — `"GPT"` matches `"gpt-5.5"`.
+- `TestMatches_WhitespaceToDash` — `"gpt 5.5"` matches `"gpt-5.5"`.
 - `TestMatches_MultipleTokens` — `"claude sonnet"` → `"claude-sonnet"` substring.
-- `TestMatches_NoMatch` — `"foo"` against `"gpt-4.1"` false.
+- `TestMatches_NoMatch` — `"foo"` against `"gpt-5.5"` false.
 - `TestMatches_SearchesAllFields` — matches Label / ID / Detail.
 
 ### `internal/ui/components/picker/picker_test.go`

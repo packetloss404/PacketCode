@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 func stripANSI(s string) string {
@@ -47,6 +49,20 @@ func TestToolResultBody_PatchFileRendersDiff(t *testing.T) {
 	assert.Contains(t, out, "+ new")
 	// Gutter present.
 	assert.Contains(t, out, " | ")
+}
+
+func TestAppendToolCallDiscardsPendingAgentText(t *testing.T) {
+	m := New()
+	m.Resize(100, 40)
+
+	m.AppendAgentText("model", "openai", `<|python_tag|>{"path":"main.go"}`)
+	m.AppendToolCall("read_file", `{"path":"main.go"}`)
+	m.CompleteToolCall("read_file", tools.ToolResult{Content: "package main"})
+
+	out := stripANSI(m.View())
+	assert.NotContains(t, out, "<|python_tag|>")
+	assert.Contains(t, out, "read_file")
+	assert.Contains(t, out, "package main")
 }
 
 // TestToolResultBody_PatchFileErrorFallsThrough verifies the red

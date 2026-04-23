@@ -12,9 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMcpTool_AdaptsNameAsPrefixed asserts the adapter exposes
-// "<server>.<tool>" as its public name.
-func TestMcpTool_AdaptsNameAsPrefixed(t *testing.T) {
+// TestMcpTool_AdaptsNameAsProviderSafe asserts the adapter exposes
+// a provider-safe public name while retaining the original MCP tool for
+// execution.
+func TestMcpTool_AdaptsNameAsProviderSafe(t *testing.T) {
 	stub := makeBasicStub(t, "fs", []ServerTool{
 		{Name: "read_file", Description: "read a file", InputSchema: json.RawMessage(`{"type":"object"}`)},
 	}, nil)
@@ -24,9 +25,19 @@ func TestMcpTool_AdaptsNameAsPrefixed(t *testing.T) {
 	defer cli.Close(time.Second)
 
 	mt := NewMcpTool(cli, cli.Tools()[0])
-	assert.Equal(t, "fs.read_file", mt.Name())
+	assert.Equal(t, "fs__read_file", mt.Name())
 	assert.Equal(t, "read a file", mt.Description())
 	assert.True(t, mt.RequiresApproval())
+}
+
+func TestMcpTool_SafeNameSanitizesAndCaps(t *testing.T) {
+	got := safeToolName("my.server", "read/file")
+	assert.Equal(t, "my_server__read_file", got)
+
+	long := safeToolName(strings.Repeat("server", 20), strings.Repeat("tool", 20))
+	assert.LessOrEqual(t, len(long), 64)
+	assert.NotContains(t, long, ".")
+	assert.NotContains(t, long, "/")
 }
 
 // TestMcpTool_Execute_DeadClient asserts that calls against a dead

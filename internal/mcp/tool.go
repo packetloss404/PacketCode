@@ -3,6 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,12 +20,14 @@ type McpTool struct {
 	client     *Client
 	serverName string
 	toolName   string
+	safeName   string
 	desc       string
 	schema     json.RawMessage
 }
 
 // NewMcpTool constructs an adapter for the given (client, serverTool)
-// pair. The exposed tool name is always "<server>.<tool>".
+// pair. The exposed tool name is provider-safe; Execute still forwards
+// calls to the original MCP tool name.
 func NewMcpTool(c *Client, t ServerTool) *McpTool {
 	schema := t.InputSchema
 	if len(bytes.TrimSpace(schema)) == 0 {
@@ -35,13 +39,14 @@ func NewMcpTool(c *Client, t ServerTool) *McpTool {
 		client:     c,
 		serverName: c.Name(),
 		toolName:   t.Name,
+		safeName:   safeToolName(c.Name(), t.Name),
 		desc:       t.Description,
 		schema:     schema,
 	}
 }
 
-// Name returns "<server>.<tool>" — MCP tools are always prefixed.
-func (t *McpTool) Name() string { return t.serverName + "." + t.toolName }
+// Name returns the provider-safe public name for this MCP tool.
+func (t *McpTool) Name() string { return t.safeName }
 
 // Description returns the server-supplied description (may be empty).
 func (t *McpTool) Description() string { return t.desc }
@@ -99,4 +104,33 @@ func (t *McpTool) Execute(ctx context.Context, params json.RawMessage) (tools.To
 		Content: strings.Join(parts, "\n"),
 		IsError: res.IsError,
 	}, nil
+}
+
+func safeToolName(serverName, toolName string) string {
+	raw := serverName + "__" + toolName
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_-")
+	if out == "" {
+		out = "mcp_tool"
+	}
+	if len(out) <= 64 {
+		return out
+	}
+	sum := sha1.Sum([]byte(raw))
+	suffix := hex.EncodeToString(sum[:])[:8]
+	return strings.TrimRight(out[:55], "_-") + "_" + suffix
 }

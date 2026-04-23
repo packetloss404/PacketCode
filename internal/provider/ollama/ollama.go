@@ -2,9 +2,9 @@
 // instance, typically reachable at http://localhost:11434.
 //
 // Two characteristics make Ollama the odd one out:
-//   1. There's no API key. ValidateKey is a no-op; "validation" really
-//      means "is the daemon reachable on this host?"
-//   2. The streaming format is NDJSON (one JSON object per line), not SSE.
+//  1. There's no API key. ValidateKey is a no-op; "validation" really
+//     means "is the daemon reachable on this host?"
+//  2. The streaming format is NDJSON (one JSON object per line), not SSE.
 //
 // Tool calling support is per-model. We expose ToolCallable() so callers
 // (the agent loop) can decide whether to inject tool descriptions into the
@@ -65,9 +65,9 @@ func New(host string) *Provider {
 	}
 }
 
-func (p *Provider) Name() string                { return displayName }
-func (p *Provider) Slug() string                { return slug }
-func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+func (p *Provider) Name() string               { return displayName }
+func (p *Provider) Slug() string               { return slug }
+func (p *Provider) BrandColor() lipgloss.Color { return brandColor }
 
 // ValidateKey ignores the apiKey argument and instead probes the daemon
 // reachability. Returns nil iff GET /api/tags succeeds.
@@ -152,10 +152,10 @@ func detectToolSupport(modelName string) bool {
 // ────────────────────────────────────────────────────────────────────────────
 
 type chatRequest struct {
-	Model    string         `json:"model"`
-	Messages []chatMessage  `json:"messages"`
-	Stream   bool           `json:"stream"`
-	Tools    []chatTool     `json:"tools,omitempty"`
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
+	Tools    []chatTool    `json:"tools,omitempty"`
 }
 
 type chatMessage struct {
@@ -304,7 +304,7 @@ func parseOllamaStream(ctx context.Context, body io.ReadCloser, ch chan<- provid
 			return
 		}
 
-		if chunk.Message.Content != "" {
+		if chunk.Message.Content != "" && len(chunk.Message.ToolCalls) == 0 {
 			ch <- provider.StreamEvent{
 				Type:      provider.EventTextDelta,
 				TextDelta: chunk.Message.Content,

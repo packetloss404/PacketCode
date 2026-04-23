@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/packetcode/packetcode/internal/cost"
+	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
@@ -30,24 +32,24 @@ const maxToolIterations = 25
 type EventType int
 
 const (
-	EventTextDelta EventType = iota
-	EventToolCallProposed   // LLM emitted a complete tool call (pre-approval)
-	EventToolCallApproved   // user approved (or trust mode auto-approved)
-	EventToolCallRejected   // user rejected
-	EventToolCallExecuted   // tool finished, result available
-	EventUsageUpdate        // usage tokens recorded
-	EventDone               // turn complete (no more tool calls)
-	EventError              // unrecoverable error; channel about to close
+	EventTextDelta        EventType = iota
+	EventToolCallProposed           // LLM emitted a complete tool call (pre-approval)
+	EventToolCallApproved           // user approved (or trust mode auto-approved)
+	EventToolCallRejected           // user rejected
+	EventToolCallExecuted           // tool finished, result available
+	EventUsageUpdate                // usage tokens recorded
+	EventDone                       // turn complete (no more tool calls)
+	EventError                      // unrecoverable error; channel about to close
 )
 
 // AgentEvent is the unified message the agent emits to the TUI.
 type AgentEvent struct {
 	Type       EventType
-	Text       string             // EventTextDelta
-	ToolCall   provider.ToolCall  // EventToolCall*
-	ToolResult tools.ToolResult   // EventToolCallExecuted
-	Usage      provider.Usage     // EventUsageUpdate
-	Error      error              // EventError
+	Text       string            // EventTextDelta
+	ToolCall   provider.ToolCall // EventToolCall*
+	ToolResult tools.ToolResult  // EventToolCallExecuted
+	Usage      provider.Usage    // EventUsageUpdate
+	Error      error             // EventError
 }
 
 // Agent owns the long-lived dependencies required to run a turn.
@@ -60,6 +62,7 @@ type Agent struct {
 	costTracker  *cost.Tracker
 	approver     Approver
 	systemPrompt string
+	hooks        *hooks.Runner
 }
 
 // Config bundles the agent's required dependencies.
@@ -70,6 +73,7 @@ type Config struct {
 	CostTracker  *cost.Tracker
 	Approver     Approver
 	SystemPrompt string
+	Hooks        *hooks.Runner
 }
 
 // New constructs an Agent. Approver defaults to AutoReject if omitted —
@@ -85,6 +89,7 @@ func New(cfg Config) *Agent {
 		costTracker:  cfg.CostTracker,
 		approver:     cfg.Approver,
 		systemPrompt: cfg.SystemPrompt,
+		hooks:        cfg.Hooks,
 	}
 }
 
@@ -106,9 +111,29 @@ func (a *Agent) Run(ctx context.Context, userMessage string) <-chan AgentEvent {
 func (a *Agent) run(ctx context.Context, userMessage string, events chan<- AgentEvent) {
 	defer close(events)
 
+	submittedMessage := userMessage
+	if a.hooks != nil {
+		cur := a.session.Current()
+		sessionID := ""
+		if cur != nil {
+			sessionID = cur.ID
+		}
+		out, err := a.hooks.RunUserPromptSubmit(ctx, hooks.PromptPayload{
+			SessionID: sessionID,
+			Prompt:    userMessage,
+		})
+		if err != nil {
+			events <- AgentEvent{Type: EventError, Error: fmt.Errorf("user prompt hook: %w", err)}
+			return
+		}
+		if out != "" {
+			submittedMessage += "\n\n[UserPromptSubmit hook output]\n" + out
+		}
+	}
+
 	if err := a.session.AddMessage(provider.Message{
 		Role:    provider.RoleUser,
-		Content: userMessage,
+		Content: submittedMessage,
 	}); err != nil {
 		events <- AgentEvent{Type: EventError, Error: fmt.Errorf("save user message: %w", err)}
 		return
@@ -141,8 +166,10 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 	req := provider.ChatRequest{
 		Model:    modelID,
 		Messages: a.buildMessages(),
-		Tools:    a.toolRegistry.Definitions(),
 		Stream:   true,
+	}
+	if prov.SupportsTools(modelID) {
+		req.Tools = a.toolRegistry.Definitions()
 	}
 
 	stream, err := prov.ChatCompletion(ctx, req)
@@ -180,15 +207,26 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 	}
 
 	calls := asm.finalize()
-
-	// Persist the assistant message (text + completed tool calls).
-	assistantMsg := provider.Message{
-		Role:      provider.RoleAssistant,
-		Content:   fullText,
-		ToolCalls: calls,
+	for _, call := range calls {
+		if err := validateToolCall(call); err != nil {
+			return false, err
+		}
 	}
-	if err := a.session.AddMessage(assistantMsg); err != nil {
-		return false, fmt.Errorf("save assistant message: %w", err)
+
+	if fullText != "" || len(calls) > 0 {
+		// Persist the assistant message (text + completed tool calls).
+		content := fullText
+		if len(calls) > 0 {
+			content = ""
+		}
+		assistantMsg := provider.Message{
+			Role:      provider.RoleAssistant,
+			Content:   content,
+			ToolCalls: calls,
+		}
+		if err := a.session.AddMessage(assistantMsg); err != nil {
+			return false, fmt.Errorf("save assistant message: %w", err)
+		}
 	}
 
 	if lastUsage != nil {
@@ -220,6 +258,8 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 // records a rejection message. Either way a tool-role message is appended
 // to the session so the LLM has full visibility into what happened.
 func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, events chan<- AgentEvent) error {
+	events <- AgentEvent{Type: EventToolCallProposed, ToolCall: call}
+
 	tool, ok := a.toolRegistry.Get(call.Name)
 	if !ok {
 		// Unknown tool — feed the error back to the LLM and continue.
@@ -235,9 +275,28 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		})
 	}
 
-	events <- AgentEvent{Type: EventToolCallProposed, ToolCall: call}
-
 	params := json.RawMessage(call.Arguments)
+	if a.hooks != nil {
+		preOut, preErr := a.hooks.RunPreToolUse(ctx, hooks.ToolPayload{
+			SessionID:  a.currentSessionID(),
+			ToolName:   call.Name,
+			ToolCallID: call.ID,
+			Arguments:  params,
+		})
+		if preErr != nil {
+			rejection := "pre-tool hook blocked " + call.Name + ": " + preErr.Error()
+			if preOut != "" {
+				rejection += "\n" + preOut
+			}
+			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
+			return a.session.AddMessage(provider.Message{
+				Role:       provider.RoleTool,
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Content:    rejection,
+			})
+		}
+	}
 	if tool.RequiresApproval() {
 		decision := a.approver.Approve(ctx, ApprovalRequest{
 			Tool:     tool,
@@ -245,11 +304,11 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			Params:   params,
 		})
 		if !decision.Approved {
-			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call}
 			rejection := decision.Reason
 			if rejection == "" {
 				rejection = "user rejected the proposed action"
 			}
+			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
 			return a.session.AddMessage(provider.Message{
 				Role:       provider.RoleTool,
 				ToolCallID: call.ID,
@@ -270,6 +329,22 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		// becomes a tool-role message so the LLM can adapt.
 		res = tools.ToolResult{Content: fmt.Sprintf("tool execution failed: %s", err), IsError: true}
 	}
+	if a.hooks != nil {
+		hookOut, hookErr := a.hooks.RunPostToolUse(ctx, hooks.ToolPayload{
+			SessionID:  a.currentSessionID(),
+			ToolName:   call.Name,
+			ToolCallID: call.ID,
+			Arguments:  params,
+			Result: &hooks.ToolResult{
+				Content:  res.Content,
+				IsError:  res.IsError,
+				Metadata: res.Metadata,
+			},
+		})
+		if hookOut != "" || hookErr != nil {
+			res.Content = appendHookOutput(res.Content, hookOut, hookErr)
+		}
+	}
 	events <- AgentEvent{Type: EventToolCallExecuted, ToolCall: call, ToolResult: res}
 	return a.session.AddMessage(provider.Message{
 		Role:       provider.RoleTool,
@@ -277,6 +352,50 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		Name:       call.Name,
 		Content:    res.Content,
 	})
+}
+
+func (a *Agent) currentSessionID() string {
+	if a == nil || a.session == nil || a.session.Current() == nil {
+		return ""
+	}
+	return a.session.Current().ID
+}
+
+func appendHookOutput(content, out string, err error) string {
+	var b strings.Builder
+	b.WriteString(content)
+	if out != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("[PostToolUse hook output]\n")
+		b.WriteString(out)
+	}
+	if err != nil {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("[PostToolUse hook error]\n")
+		b.WriteString(err.Error())
+	}
+	return b.String()
+}
+
+func validateToolCall(call provider.ToolCall) error {
+	if call.Name == "" {
+		return fmt.Errorf("tool call missing name")
+	}
+	if !json.Valid([]byte(call.Arguments)) {
+		return fmt.Errorf("tool call %q arguments are invalid JSON", call.Name)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(call.Arguments), &obj); err != nil {
+		return fmt.Errorf("tool call %q arguments must be a JSON object", call.Name)
+	}
+	if obj == nil {
+		return fmt.Errorf("tool call %q arguments must be a JSON object", call.Name)
+	}
+	return nil
 }
 
 // buildMessages assembles the message array sent to the provider:

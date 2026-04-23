@@ -12,19 +12,20 @@ import (
 // job is only to distinguish "this looked like a slash command" from
 // "this is normal prose".
 var knownSlashCommands = map[string]struct{}{
-	"spawn":    {},
-	"jobs":     {},
-	"cancel":   {},
-	"provider": {},
-	"model":    {},
-	"sessions": {},
-	"undo":     {},
-	"compact":  {},
-	"cost":     {},
-	"trust":    {},
-	"help":     {},
-	"clear":    {},
-	"mcp":      {},
+	"spawn":      {},
+	"jobs":       {},
+	"cancel":     {},
+	"provider":   {},
+	"model":      {},
+	"sessions":   {},
+	"undo":       {},
+	"compact":    {},
+	"cost":       {},
+	"trust":      {},
+	"help":       {},
+	"clear":      {},
+	"mcp":        {},
+	"statusline": {},
 }
 
 // ParseSlashCommand inspects a raw input line and, if it starts with "/"

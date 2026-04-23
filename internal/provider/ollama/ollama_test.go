@@ -243,3 +243,36 @@ func TestProvider_ChatCompletion_ToolCall(t *testing.T) {
 	assert.Equal(t, "read_file", name)
 	assert.JSONEq(t, `{"path":"main.go"}`, args)
 }
+
+func TestProvider_ChatCompletion_SuppressesTextOnToolCallChunk(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"message":{"role":"assistant","content":"<|python_tag|>{\"path\":\"main.go\"}","tool_calls":[{"function":{"name":"read_file","arguments":{"path":"main.go"}}}]},"done":true,"prompt_eval_count":15,"eval_count":8}`,
+		``,
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := New(server.URL)
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "qwen2.5-coder:14b",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read main.go"}},
+	})
+	require.NoError(t, err)
+
+	var text, args strings.Builder
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			text.WriteString(ev.TextDelta)
+		case provider.EventToolCallDelta:
+			args.WriteString(ev.ToolCall.ArgumentsDelta)
+		case provider.EventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+	assert.Empty(t, text.String())
+	assert.JSONEq(t, `{"path":"main.go"}`, args.String())
+}

@@ -7,7 +7,7 @@ import "strings"
 
 // normalize lowercases s and collapses any run of whitespace to a single
 // dash. This is the canonical form used on both sides of the filter
-// match so "gpt 4.1" and "gpt-4.1" compare equal.
+// match so "gpt 5.5" and "gpt-5.5" compare equal.
 func normalize(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder

@@ -1,5 +1,5 @@
 // Package openai implements the provider.Provider interface for OpenAI's
-// chat-completions API (GPT-4.1, o3, o4-mini).
+// chat-completions API (GPT-5.5, GPT-4.1, o3, o4-mini).
 //
 // All wire-protocol logic lives in internal/provider/openaicompat — this
 // package contributes only OpenAI-specific identity, base URL, model
@@ -17,6 +17,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.openai.com/v1"
+	DefaultModel   = "gpt-5.5"
 	slug           = "openai"
 	displayName    = "OpenAI"
 )
@@ -45,9 +46,9 @@ func NewWithBaseURL(baseURL, apiKey string) *Provider {
 	}
 }
 
-func (p *Provider) Name() string                { return displayName }
-func (p *Provider) Slug() string                { return slug }
-func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+func (p *Provider) Name() string               { return displayName }
+func (p *Provider) Slug() string               { return slug }
+func (p *Provider) BrandColor() lipgloss.Color { return brandColor }
 
 func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	return p.client.ValidateKey(ctx, apiKey)
@@ -69,16 +70,21 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 			continue
 		}
 		entry, hasPricing := pricingTable[m.ID]
+		if !hasPricing {
+			entry.Input, entry.Output = p.Pricing(m.ID)
+			entry.ContextWindow = p.ContextWindow(m.ID)
+			entry.SupportsTools = p.SupportsTools(m.ID)
+		}
 		out = append(out, provider.Model{
 			ID:            m.ID,
 			DisplayName:   m.ID,
 			ContextWindow: entry.ContextWindow,
-			SupportsTools: !hasPricing || entry.SupportsTools, // unknown → assume yes; runtime API will complain if wrong
+			SupportsTools: entry.SupportsTools,
 			InputPer1M:    entry.Input,
 			OutputPer1M:   entry.Output,
 		})
 	}
-	return out, nil
+	return prioritizeDefaultModel(out), nil
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
@@ -120,4 +126,21 @@ func isChatModel(id string) bool {
 		}
 	}
 	return true
+}
+
+func prioritizeDefaultModel(models []provider.Model) []provider.Model {
+	for i, m := range models {
+		if m.ID != DefaultModel {
+			continue
+		}
+		if i == 0 {
+			return models
+		}
+		out := make([]provider.Model, 0, len(models))
+		out = append(out, m)
+		out = append(out, models[:i]...)
+		out = append(out, models[i+1:]...)
+		return out
+	}
+	return models
 }

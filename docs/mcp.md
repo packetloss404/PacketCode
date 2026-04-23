@@ -111,9 +111,10 @@ As with every MCP tool, every `fetch.fetch` call requires approval.
 
 ## Tool names and approval
 
-- MCP tools are ALWAYS prefixed: `<server>.<tool>`. Two servers that
-  both expose `read_file` won't collide — you'll see e.g.
-  `filesystem.read_file` and `git.read_file`.
+- MCP tools are ALWAYS prefixed with provider-safe aliases:
+  `<server>__<tool>`. Two servers that both expose `read_file` won't
+  collide — you'll see e.g. `filesystem__read_file` and
+  `git__read_file`.
 - Native tools (`read_file`, `write_file`, `patch_file`,
   `search_codebase`, `list_directory`, `execute_command`,
   `spawn_agent`) are never prefixed and never collide with MCP tools.
@@ -121,7 +122,7 @@ As with every MCP tool, every `fetch.fetch` call requires approval.
   what the server is. Trust mode (`--trust` or `trust_mode = true`)
   auto-approves them like any other destructive tool.
 
-The approval modal shows the exact tool name (`filesystem.write_file`)
+The approval modal shows the exact tool name (`filesystem__write_file`)
 and the arguments the LLM proposed, so you can inspect them before
 pressing `Y`.
 

@@ -4,6 +4,8 @@
 package input
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,15 +21,17 @@ type Model struct {
 	ta      textarea.Model
 	focused bool
 	width   int
+	maxRows int
 }
 
 func New() Model {
 	ta := textarea.New()
 	ta.Placeholder = "Ask packetcode anything... (/ for commands)"
 	ta.CharLimit = 0
-	ta.MaxHeight = 10
+	ta.MaxHeight = 4
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
+	ta.SetHeight(1)
 
 	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(theme.TextPrimary)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
@@ -38,20 +42,21 @@ func New() Model {
 	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(theme.TextDim)
 
 	ta.Focus()
-	return Model{ta: ta, focused: true}
+	return Model{ta: ta, focused: true, maxRows: 4}
 }
 
 func (m *Model) Resize(width, height int) {
 	m.width = width
 	m.ta.SetWidth(width - 4)
-	if height > 0 && height < 12 {
-		m.ta.SetHeight(height - 2)
+	if height > 0 && height < m.maxRows+2 {
+		m.maxRows = max(1, height-2)
 	}
+	m.syncHeight()
 }
 
-func (m *Model) Focus()   { m.focused = true; m.ta.Focus() }
-func (m *Model) Blur()    { m.focused = false; m.ta.Blur() }
-func (m *Model) Reset()   { m.ta.Reset() }
+func (m *Model) Focus()        { m.focused = true; m.ta.Focus() }
+func (m *Model) Blur()         { m.focused = false; m.ta.Blur() }
+func (m *Model) Reset()        { m.ta.Reset(); m.syncHeight() }
 func (m *Model) Value() string { return m.ta.Value() }
 
 // SetValue replaces the textarea contents and moves the caret to the
@@ -60,6 +65,7 @@ func (m *Model) Value() string { return m.ta.Value() }
 func (m *Model) SetValue(s string) {
 	m.ta.SetValue(s)
 	m.ta.CursorEnd()
+	m.syncHeight()
 }
 
 // Update runs the textarea's own logic and intercepts Enter to fire SubmitMsg.
@@ -78,6 +84,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
+	m.syncHeight()
 	return m, cmd
 }
 
@@ -86,11 +93,24 @@ func (m Model) View() string {
 	if m.focused {
 		style = theme.StyleInputFocused
 	}
-	hint := theme.StyleDim.Render("Shift+↵ newline · ↵ send")
 	body := m.ta.View()
 	width := m.width - 2
 	if width <= 0 {
 		width = 80
 	}
-	return style.Width(width).Render(body + "\n" + lipgloss.PlaceHorizontal(width-4, lipgloss.Right, hint))
+	return style.Width(width).Render(body)
+}
+
+func (m *Model) syncHeight() {
+	rows := strings.Count(m.ta.Value(), "\n") + 1
+	if rows < 1 {
+		rows = 1
+	}
+	if m.maxRows <= 0 {
+		m.maxRows = 4
+	}
+	if rows > m.maxRows {
+		rows = m.maxRows
+	}
+	m.ta.SetHeight(rows)
 }
