@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +39,29 @@ func TestMcpTool_SafeNameSanitizesAndCaps(t *testing.T) {
 	assert.LessOrEqual(t, len(long), 64)
 	assert.NotContains(t, long, ".")
 	assert.NotContains(t, long, "/")
+}
+
+func TestRegisterTools_SkipsAliasCollisions(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(fakeTool{name: "fs__read_file"})
+	client := &Client{name: "fs", tools: []ServerTool{
+		{Name: "read_file"},
+		{Name: "write_file"},
+		{Name: "write/file"},
+	}}
+
+	reports := RegisterTools(reg, []*Client{client})
+	require.Len(t, reports, 3)
+	assert.Equal(t, "skipped", reports[0].Status)
+	assert.Equal(t, "registered", reports[1].Status)
+	assert.Equal(t, "skipped", reports[2].Status)
+
+	all := reg.All()
+	assert.Len(t, all, 2)
+	_, ok := reg.Get("fs__read_file")
+	assert.True(t, ok)
+	_, ok = reg.Get("fs__write_file")
+	assert.True(t, ok)
 }
 
 // TestMcpTool_Execute_DeadClient asserts that calls against a dead
@@ -160,4 +184,14 @@ func TestMcpTool_Schema_PassesThrough(t *testing.T) {
 	defer cli.Close(time.Second)
 	mt := NewMcpTool(cli, cli.Tools()[0])
 	assert.JSONEq(t, string(custom), string(mt.Schema()))
+}
+
+type fakeTool struct{ name string }
+
+func (f fakeTool) Name() string            { return f.name }
+func (f fakeTool) Description() string     { return "fake" }
+func (f fakeTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (f fakeTool) RequiresApproval() bool  { return false }
+func (f fakeTool) Execute(context.Context, json.RawMessage) (tools.ToolResult, error) {
+	return tools.ToolResult{}, nil
 }

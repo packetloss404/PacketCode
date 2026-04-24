@@ -107,7 +107,7 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: "patch_file: at least one patch is required", IsError: true}, nil
 	}
 
-	abs, err := resolveInRoot(t.Root, p.Path)
+	abs, err := resolveExistingInRoot(t.Root, p.Path)
 	if err != nil {
 		return ToolResult{Content: err.Error(), IsError: true}, nil
 	}
@@ -128,6 +128,7 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: fmt.Sprintf("patch_file: backup failed: %s", err), IsError: true}, nil
 	}
 	if err := atomicWrite(abs, []byte(updated)); err != nil {
+		rollbackBackup(t.Backups, abs)
 		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
 	}
 
@@ -148,7 +149,7 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 // errors bubble out as-is so the caller can distinguish "bad patches"
 // from "diff ready".
 func (t *PatchFileTool) PreviewPatchDiff(path string, patches []PatchOp) (string, error) {
-	abs, err := resolveInRoot(t.Root, path)
+	abs, err := resolveExistingInRoot(t.Root, path)
 	if err != nil {
 		return "", err
 	}

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -64,8 +65,8 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	url := p.baseURL + "/models?key=" + apiKey
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	endpoint := p.baseURL + "/models?key=" + url.QueryEscape(apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -92,8 +93,8 @@ type modelsResponse struct {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
-	url := p.baseURL + "/models?key=" + p.apiKey
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	endpoint := p.baseURL + "/models?key=" + url.QueryEscape(p.apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -118,20 +119,19 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 			continue
 		}
 		id := stripModelsPrefix(m.Name)
-		entry, hasPricing := pricingTable[id]
+		in, outRate := p.Pricing(id)
 		ctxWindow := m.InputTokenLimit
 		if ctxWindow == 0 {
-			ctxWindow = entry.ContextWindow
+			ctxWindow = p.ContextWindow(id)
 		}
 		out = append(out, provider.Model{
 			ID:            id,
 			DisplayName:   m.DisplayName,
 			ContextWindow: ctxWindow,
-			SupportsTools: true, // 2.x family all support function calling
-			InputPer1M:    entry.Input,
-			OutputPer1M:   entry.Output,
+			SupportsTools: p.SupportsTools(id),
+			InputPer1M:    in,
+			OutputPer1M:   outRate,
 		})
-		_ = hasPricing
 	}
 	return out, nil
 }
@@ -344,10 +344,10 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 		return nil, fmt.Errorf("marshal gemini request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s",
-		p.baseURL, req.Model, p.apiKey)
+	endpoint := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s",
+		p.baseURL, url.PathEscape(req.Model), url.QueryEscape(p.apiKey))
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}

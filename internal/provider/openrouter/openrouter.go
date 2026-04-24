@@ -3,10 +3,10 @@
 // endpoint.
 //
 // Two things distinguish OpenRouter from a vanilla OpenAI-compatible host:
-//   1. Two HTTP headers (HTTP-Referer, X-Title) are required for proper
-//      attribution and rate-limit treatment.
-//   2. Pricing is per-model and changes constantly, so we read it from
-//      OpenRouter's /models endpoint at startup and cache it in-process.
+//  1. Two HTTP headers (HTTP-Referer, X-Title) are required for proper
+//     attribution and rate-limit treatment.
+//  2. Pricing is per-model and changes constantly, so we read it from
+//     OpenRouter's /models endpoint at startup and cache it in-process.
 package openrouter
 
 import (
@@ -74,9 +74,9 @@ func NewWithBaseURL(baseURL, apiKey string) *Provider {
 	return p
 }
 
-func (p *Provider) Name() string                { return displayName }
-func (p *Provider) Slug() string                { return slug }
-func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+func (p *Provider) Name() string               { return displayName }
+func (p *Provider) Slug() string               { return slug }
+func (p *Provider) BrandColor() lipgloss.Color { return brandColor }
 
 func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	return p.client.ValidateKey(ctx, apiKey)
@@ -166,19 +166,25 @@ func (p *Provider) Pricing(modelID string) (float64, float64) {
 	if entry, ok := p.pricing[modelID]; ok {
 		return entry.Input, entry.Output
 	}
-	return 0, 0
+	return 3.00, 15.00
 }
 
 func (p *Provider) ContextWindow(modelID string) int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.contexts[modelID]
+	if ctxWindow, ok := p.contexts[modelID]; ok {
+		return ctxWindow
+	}
+	return 128_000
 }
 
 func (p *Provider) SupportsTools(modelID string) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.tools[modelID]
+	if supports, ok := p.tools[modelID]; ok {
+		return supports
+	}
+	return true
 }
 
 // per1MFromPerToken converts OpenRouter's per-token decimal string into

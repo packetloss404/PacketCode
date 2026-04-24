@@ -60,19 +60,19 @@ func (s State) IsTerminal() bool {
 // Manager owns the canonical Job; UI/test code should consume Snapshots
 // to avoid sharing mutable state.
 type Job struct {
-	ID           string             // 8-char short id, also the subsession suffix
-	SessionID    string             // full id of the job's underlying session.Session
-	ParentJobID  string             // "" when spawned from the main session
-	Prompt       string             // initial user message
-	Provider     string             // slug; may differ from main session
-	Model        string             // model id under that provider
+	ID           string // 8-char short id, also the subsession suffix
+	SessionID    string // full id of the job's underlying session.Session
+	ParentJobID  string // "" when spawned from the main session
+	Prompt       string // initial user message
+	Provider     string // slug; may differ from main session
+	Model        string // model id under that provider
 	State        State
 	CreatedAt    time.Time
 	StartedAt    time.Time
 	FinishedAt   time.Time
-	Summary      string             // short result summary surfaced into main convo
-	Error        string             // populated on StateFailed
-	Reason       string             // free-form; "previous app exit" / "app shutdown" / etc.
+	Summary      string // short result summary surfaced into main convo
+	Error        string // populated on StateFailed
+	Reason       string // free-form; "previous app exit" / "app shutdown" / etc.
 	InputTokens  int
 	OutputTokens int
 	CostUSD      float64
@@ -86,11 +86,11 @@ type Job struct {
 // fresh Snapshot on every state transition.
 type Snapshot struct {
 	ID, ParentJobID, Prompt, Provider, Model, Summary, Error string
-	State                            State
-	CreatedAt, StartedAt, FinishedAt time.Time
-	Tokens                           struct{ Input, Output int }
-	CostUSD                          float64
-	Depth                            int
+	State                                                    State
+	CreatedAt, StartedAt, FinishedAt                         time.Time
+	Tokens                                                   struct{ Input, Output int }
+	CostUSD                                                  float64
+	Depth                                                    int
 }
 
 // snapshotOf builds a Snapshot from a Job. Caller must hold the Manager's

@@ -18,6 +18,7 @@ type StubHandler func(params json.RawMessage) (result any, err *ErrorObj)
 // Client by handing the client side to NewClientWithStub.
 type StubServer struct {
 	handlers map[string]StubHandler
+	captured chan json.RawMessage
 
 	// stdinReader is what the StubServer reads requests from (the
 	// client's stdin writer side).
@@ -90,6 +91,19 @@ func (s *StubServer) SendRequest(id int64, method string, params any) error {
 	return writeLine(s.stdoutWriter, newRequest(id, method, params))
 }
 
+// SendRequestWithStringID pushes a server request whose JSON-RPC id is a
+// string. MCP permits string ids for server-initiated requests, and the
+// client must preserve the id exactly in its error response.
+func (s *StubServer) SendRequestWithStringID(id, method string, params any) error {
+	msg := map[string]any{"jsonrpc": JSONRPCVersion, "id": id, "method": method}
+	if params != nil {
+		msg["params"] = params
+	}
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	return writeLine(s.stdoutWriter, msg)
+}
+
 func (s *StubServer) loop() {
 	defer s.wg.Done()
 	scanner := newScanner(s.stdinReader)
@@ -99,18 +113,16 @@ func (s *StubServer) loop() {
 			continue
 		}
 		var probe struct {
-			ID     *json.Number    `json:"id,omitempty"`
+			ID     json.RawMessage `json:"id,omitempty"`
 			Method string          `json:"method,omitempty"`
 			Params json.RawMessage `json:"params,omitempty"`
 			Result json.RawMessage `json:"result,omitempty"`
 			Error  *ErrorObj       `json:"error,omitempty"`
 		}
-		dec := json.NewDecoder(newBytesReader(line))
-		dec.UseNumber()
-		if err := dec.Decode(&probe); err != nil {
+		if err := json.Unmarshal(line, &probe); err != nil {
 			continue
 		}
-		if probe.Method != "" && probe.ID == nil {
+		if probe.Method != "" && len(probe.ID) == 0 {
 			// Notification — let the test observe it via a registered
 			// handler if any (handlers for notification methods are
 			// invoked only for their side effects).
@@ -119,12 +131,18 @@ func (s *StubServer) loop() {
 			}
 			continue
 		}
-		if probe.Method == "" && probe.ID != nil {
+		if probe.Method == "" && len(probe.ID) > 0 {
 			// Response to a server-initiated request — drop.
+			if s.captured != nil {
+				select {
+				case s.captured <- append(json.RawMessage(nil), line...):
+				default:
+				}
+			}
 			continue
 		}
 		// Standard client → server request.
-		id, err := probe.ID.Int64()
+		id, err := numericID(probe.ID)
 		if err != nil {
 			continue
 		}
@@ -145,7 +163,7 @@ func (s *StubServer) loop() {
 func (s *StubServer) writeResult(id int64, result any) {
 	resp := Response{
 		JSONRPC: JSONRPCVersion,
-		ID:      id,
+		ID:      json.RawMessage(fmtInt64(id)),
 	}
 	if result != nil {
 		raw, err := json.Marshal(result)
@@ -167,12 +185,20 @@ func (s *StubServer) writeError(id int64, code int, msg string) {
 func (s *StubServer) writeRawError(id int64, e *ErrorObj) {
 	resp := Response{
 		JSONRPC: JSONRPCVersion,
-		ID:      id,
+		ID:      json.RawMessage(fmtInt64(id)),
 		Error:   e,
 	}
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_ = writeLine(s.stdoutWriter, resp)
+}
+
+func (s *StubServer) CaptureClientResponses(buffer int) <-chan json.RawMessage {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	s.captured = make(chan json.RawMessage, buffer)
+	return s.captured
 }
 
 // DefaultInitializeHandler returns a StubHandler that responds to

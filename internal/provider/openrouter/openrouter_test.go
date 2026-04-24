@@ -85,11 +85,13 @@ func TestProvider_ListModels_DynamicPricingAndToolDetection(t *testing.T) {
 	assert.True(t, p.SupportsTools("anthropic/claude-sonnet-4"))
 }
 
-func TestProvider_PricingBeforeListModelsReturnsZero(t *testing.T) {
+func TestProvider_MetadataBeforeListModelsUsesSafeFallback(t *testing.T) {
 	p := New("")
 	in, out := p.Pricing("anything")
-	assert.Equal(t, 0.0, in)
-	assert.Equal(t, 0.0, out)
+	assert.Equal(t, 3.0, in)
+	assert.Equal(t, 15.0, out)
+	assert.Equal(t, 128_000, p.ContextWindow("anything"))
+	assert.True(t, p.SupportsTools("anything"))
 }
 
 func TestPer1MFromPerToken(t *testing.T) {

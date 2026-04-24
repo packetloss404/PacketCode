@@ -170,6 +170,11 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 	}
 	if prov.SupportsTools(modelID) {
 		req.Tools = a.toolRegistry.Definitions()
+	} else if a.toolRegistry != nil && len(a.toolRegistry.Definitions()) > 0 {
+		req.Messages = append([]provider.Message{{
+			Role:    provider.RoleSystem,
+			Content: unsupportedToolsMessage(prov.Name(), modelID),
+		}}, req.Messages...)
 	}
 
 	stream, err := prov.ChatCompletion(ctx, req)
@@ -252,6 +257,10 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 		}
 	}
 	return true, nil
+}
+
+func unsupportedToolsMessage(providerName, modelID string) string {
+	return fmt.Sprintf("Native tool calling is unavailable for %s model %q. Do not claim to use tools or request file/command actions; explain the limitation and ask the user to switch to a tool-capable model if tool access is required.", providerName, modelID)
 }
 
 // handleToolCall runs the approval flow and either executes the tool or

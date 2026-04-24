@@ -23,12 +23,12 @@ type themeSnapshot struct {
 	success, warning, errorColor, info                                   lipgloss.Color
 	providerColors                                                       map[string]lipgloss.Color
 
-	stylePrimary, styleSecondary, styleDim, styleAccent, styleAccentDim                lipgloss.Style
-	styleSuccess, styleWarning, styleError, styleInfo                                  lipgloss.Style
-	styleTopBar, styleUserMessage, styleAgentMessage, styleSystemMessage               lipgloss.Style
-	styleApprovalPrompt, styleToolCall                                                 lipgloss.Style
-	styleInputIdle, styleInputFocused                                                  lipgloss.Style
-	styleDiffAdded, styleDiffRemoved, styleDiffHunk                                    lipgloss.Style
+	stylePrimary, styleSecondary, styleDim, styleAccent, styleAccentDim  lipgloss.Style
+	styleSuccess, styleWarning, styleError, styleInfo                    lipgloss.Style
+	styleTopBar, styleUserMessage, styleAgentMessage, styleSystemMessage lipgloss.Style
+	styleApprovalPrompt, styleToolCall                                   lipgloss.Style
+	styleInputIdle, styleInputFocused                                    lipgloss.Style
+	styleDiffAdded, styleDiffRemoved, styleDiffHunk                      lipgloss.Style
 }
 
 func snapshotTheme(t *testing.T) {
@@ -469,4 +469,3 @@ func TestProviderColor_UnknownSlug_ReturnsTextPrimary(t *testing.T) {
 	got := ProviderColor("does-not-exist")
 	assert.Equal(t, TextPrimary, got)
 }
-

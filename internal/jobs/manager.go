@@ -112,7 +112,7 @@ type SpawnRequest struct {
 //   - "unknown_provider"  — provider slug not registered
 //   - "unknown_model"     — model id not exposed by provider
 //   - "no_provider"       — neither request nor defaults nor Active()
-//                            yields a (provider, model) pair
+//     yields a (provider, model) pair
 //   - "manager_closed"    — Spawn called after Shutdown
 type SpawnError struct {
 	Code   string
@@ -146,13 +146,13 @@ type Result struct {
 type Manager struct {
 	cfg Config
 
-	mu          sync.RWMutex
-	jobs        map[string]*Job
-	cancel      map[string]context.CancelFunc
-	results     []Result
-	subscribers []func(Snapshot)
-	pathLocks   pathLockMap
-	closed      bool
+	mu           sync.RWMutex
+	jobs         map[string]*Job
+	cancel       map[string]context.CancelFunc
+	results      []Result
+	subscribers  []func(Snapshot)
+	pathLocks    pathLockMap
+	closed       bool
 	totalSpawned int
 
 	// sem bounds concurrent runJob workers to MaxConcurrent.
@@ -592,9 +592,10 @@ func (m *Manager) buildJobProviderRegistry(j *Job) (*provider.Registry, error) {
 
 // resolveProviderModel walks the spec's precedence ladder to bind a job
 // to a single (provider, model) pair at spawn time:
-//   1. Explicit SpawnRequest overrides.
-//   2. Manager Config defaults.
-//   3. The main Registry's Active() pair.
+//  1. Explicit SpawnRequest overrides.
+//  2. Manager Config defaults.
+//  3. The main Registry's Active() pair.
+//
 // At each step, missing slots fall through to the next.
 func (m *Manager) resolveProviderModel(req SpawnRequest) (string, string, *SpawnError) {
 	provSlug := req.Provider

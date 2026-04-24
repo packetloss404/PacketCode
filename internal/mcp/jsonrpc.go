@@ -21,7 +21,7 @@ const (
 // via Notification; this struct always carries an id.
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
+	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 }
@@ -30,7 +30,7 @@ type Request struct {
 // Error will be non-nil on a well-formed message.
 type Response struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
+	ID      json.RawMessage `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *ErrorObj       `json:"error,omitempty"`
 }
@@ -65,7 +65,7 @@ func (e *ErrorObj) Error() string {
 func newRequest(id int64, method string, params any) Request {
 	r := Request{
 		JSONRPC: JSONRPCVersion,
-		ID:      id,
+		ID:      json.RawMessage(fmtInt64(id)),
 		Method:  method,
 	}
 	if params != nil {
@@ -76,6 +76,28 @@ func newRequest(id int64, method string, params any) Request {
 		r.Params = raw
 	}
 	return r
+}
+
+func fmtInt64(id int64) []byte {
+	if id == 0 {
+		return []byte("0")
+	}
+	neg := id < 0
+	if neg {
+		id = -id
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for id > 0 {
+		pos--
+		buf[pos] = byte('0' + id%10)
+		id /= 10
+	}
+	if neg {
+		pos--
+		buf[pos] = '-'
+	}
+	return buf[pos:]
 }
 
 // newNotification builds a Notification with the JSON-RPC version

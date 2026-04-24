@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/packetcode/packetcode/internal/config"
 )
 
 // spawnServerProcess starts the MCP server child described by cfg, wires
@@ -41,7 +43,14 @@ func spawnServerProcess(cfg ServerConfig, logDir string) (*exec.Cmd, io.WriteClo
 		_ = stderr.Close()
 		return nil, nil, nil, nil, fmt.Errorf("create log dir: %w", err)
 	}
-	logPath := filepath.Join(logDir, "mcp-"+cfg.Name+".log")
+	logFileName, err := config.MCPLogFileName(cfg.Name)
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return nil, nil, nil, nil, err
+	}
+	logPath := filepath.Join(logDir, logFileName)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		_ = stdin.Close()

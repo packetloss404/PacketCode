@@ -13,9 +13,13 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
-const defaultTimeout = 2 * time.Second
+const (
+	defaultTimeout           = 2 * time.Second
+	maxStatusLineOutputBytes = 64 * 1024
+)
 
 type Runner struct {
 	cfg config.StatusLineConfig
@@ -87,25 +91,48 @@ func (r *Runner) Render(ctx context.Context, snap Snapshot) (string, error) {
 		cmd.Dir = r.cwd
 	}
 	cmd.Stdin = bytes.NewReader(data)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := procrun.NewBoundedBuffer(maxStatusLineOutputBytes)
+	stderr := procrun.NewBoundedBuffer(maxStatusLineOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		if msg == "" {
-			msg = err.Error()
+		msg := statuslineErrorMessage(runCtx, timeout, stdout.String(), stderr.String(), err)
+		if stderr.Truncated() {
+			msg += "\n...[stderr truncated at 64KB]..."
 		}
 		return "", fmt.Errorf("statusline command failed: %s", msg)
 	}
-	return strings.TrimRight(stdout.String(), "\r\n"), nil
+	out := strings.TrimRight(stdout.String(), "\r\n")
+	if stdout.Truncated() {
+		out += "\n...[stdout truncated at 64KB]..."
+	}
+	return out, nil
+}
+
+func statuslineErrorMessage(ctx context.Context, timeout time.Duration, stdout, stderr string, err error) string {
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Sprintf("timed out after %s; process tree cancellation requested", timeout)
+	}
+	if ctx.Err() == context.Canceled {
+		return "canceled; process tree cancellation requested"
+	}
+	msg := strings.TrimSpace(stderr)
+	if msg == "" {
+		msg = strings.TrimSpace(stdout)
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return msg
 }
 
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
+	procrun.ConfigureTreeCancel(cmd)
+	return cmd
 }

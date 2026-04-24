@@ -5,11 +5,11 @@
 // user's eye anchors at the input + status while reading the conversation
 // flowing upward. Order top-to-bottom:
 //
-//   conversation
-//   [overlay]      ← approval prompt, picker, jobs modal, or spinner
-//   [aboveInput]   ← anchored-to-input helpers (slash-command autocomplete)
-//   input
-//   status
+//	conversation
+//	[overlay]      ← approval prompt, picker, jobs modal, or spinner
+//	[aboveInput]   ← anchored-to-input helpers (slash-command autocomplete)
+//	input
+//	status
 //
 // This file is intentionally a pure stacker: it accepts already-rendered
 // strings and joins them. Sizing decisions belong to the App so the

@@ -24,6 +24,17 @@ func TestMCPLogPath(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, ".packetcode", "mcp-git.log"), got)
 }
 
+func TestMCPLogPath_RejectsUnsafeName(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	for _, name := range []string{"../evil", `foo\\bar`, "", "name.with.dot"} {
+		_, err := MCPLogPath(name)
+		require.Error(t, err, "name %q", name)
+	}
+}
+
 func TestThemePath_UnderHomeDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

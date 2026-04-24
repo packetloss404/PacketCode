@@ -39,7 +39,7 @@ func TestTracker_HighWaterMark(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 1000, 500))
-	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 800, 400)) // smaller — should be ignored
+	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 800, 400))  // smaller — should be ignored
 	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 1200, 600)) // larger — should win
 
 	in, out := tr.SessionTokens("s1")
@@ -84,9 +84,9 @@ func TestTracker_Breakdown(t *testing.T) {
 
 func TestTracker_SessionCostsForIDs(t *testing.T) {
 	tr, _ := NewTracker(filepath.Join(t.TempDir(), "tally.json"), fixedPricing)
-	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 1_000_000, 0))   // $2
-	require.NoError(t, tr.RecordUsage("s2", "openai", "gpt-4.1", 0, 1_000_000))   // $8
-	require.NoError(t, tr.RecordUsage("s3", "openai", "gpt-4.1", 500_000, 0))     // $1
+	require.NoError(t, tr.RecordUsage("s1", "openai", "gpt-4.1", 1_000_000, 0)) // $2
+	require.NoError(t, tr.RecordUsage("s2", "openai", "gpt-4.1", 0, 1_000_000)) // $8
+	require.NoError(t, tr.RecordUsage("s3", "openai", "gpt-4.1", 500_000, 0))   // $1
 
 	// Two known ids → sum.
 	got := tr.SessionCostsForIDs([]string{"s1", "s2"})

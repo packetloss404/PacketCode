@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -33,9 +32,9 @@ func NewWriteFileTool(root string, backups BackupManager) *WriteFileTool {
 	return &WriteFileTool{Root: root, Backups: backups}
 }
 
-func (*WriteFileTool) Name() string             { return "write_file" }
-func (*WriteFileTool) RequiresApproval() bool   { return true }
-func (*WriteFileTool) Schema() json.RawMessage  { return json.RawMessage(writeFileSchema) }
+func (*WriteFileTool) Name() string            { return "write_file" }
+func (*WriteFileTool) RequiresApproval() bool  { return true }
+func (*WriteFileTool) Schema() json.RawMessage { return json.RawMessage(writeFileSchema) }
 func (*WriteFileTool) Description() string {
 	return "Write a complete file (creating it or overwriting an existing file). Requires user approval. Backs up the previous contents so /undo can revert."
 }
@@ -54,7 +53,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return ToolResult{}, fmt.Errorf("write_file: parse params: %w", err)
 	}
-	abs, err := resolveInRoot(t.Root, p.Path)
+	abs, err := resolveWritePath(t.Root, p.Path)
 	if err != nil {
 		return ToolResult{Content: err.Error(), IsError: true}, nil
 	}
@@ -63,28 +62,9 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: fmt.Sprintf("write_file: backup failed: %s", err), IsError: true}, nil
 	}
 
-	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ToolResult{Content: fmt.Sprintf("write_file: create parent dir: %s", err), IsError: true}, nil
-	}
-
-	tmp, err := os.CreateTemp(dir, ".write.*.tmp")
-	if err != nil {
-		return ToolResult{Content: fmt.Sprintf("write_file: create temp: %s", err), IsError: true}, nil
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.WriteString(p.Content); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return ToolResult{Content: fmt.Sprintf("write_file: write temp: %s", err), IsError: true}, nil
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return ToolResult{Content: fmt.Sprintf("write_file: close temp: %s", err), IsError: true}, nil
-	}
-	if err := os.Rename(tmpPath, abs); err != nil {
-		_ = os.Remove(tmpPath)
-		return ToolResult{Content: fmt.Sprintf("write_file: rename: %s", err), IsError: true}, nil
+	if err := atomicWrite(abs, []byte(p.Content)); err != nil {
+		rollbackBackup(t.Backups, abs)
+		return ToolResult{Content: fmt.Sprintf("write_file: %s", err), IsError: true}, nil
 	}
 
 	lineCount := strings.Count(p.Content, "\n")
@@ -115,7 +95,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 // Mirrors read_file's binary guard so approval never attempts to
 // render an invalid-UTF-8 diff.
 func (t *WriteFileTool) PreviewDiff(path, content string) (string, bool, error) {
-	abs, err := resolveInRoot(t.Root, path)
+	abs, err := resolveWritePath(t.Root, path)
 	if err != nil {
 		return "", false, err
 	}

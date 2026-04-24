@@ -44,10 +44,10 @@ type fakeProvider struct {
 	supportsTools bool
 }
 
-func (f *fakeProvider) Name() string                                           { return f.name }
-func (f *fakeProvider) Slug() string                                           { return f.slug }
-func (f *fakeProvider) BrandColor() lipgloss.Color                             { return lipgloss.Color("#000000") }
-func (f *fakeProvider) ValidateKey(_ context.Context, _ string) error          { return nil }
+func (f *fakeProvider) Name() string                                  { return f.name }
+func (f *fakeProvider) Slug() string                                  { return f.slug }
+func (f *fakeProvider) BrandColor() lipgloss.Color                    { return lipgloss.Color("#000000") }
+func (f *fakeProvider) ValidateKey(_ context.Context, _ string) error { return nil }
 func (f *fakeProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 	atomic.AddInt32(&f.listCalls, 1)
 	if f.listErr != nil {

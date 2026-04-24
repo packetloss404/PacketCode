@@ -57,6 +57,29 @@ func TestProvider_ListModels_FiltersAndStripsPrefix(t *testing.T) {
 	assert.ElementsMatch(t, []string{"gemini-2.5-pro", "gemini-2.5-flash"}, ids)
 }
 
+func TestProvider_ListModels_MetadataMatchesProviderMethods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"models":[
+				{"name":"models/gemini-1.5-pro","displayName":"Gemini 1.5 Pro","supportedGenerationMethods":["generateContent"]},
+				{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash","supportedGenerationMethods":["generateContent"]}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	models, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+	for _, m := range models {
+		in, out := p.Pricing(m.ID)
+		assert.Equal(t, in, m.InputPer1M)
+		assert.Equal(t, out, m.OutputPer1M)
+		assert.Equal(t, p.ContextWindow(m.ID), m.ContextWindow)
+		assert.Equal(t, p.SupportsTools(m.ID), m.SupportsTools)
+	}
+}
+
 func TestProvider_ValidateKey(t *testing.T) {
 	hits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +197,28 @@ func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 	require.NotNil(t, usage)
 	assert.Equal(t, 7, usage.InputTokens)
 	assert.Equal(t, 2, usage.OutputTokens)
+}
+
+func TestProvider_ChatCompletion_EscapesModelPathAndKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/models/gemini%2Ftest%20model:streamGenerateContent", r.URL.EscapedPath())
+		assert.Contains(t, r.URL.RawQuery, "key=a%2Bb%2Fc")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"STOP\"}]}\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "a+b/c")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini/test model",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	require.NoError(t, err)
+	for ev := range ch {
+		if ev.Type == provider.EventError {
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
 }
 
 func TestProvider_ChatCompletion_StreamsToolCall(t *testing.T) {

@@ -149,6 +149,26 @@ type wireMessage struct {
 	Name       string         `json:"name,omitempty"`
 }
 
+func (m wireMessage) MarshalJSON() ([]byte, error) {
+	type wireMessageAlias wireMessage
+	if m.Role == string(provider.RoleTool) {
+		return json.Marshal(struct {
+			Role       string         `json:"role"`
+			Content    string         `json:"content"`
+			ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
+			ToolCallID string         `json:"tool_call_id,omitempty"`
+			Name       string         `json:"name,omitempty"`
+		}{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCalls:  m.ToolCalls,
+			ToolCallID: m.ToolCallID,
+			Name:       m.Name,
+		})
+	}
+	return json.Marshal(wireMessageAlias(m))
+}
+
 type wireToolCall struct {
 	ID       string           `json:"id"`
 	Type     string           `json:"type"`

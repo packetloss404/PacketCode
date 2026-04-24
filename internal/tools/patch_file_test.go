@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -198,6 +199,31 @@ func TestPatchFile_PreviewPatchDiff_PathTraversal(t *testing.T) {
 	_, err := tool.PreviewPatchDiff("../escape.txt", []PatchOp{{Search: "x", Replace: "y"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside project root")
+}
+
+func TestPatchFile_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret\n"), 0o644))
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		require.NoError(t, err)
+	}
+
+	tool := NewPatchFileTool(root, NoopBackupManager())
+	body, _ := json.Marshal(map[string]any{
+		"path":    filepath.Join("link", "secret.txt"),
+		"patches": []map[string]string{{"search": "secret", "replace": "changed"}},
+	})
+	res, err := tool.Execute(context.Background(), body)
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	got, err := os.ReadFile(filepath.Join(outside, "secret.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "secret\n", string(got))
 }
 
 func TestPatchFile_PreviewPatchDiff_NonexistentFile(t *testing.T) {

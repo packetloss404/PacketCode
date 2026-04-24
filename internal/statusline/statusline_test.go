@@ -3,7 +3,9 @@ package statusline
 import (
 	"context"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,4 +31,35 @@ func TestRunner_RenderPassesJSONOnStdin(t *testing.T) {
 
 func TestNew_DisabledWithoutCommand(t *testing.T) {
 	assert.Nil(t, New(config.StatusLineConfig{}, t.TempDir()))
+}
+
+func TestRunner_RenderTimeoutMessage(t *testing.T) {
+	command := "sleep 5"
+	if runtime.GOOS == "windows" {
+		command = "Start-Sleep -Seconds 5"
+	}
+	r := New(config.StatusLineConfig{Command: command, TimeoutSec: 1}, t.TempDir())
+	require.NotNil(t, r)
+
+	start := time.Now()
+	_, err := r.Render(context.Background(), Snapshot{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out after 1s")
+	assert.Contains(t, err.Error(), "process tree cancellation requested")
+	assert.Less(t, time.Since(start), 3*time.Second)
+}
+
+func TestRunner_RenderTruncatesStdout(t *testing.T) {
+	command := "yes s | head -c 70000"
+	if runtime.GOOS == "windows" {
+		command = "$out = 's' * 70000; [Console]::Out.Write($out)"
+	}
+	r := New(config.StatusLineConfig{Command: command, TimeoutSec: 5}, t.TempDir())
+	require.NotNil(t, r)
+
+	out, err := r.Render(context.Background(), Snapshot{})
+	require.NoError(t, err)
+	assert.Contains(t, out, "stdout truncated at 64KB")
+	assert.Less(t, len(out), 70*1024)
+	assert.False(t, strings.Contains(out, strings.Repeat("s", 70000)))
 }

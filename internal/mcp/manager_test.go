@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,74 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(dir)
 	}
 	os.Exit(code)
+}
+
+func TestManager_Start_RejectsUnsafeServerName(t *testing.T) {
+	requireStub(t)
+	mgr := NewManager(Config{
+		Servers: []ServerConfig{{
+			Name:       "../evil",
+			Command:    stubBinaryPath,
+			Enabled:    true,
+			TimeoutSec: 2,
+		}},
+		LogDir:     t.TempDir(),
+		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
+	})
+
+	reports := mgr.Start(context.Background())
+	require.Len(t, reports, 1)
+	assert.Equal(t, "failed", reports[0].Status)
+	assert.Contains(t, reports[0].Err, "invalid MCP server name")
+}
+
+func TestManager_Start_RejectsProtocolMismatch(t *testing.T) {
+	requireStub(t)
+	mgr := NewManager(Config{
+		Servers: []ServerConfig{{
+			Name:       "old",
+			Command:    stubBinaryPath,
+			Env:        map[string]string{"PACKETCODE_STUB_PROTOCOL_VERSION": "1900-01-01"},
+			Enabled:    true,
+			TimeoutSec: 2,
+		}},
+		LogDir:     t.TempDir(),
+		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
+	})
+
+	reports := mgr.Start(context.Background())
+	require.Len(t, reports, 1)
+	assert.Equal(t, "failed", reports[0].Status)
+	assert.Contains(t, reports[0].Err, "unsupported protocol version")
+}
+
+func TestClient_DeathReason_PreservesNonZeroExit(t *testing.T) {
+	requireStub(t)
+	mgr := NewManager(Config{
+		Servers: []ServerConfig{{
+			Name:       "crashy",
+			Command:    stubBinaryPath,
+			Env:        map[string]string{"PACKETCODE_STUB_EXIT_AFTER_TOOLS": "7"},
+			Enabled:    true,
+			TimeoutSec: 2,
+		}},
+		LogDir:     t.TempDir(),
+		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
+	})
+	defer mgr.Shutdown(2 * time.Second)
+	reports := mgr.Start(context.Background())
+	require.Len(t, reports, 1)
+	require.Equal(t, "running", reports[0].Status, reports[0].Err)
+	cli, ok := mgr.Client("crashy")
+	require.True(t, ok)
+
+	for i := 0; i < 100 && cli.IsAlive(); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.False(t, cli.IsAlive())
+	reason := cli.DeathReason()
+	require.Error(t, reason)
+	assert.True(t, strings.Contains(reason.Error(), "exit status 7") || strings.Contains(reason.Error(), "ExitStatus 7"), "death reason = %v", reason)
 }
 
 func requireStub(t *testing.T) {
@@ -166,4 +235,3 @@ func TestManager_Shutdown_AllClients(t *testing.T) {
 	}
 	assert.Empty(t, mgr.Clients())
 }
-

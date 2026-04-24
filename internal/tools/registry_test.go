@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -17,10 +18,10 @@ type stubTool struct {
 	description string
 }
 
-func (s *stubTool) Name() string             { return s.name }
-func (s *stubTool) Description() string      { return s.description }
-func (s *stubTool) Schema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
-func (s *stubTool) RequiresApproval() bool   { return s.approval }
+func (s *stubTool) Name() string            { return s.name }
+func (s *stubTool) Description() string     { return s.description }
+func (s *stubTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (s *stubTool) RequiresApproval() bool  { return s.approval }
 func (s *stubTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	return ToolResult{Content: "ok"}, nil
 }
@@ -100,4 +101,37 @@ func TestResolveInRoot_AllowsAbsoluteInsideRoot(t *testing.T) {
 func TestResolveInRoot_EmptyPathRejected(t *testing.T) {
 	_, err := resolveInRoot(t.TempDir(), "")
 	require.Error(t, err)
+}
+
+func TestResolveExistingInRoot_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644))
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		require.NoError(t, err)
+	}
+
+	_, err := resolveExistingInRoot(root, filepath.Join("link", "secret.txt"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside project root")
+}
+
+func TestResolveWritePath_RejectsSymlinkParentEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		require.NoError(t, err)
+	}
+
+	_, err := resolveWritePath(root, filepath.Join("link", "created.txt"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside project root")
 }

@@ -19,9 +19,9 @@ import (
 // That's fine for the MVP: undo only exists within a single packetcode
 // session. Persisting the stack across restarts is post-MVP work.
 type BackupManager struct {
-	root      string // ~/.packetcode/backups/<session-id>
-	mu        sync.Mutex
-	stack     []entry
+	root  string // ~/.packetcode/backups/<session-id>
+	mu    sync.Mutex
+	stack []entry
 }
 
 type entry struct {
@@ -29,6 +29,7 @@ type entry struct {
 	original   string // absolute path of original file
 	backupPath string // absolute path of .bak under root
 	preExisted bool   // false → file was created (undo = delete)
+	mode       os.FileMode
 }
 
 // NewBackupManager constructs a manager rooted at <backupsDir>/<sessionID>.
@@ -75,6 +76,10 @@ func (b *BackupManager) Backup(filePath string) error {
 		return fmt.Errorf("backup: open original: %w", err)
 	}
 	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("backup: stat original: %w", err)
+	}
 
 	dst, err := os.Create(backupPath)
 	if err != nil {
@@ -95,7 +100,32 @@ func (b *BackupManager) Backup(filePath string) error {
 		original:   abs,
 		backupPath: backupPath,
 		preExisted: true,
+		mode:       info.Mode().Perm(),
 	})
+	return nil
+}
+
+// RollbackBackup removes the most recent backup for filePath. Tools call this
+// after a failed mutation so failed writes do not become undoable operations.
+func (b *BackupManager) RollbackBackup(filePath string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	abs, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("backup rollback: resolve path: %w", err)
+	}
+	if len(b.stack) == 0 {
+		return nil
+	}
+	last := b.stack[len(b.stack)-1]
+	if last.original != abs {
+		return nil
+	}
+	b.stack = b.stack[:len(b.stack)-1]
+	if last.backupPath != "" {
+		_ = os.Remove(last.backupPath)
+	}
 	return nil
 }
 
@@ -110,13 +140,13 @@ func (b *BackupManager) Undo() (string, error) {
 		return "", nil
 	}
 	last := b.stack[len(b.stack)-1]
-	b.stack = b.stack[:len(b.stack)-1]
 
 	if !last.preExisted {
 		// Restoring "no file existed" means deleting the now-existing file.
 		if err := os.Remove(last.original); err != nil && !os.IsNotExist(err) {
 			return "", fmt.Errorf("undo: remove created file: %w", err)
 		}
+		b.stack = b.stack[:len(b.stack)-1]
 		return last.original, nil
 	}
 
@@ -125,18 +155,37 @@ func (b *BackupManager) Undo() (string, error) {
 		return "", fmt.Errorf("undo: open backup: %w", err)
 	}
 	defer src.Close()
-	dst, err := os.Create(last.original)
+	dir := filepath.Dir(last.original)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("undo: create parent dir: %w", err)
+	}
+	dst, err := os.CreateTemp(dir, ".undo.*.tmp")
 	if err != nil {
-		return "", fmt.Errorf("undo: rewrite original: %w", err)
+		return "", fmt.Errorf("undo: create temp: %w", err)
+	}
+	tmpPath := dst.Name()
+	if last.mode != 0 {
+		if err := dst.Chmod(last.mode); err != nil {
+			_ = dst.Close()
+			_ = os.Remove(tmpPath)
+			return "", fmt.Errorf("undo: chmod temp: %w", err)
+		}
 	}
 	if _, err := io.Copy(dst, src); err != nil {
 		_ = dst.Close()
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("undo: copy back: %w", err)
 	}
 	if err := dst.Close(); err != nil {
+		_ = os.Remove(tmpPath)
 		return "", err
 	}
+	if err := os.Rename(tmpPath, last.original); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("undo: restore original: %w", err)
+	}
 	// Remove the backup file we just consumed.
+	b.stack = b.stack[:len(b.stack)-1]
 	_ = os.Remove(last.backupPath)
 	return last.original, nil
 }

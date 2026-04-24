@@ -31,9 +31,9 @@ func NewListDirectoryTool(root string) *ListDirectoryTool {
 	return &ListDirectoryTool{Root: root}
 }
 
-func (*ListDirectoryTool) Name() string             { return "list_directory" }
-func (*ListDirectoryTool) RequiresApproval() bool   { return false }
-func (*ListDirectoryTool) Schema() json.RawMessage  { return json.RawMessage(listDirectorySchema) }
+func (*ListDirectoryTool) Name() string            { return "list_directory" }
+func (*ListDirectoryTool) RequiresApproval() bool  { return false }
+func (*ListDirectoryTool) Schema() json.RawMessage { return json.RawMessage(listDirectorySchema) }
 func (*ListDirectoryTool) Description() string {
 	return "List the contents of a directory as a tree. Skips conventional ignore paths (node_modules, .git, etc.)."
 }
@@ -65,7 +65,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, raw json.RawMessage) (T
 		depth = 1
 	}
 
-	abs, err := resolveInRoot(t.Root, p.Path)
+	abs, err := resolveExistingInRoot(t.Root, p.Path)
 	if err != nil {
 		return ToolResult{Content: err.Error(), IsError: true}, nil
 	}

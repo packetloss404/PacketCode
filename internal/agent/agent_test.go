@@ -264,6 +264,10 @@ func TestAgent_UnsupportedModelOmitsNativeTools(t *testing.T) {
 
 	_ = collect(a.Run(context.Background(), "hi"))
 	assert.Empty(t, prov.lastRequest.Tools)
+	require.NotEmpty(t, prov.lastRequest.Messages)
+	assert.Equal(t, provider.RoleSystem, prov.lastRequest.Messages[0].Role)
+	assert.Contains(t, prov.lastRequest.Messages[0].Content, "Native tool calling is unavailable")
+	assert.Contains(t, prov.lastRequest.Messages[0].Content, "scripted-model")
 }
 
 func TestAgent_InvalidToolCallArgumentsError(t *testing.T) {

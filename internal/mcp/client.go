@@ -71,6 +71,7 @@ type Client struct {
 	stdout     io.ReadCloser
 	logFile    *os.File
 	wmu        sync.Mutex // serialises stdin writes
+	deathMu    sync.Mutex
 	nextID     atomic.Int64
 	pending    sync.Map // map[int64]chan rpcResponse
 	dead       atomic.Bool
@@ -164,6 +165,9 @@ func (c *Client) handshake(ctx context.Context, timeout time.Duration, info Clie
 	}
 	if _, ok := ir.Capabilities["tools"]; !ok {
 		return fmt.Errorf("server does not expose tools")
+	}
+	if ir.ProtocolVersion != ProtocolVersion {
+		return fmt.Errorf("unsupported protocol version %q (want %q)", ir.ProtocolVersion, ProtocolVersion)
 	}
 	c.serverInfo = ir.ServerInfo
 
@@ -310,7 +314,7 @@ func (c *Client) readerLoop() {
 		// Peek to discriminate between response (has id, no method) and
 		// request/notification (has method).
 		var probe struct {
-			ID     *json.Number    `json:"id,omitempty"`
+			ID     json.RawMessage `json:"id,omitempty"`
 			Method string          `json:"method,omitempty"`
 			Result json.RawMessage `json:"result,omitempty"`
 			Error  *ErrorObj       `json:"error,omitempty"`
@@ -322,20 +326,16 @@ func (c *Client) readerLoop() {
 			continue
 		}
 		switch {
-		case probe.Method == "" && probe.ID != nil:
+		case probe.Method == "" && len(probe.ID) > 0:
 			// Response to one of our requests.
-			id, err := probe.ID.Int64()
+			id, err := numericID(probe.ID)
 			if err != nil {
 				continue
 			}
 			c.deliverResponse(id, probe.Result, probe.Error)
-		case probe.Method != "" && probe.ID != nil:
+		case probe.Method != "" && len(probe.ID) > 0:
 			// Server-initiated request — refuse politely.
-			id, err := probe.ID.Int64()
-			if err != nil {
-				continue
-			}
-			c.replyMethodNotFound(id)
+			c.replyMethodNotFound(probe.ID)
 		default:
 			// Notification — silently ignore.
 		}
@@ -347,6 +347,14 @@ func (c *Client) readerLoop() {
 	}
 	c.markDead(eofExit(err))
 	c.flushPendingExited()
+}
+
+func numericID(raw json.RawMessage) (int64, error) {
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0, err
+	}
+	return n.Int64()
 }
 
 // eofExit produces a death-reason error that wraps both ErrServerExited
@@ -402,10 +410,10 @@ func (c *Client) deliverResponse(id int64, result json.RawMessage, errObj *Error
 
 // replyMethodNotFound writes a JSON-RPC error response refusing the
 // server's request.
-func (c *Client) replyMethodNotFound(id int64) {
+func (c *Client) replyMethodNotFound(id json.RawMessage) {
 	resp := Response{
 		JSONRPC: JSONRPCVersion,
-		ID:      id,
+		ID:      append(json.RawMessage(nil), id...),
 		Error: &ErrorObj{
 			Code:    ErrCodeMethodNotFound,
 			Message: "method not supported",
@@ -436,6 +444,8 @@ func (c *Client) flushPendingExited() {
 // returns ErrServerExited promptly instead of hanging forever.
 func (c *Client) markDead(err error) {
 	if c.dead.CompareAndSwap(false, true) {
+		c.deathMu.Lock()
+		defer c.deathMu.Unlock()
 		if err == nil {
 			err = ErrServerExited
 		}
@@ -457,6 +467,9 @@ func (c *Client) reaperLoop() {
 		c.markDead(eofExit(io.EOF))
 	} else {
 		c.markDead(eofExit(err))
+		c.deathMu.Lock()
+		c.deadErr.Store(eofExit(err))
+		c.deathMu.Unlock()
 	}
 	c.flushPendingExited()
 }

@@ -74,4 +74,3 @@ func (a *App) renderProvidersTable() string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
-

@@ -14,9 +14,13 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
-const defaultTimeout = 10 * time.Second
+const (
+	defaultTimeout     = 10 * time.Second
+	maxHookOutputBytes = 64 * 1024
+)
 
 type Runner struct {
 	cfg config.HooksConfig
@@ -47,8 +51,12 @@ type ToolResult struct {
 }
 
 type Result struct {
-	Stdout string
-	Stderr string
+	Stdout          string
+	Stderr          string
+	StdoutTruncated bool
+	StderrTruncated bool
+	TimedOut        bool
+	Canceled        bool
 }
 
 func New(cfg config.HooksConfig, cwd string) *Runner {
@@ -98,16 +106,17 @@ func (r *Runner) runCollect(ctx context.Context, cfgs []config.HookConfig, toolN
 			continue
 		}
 		res, err := r.runOne(ctx, cfg, payload)
-		if strings.TrimSpace(res.Stdout) != "" {
-			outputs = append(outputs, strings.TrimSpace(res.Stdout))
+		stdout := strings.TrimSpace(res.Stdout)
+		if res.StdoutTruncated {
+			stdout += "\n...[stdout truncated at 64KB]..."
+		}
+		if stdout != "" {
+			outputs = append(outputs, stdout)
 		}
 		if err != nil {
-			msg := strings.TrimSpace(res.Stderr)
-			if msg == "" {
-				msg = strings.TrimSpace(res.Stdout)
-			}
-			if msg == "" {
-				msg = err.Error()
+			msg := hookErrorMessage(res, err)
+			if res.StderrTruncated {
+				msg += "\n...[stderr truncated at 64KB]..."
 			}
 			if failFast {
 				return strings.Join(outputs, "\n\n"), fmt.Errorf("hook %q failed: %s", cfg.Command, msg)
@@ -134,11 +143,40 @@ func (r *Runner) runOne(ctx context.Context, cfg config.HookConfig, payload any)
 		cmd.Dir = r.cwd
 	}
 	cmd.Stdin = bytes.NewReader(data)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := procrun.NewBoundedBuffer(maxHookOutputBytes)
+	stderr := procrun.NewBoundedBuffer(maxHookOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err = cmd.Run()
-	return Result{Stdout: stdout.String(), Stderr: stderr.String()}, err
+	res := Result{
+		Stdout:          stdout.String(),
+		Stderr:          stderr.String(),
+		StdoutTruncated: stdout.Truncated(),
+		StderrTruncated: stderr.Truncated(),
+		TimedOut:        runCtx.Err() == context.DeadlineExceeded,
+		Canceled:        runCtx.Err() == context.Canceled,
+	}
+	if res.TimedOut {
+		return res, fmt.Errorf("timed out after %s; process tree cancellation requested", timeout)
+	}
+	if res.Canceled {
+		return res, fmt.Errorf("canceled; process tree cancellation requested")
+	}
+	return res, err
+}
+
+func hookErrorMessage(res Result, err error) string {
+	if res.TimedOut || res.Canceled {
+		return err.Error()
+	}
+	msg := strings.TrimSpace(res.Stderr)
+	if msg == "" {
+		msg = strings.TrimSpace(res.Stdout)
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return msg
 }
 
 func matchesTool(matcher, toolName string) bool {
@@ -147,8 +185,12 @@ func matchesTool(matcher, toolName string) bool {
 }
 
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
+	procrun.ConfigureTreeCancel(cmd)
+	return cmd
 }

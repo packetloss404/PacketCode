@@ -27,8 +27,8 @@ import (
 // has already been saved; main() typically reloads it before constructing
 // the App so the in-memory copy matches disk.
 type SetupResult struct {
-	Slug    string
-	Model   string
+	Slug  string
+	Model string
 }
 
 // RunSetup walks the user through configuring at least one provider.

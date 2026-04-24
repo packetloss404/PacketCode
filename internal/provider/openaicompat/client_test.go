@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,6 +97,32 @@ loop:
 		}
 	}
 	assert.True(t, sawCancelErr, "expected EventError wrapping context.Canceled; got events: %+v", events)
+}
+
+func TestChatCompletion_SerializesEmptyToolMessageContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"role":"tool","content":""`)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "sk-test")
+	ch, err := c.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model: "gpt-4.1",
+		Messages: []provider.Message{{
+			Role:       provider.RoleTool,
+			ToolCallID: "call_1",
+			Name:       "empty_tool",
+			Content:    "",
+		}},
+	})
+	require.NoError(t, err)
+	for range ch {
+	}
 }
 
 func TestParseSSE_SuppressesTextOnToolCallFrames(t *testing.T) {

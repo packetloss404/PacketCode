@@ -31,19 +31,21 @@ import (
 // package's scriptedProvider rather than importing it (cross-package
 // test fakes aren't exported by design).
 type scriptedE2EProvider struct {
-	turns    [][]provider.StreamEvent
-	turnIdx  int32
-	blockCh  chan struct{} // when non-nil, ChatCompletion waits on close(blockCh) before returning
+	turns   [][]provider.StreamEvent
+	turnIdx int32
+	blockCh chan struct{} // when non-nil, ChatCompletion waits on close(blockCh) before returning
 }
 
-func (s *scriptedE2EProvider) Name() string                                           { return "scripted" }
-func (s *scriptedE2EProvider) Slug() string                                           { return "scripted" }
-func (s *scriptedE2EProvider) BrandColor() lipgloss.Color                             { return lipgloss.Color("#000000") }
-func (s *scriptedE2EProvider) ValidateKey(_ context.Context, _ string) error          { return nil }
-func (s *scriptedE2EProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
-func (s *scriptedE2EProvider) Pricing(_ string) (float64, float64)                    { return 0, 0 }
-func (s *scriptedE2EProvider) ContextWindow(_ string) int                             { return 100_000 }
-func (s *scriptedE2EProvider) SupportsTools(_ string) bool                            { return true }
+func (s *scriptedE2EProvider) Name() string                                  { return "scripted" }
+func (s *scriptedE2EProvider) Slug() string                                  { return "scripted" }
+func (s *scriptedE2EProvider) BrandColor() lipgloss.Color                    { return lipgloss.Color("#000000") }
+func (s *scriptedE2EProvider) ValidateKey(_ context.Context, _ string) error { return nil }
+func (s *scriptedE2EProvider) ListModels(_ context.Context) ([]provider.Model, error) {
+	return nil, nil
+}
+func (s *scriptedE2EProvider) Pricing(_ string) (float64, float64) { return 0, 0 }
+func (s *scriptedE2EProvider) ContextWindow(_ string) int          { return 100_000 }
+func (s *scriptedE2EProvider) SupportsTools(_ string) bool         { return true }
 
 func (s *scriptedE2EProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	// Block until the test closes blockCh if one is provided. This lets

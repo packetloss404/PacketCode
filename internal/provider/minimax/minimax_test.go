@@ -64,4 +64,13 @@ func TestProvider_ListModels_PassesThroughUpstream(t *testing.T) {
 	require.Len(t, models, 2)
 	assert.Equal(t, "MiniMax-Text-01", models[0].ID)
 	assert.Equal(t, 1_000_000, models[0].ContextWindow)
+	assert.True(t, models[0].SupportsTools)
+	assert.False(t, models[1].SupportsTools)
+	for _, m := range models {
+		in, out := p.Pricing(m.ID)
+		assert.Equal(t, in, m.InputPer1M)
+		assert.Equal(t, out, m.OutputPer1M)
+		assert.Equal(t, p.ContextWindow(m.ID), m.ContextWindow)
+		assert.Equal(t, p.SupportsTools(m.ID), m.SupportsTools)
+	}
 }

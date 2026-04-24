@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // dirName is the name of packetcode's config/state directory under $HOME.
@@ -95,13 +96,38 @@ func ThemePath() (string, error) {
 }
 
 // MCPLogPath returns ~/.packetcode/mcp-<name>.log. The directory is
-// created if missing; the file is not.
+// created if missing; the file is not. Names are deliberately restricted
+// to filename-safe characters so a configured MCP server cannot escape
+// the packetcode state directory via path separators or traversal.
 func MCPLogPath(name string) (string, error) {
 	dir, err := HomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "mcp-"+name+".log"), nil
+	file, err := MCPLogFileName(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, file), nil
+}
+
+// MCPLogFileName returns the sanitized per-server log filename for name.
+func MCPLogFileName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("invalid MCP server name %q", name)
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-':
+		default:
+			return "", fmt.Errorf("invalid MCP server name %q: use only letters, digits, '_' or '-'", name)
+		}
+	}
+	return "mcp-" + name + ".log", nil
 }
 
 // EnsureDir creates the directory (with parents) at 0700 if it does not exist.

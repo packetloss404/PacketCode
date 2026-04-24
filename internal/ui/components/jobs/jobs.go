@@ -148,7 +148,9 @@ func (m Model) View() string {
 }
 
 // renderHeader builds the single-line modal header:
-//   [job:7f3a] state · provider/model · age · $cost
+//
+//	[job:7f3a] state · provider/model · age · $cost
+//
 // Each field is rendered in the theme's secondary-text style so the
 // ID stays the visual anchor.
 func (m Model) renderHeader() string {

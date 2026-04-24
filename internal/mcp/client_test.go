@@ -21,9 +21,9 @@ var stubInfo = ClientInfo{Name: "packetcode-test", Version: "0.0.0"}
 func makeBasicStub(t *testing.T, name string, tools []ServerTool, extra map[string]StubHandler) *StubServer {
 	t.Helper()
 	handlers := map[string]StubHandler{
-		"initialize":                  DefaultInitializeHandler(name),
-		"notifications/initialized":   func(_ json.RawMessage) (any, *ErrorObj) { return nil, nil },
-		"tools/list":                  DefaultToolsListHandler(tools),
+		"initialize":                DefaultInitializeHandler(name),
+		"notifications/initialized": func(_ json.RawMessage) (any, *ErrorObj) { return nil, nil },
+		"tools/list":                DefaultToolsListHandler(tools),
 	}
 	for k, v := range extra {
 		handlers[k] = v
@@ -49,6 +49,24 @@ func TestClient_InitializeHandshake(t *testing.T) {
 	assert.Equal(t, "say hi", tools[0].Description)
 	assert.Equal(t, "stub", cli.ServerInfo().Name)
 	assert.True(t, cli.IsAlive())
+}
+
+func TestClient_InitializeRejectsProtocolMismatch(t *testing.T) {
+	stub := NewStubServer(map[string]StubHandler{
+		"initialize": func(_ json.RawMessage) (any, *ErrorObj) {
+			return map[string]any{
+				"protocolVersion": "1900-01-01",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "old", "version": "0.0.1"},
+			}, nil
+		},
+	})
+	defer stub.Stop()
+
+	cli, err := NewClientWithStub("old", stub, stubInfo, 5)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported protocol version")
+	assert.Nil(t, cli)
 }
 
 // TestClient_InitializeTimeout asserts that a server that never answers
@@ -230,30 +248,55 @@ func TestClient_StdoutEOF_UnblocksPending(t *testing.T) {
 // TestClient_ServerInitiatedRequest_RespondsMethodNotFound asserts the
 // reader replies to a server-initiated request with method-not-found.
 func TestClient_ServerInitiatedRequest_RespondsMethodNotFound(t *testing.T) {
-	captured := make(chan json.RawMessage, 1)
 	stub := makeBasicStub(t, "stub", []ServerTool{}, nil)
-	// Override the handler map by registering a bogus method name; we
-	// actually capture via a wrapper around the stub's stdoutReader by
-	// reading the line ourselves before the stub forwards it. Easier:
-	// register a "client_reply" handler that captures any message that
-	// happens to look like a response.
+	captured := stub.CaptureClientResponses(1)
 	defer stub.Stop()
 
 	cli, err := NewClientWithStub("stub", stub, stubInfo, 5)
 	require.NoError(t, err)
 	defer cli.Close(time.Second)
 
-	// The simplest way to assert the client replies is to install an
-	// extra goroutine in the stub that captures *all* lines from the
-	// client. Since StubServer.loop already drops "response from client"
-	// lines, we instead just send the request and assert client stays
-	// alive afterwards (i.e. doesn't crash on the unexpected request).
 	require.NoError(t, stub.SendRequest(99, "sampling/createMessage", map[string]any{}))
 
-	// Give the reader a moment to respond.
-	time.Sleep(100 * time.Millisecond)
-	assert.True(t, cli.IsAlive())
-	_ = captured
+	select {
+	case raw := <-captured:
+		var resp struct {
+			ID    json.RawMessage `json:"id"`
+			Error *ErrorObj       `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &resp))
+		assert.JSONEq(t, `99`, string(resp.ID))
+		require.NotNil(t, resp.Error)
+		assert.Equal(t, ErrCodeMethodNotFound, resp.Error.Code)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for method-not-found response")
+	}
+}
+
+func TestClient_ServerInitiatedRequest_StringIDRespondsMethodNotFound(t *testing.T) {
+	stub := makeBasicStub(t, "stub", []ServerTool{}, nil)
+	captured := stub.CaptureClientResponses(1)
+	defer stub.Stop()
+
+	cli, err := NewClientWithStub("stub", stub, stubInfo, 5)
+	require.NoError(t, err)
+	defer cli.Close(time.Second)
+
+	require.NoError(t, stub.SendRequestWithStringID("server-1", "sampling/createMessage", map[string]any{}))
+
+	select {
+	case raw := <-captured:
+		var resp struct {
+			ID    json.RawMessage `json:"id"`
+			Error *ErrorObj       `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &resp))
+		assert.JSONEq(t, `"server-1"`, string(resp.ID))
+		require.NotNil(t, resp.Error)
+		assert.Equal(t, ErrCodeMethodNotFound, resp.Error.Code)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for method-not-found response")
+	}
 }
 
 // TestClient_ServerNotification_Ignored sends a notification from the

@@ -35,9 +35,9 @@ func NewWithBaseURL(baseURL, apiKey string) *Provider {
 	return &Provider{client: openaicompat.NewClient(baseURL, apiKey)}
 }
 
-func (p *Provider) Name() string                { return displayName }
-func (p *Provider) Slug() string                { return slug }
-func (p *Provider) BrandColor() lipgloss.Color  { return brandColor }
+func (p *Provider) Name() string               { return displayName }
+func (p *Provider) Slug() string               { return slug }
+func (p *Provider) BrandColor() lipgloss.Color { return brandColor }
 
 func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	return p.client.ValidateKey(ctx, apiKey)
@@ -54,14 +54,14 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 	}
 	out := make([]provider.Model, 0, len(raw))
 	for _, m := range raw {
-		entry := pricingTable[m.ID]
+		in, outRate := p.Pricing(m.ID)
 		out = append(out, provider.Model{
 			ID:            m.ID,
 			DisplayName:   m.ID,
-			ContextWindow: entry.ContextWindow,
-			SupportsTools: true,
-			InputPer1M:    entry.Input,
-			OutputPer1M:   entry.Output,
+			ContextWindow: p.ContextWindow(m.ID),
+			SupportsTools: p.SupportsTools(m.ID),
+			InputPer1M:    in,
+			OutputPer1M:   outRate,
 		})
 	}
 	return out, nil
@@ -70,14 +70,14 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 func (p *Provider) fallback() []provider.Model {
 	out := make([]provider.Model, 0, len(fallbackModels))
 	for _, id := range fallbackModels {
-		entry := pricingTable[id]
+		in, outRate := p.Pricing(id)
 		out = append(out, provider.Model{
 			ID:            id,
 			DisplayName:   id,
-			ContextWindow: entry.ContextWindow,
-			SupportsTools: true,
-			InputPer1M:    entry.Input,
-			OutputPer1M:   entry.Output,
+			ContextWindow: p.ContextWindow(id),
+			SupportsTools: p.SupportsTools(id),
+			InputPer1M:    in,
+			OutputPer1M:   outRate,
 		})
 	}
 	return out
@@ -101,7 +101,9 @@ func (p *Provider) ContextWindow(modelID string) int {
 	return 245_000
 }
 
-// SupportsTools — MiniMax-Text-01 supports function calling natively.
-// Older abab models did not; we conservatively report true and let the
-// agent loop surface upstream errors if a model rejects tool use.
-func (p *Provider) SupportsTools(modelID string) bool { return true }
+func (p *Provider) SupportsTools(modelID string) bool {
+	if entry, ok := pricingTable[modelID]; ok {
+		return entry.SupportsTools
+	}
+	return true
+}

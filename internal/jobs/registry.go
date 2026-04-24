@@ -138,10 +138,10 @@ type pathLockTool struct {
 	paramKey string
 }
 
-func (p *pathLockTool) Name() string             { return p.inner.Name() }
-func (p *pathLockTool) Description() string      { return p.inner.Description() }
-func (p *pathLockTool) Schema() json.RawMessage  { return p.inner.Schema() }
-func (p *pathLockTool) RequiresApproval() bool   { return p.inner.RequiresApproval() }
+func (p *pathLockTool) Name() string            { return p.inner.Name() }
+func (p *pathLockTool) Description() string     { return p.inner.Description() }
+func (p *pathLockTool) Schema() json.RawMessage { return p.inner.Schema() }
+func (p *pathLockTool) RequiresApproval() bool  { return p.inner.RequiresApproval() }
 
 func (p *pathLockTool) Execute(ctx context.Context, raw json.RawMessage) (tools.ToolResult, error) {
 	abs := p.extractPath(raw)

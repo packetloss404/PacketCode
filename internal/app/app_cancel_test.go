@@ -29,14 +29,14 @@ type hangingProvider struct {
 	started int32
 }
 
-func (h *hangingProvider) Name() string                                          { return "hang" }
-func (h *hangingProvider) Slug() string                                          { return "hang" }
-func (h *hangingProvider) BrandColor() lipgloss.Color                            { return lipgloss.Color("#000000") }
-func (h *hangingProvider) ValidateKey(context.Context, string) error             { return nil }
-func (h *hangingProvider) ListModels(context.Context) ([]provider.Model, error)  { return nil, nil }
-func (h *hangingProvider) Pricing(string) (float64, float64)                     { return 0, 0 }
-func (h *hangingProvider) ContextWindow(string) int                              { return 100_000 }
-func (h *hangingProvider) SupportsTools(string) bool                             { return true }
+func (h *hangingProvider) Name() string                                         { return "hang" }
+func (h *hangingProvider) Slug() string                                         { return "hang" }
+func (h *hangingProvider) BrandColor() lipgloss.Color                           { return lipgloss.Color("#000000") }
+func (h *hangingProvider) ValidateKey(context.Context, string) error            { return nil }
+func (h *hangingProvider) ListModels(context.Context) ([]provider.Model, error) { return nil, nil }
+func (h *hangingProvider) Pricing(string) (float64, float64)                    { return 0, 0 }
+func (h *hangingProvider) ContextWindow(string) int                             { return 100_000 }
+func (h *hangingProvider) SupportsTools(string) bool                            { return true }
 
 func (h *hangingProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	atomic.AddInt32(&h.started, 1)
@@ -57,14 +57,14 @@ type approvalProvider struct {
 	turnIdx int32
 }
 
-func (approvalProvider) Name() string                                          { return "appr" }
-func (approvalProvider) Slug() string                                          { return "appr" }
-func (approvalProvider) BrandColor() lipgloss.Color                            { return lipgloss.Color("#000000") }
-func (approvalProvider) ValidateKey(context.Context, string) error             { return nil }
-func (approvalProvider) ListModels(context.Context) ([]provider.Model, error)  { return nil, nil }
-func (approvalProvider) Pricing(string) (float64, float64)                     { return 0, 0 }
-func (approvalProvider) ContextWindow(string) int                              { return 100_000 }
-func (approvalProvider) SupportsTools(string) bool                             { return true }
+func (approvalProvider) Name() string                                         { return "appr" }
+func (approvalProvider) Slug() string                                         { return "appr" }
+func (approvalProvider) BrandColor() lipgloss.Color                           { return lipgloss.Color("#000000") }
+func (approvalProvider) ValidateKey(context.Context, string) error            { return nil }
+func (approvalProvider) ListModels(context.Context) ([]provider.Model, error) { return nil, nil }
+func (approvalProvider) Pricing(string) (float64, float64)                    { return 0, 0 }
+func (approvalProvider) ContextWindow(string) int                             { return 100_000 }
+func (approvalProvider) SupportsTools(string) bool                            { return true }
 
 func (a *approvalProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	atomic.AddInt32(&a.turnIdx, 1)
@@ -85,10 +85,10 @@ func (a *approvalProvider) ChatCompletion(ctx context.Context, _ provider.ChatRe
 // modal's Hide on cancel without the tool ever running.
 type fakeWriteTool struct{}
 
-func (fakeWriteTool) Name() string             { return "fake_write" }
-func (fakeWriteTool) Description() string      { return "requires approval, never runs" }
-func (fakeWriteTool) Schema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
-func (fakeWriteTool) RequiresApproval() bool   { return true }
+func (fakeWriteTool) Name() string            { return "fake_write" }
+func (fakeWriteTool) Description() string     { return "requires approval, never runs" }
+func (fakeWriteTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (fakeWriteTool) RequiresApproval() bool  { return true }
 func (fakeWriteTool) Execute(ctx context.Context, _ json.RawMessage) (tools.ToolResult, error) {
 	<-ctx.Done()
 	return tools.ToolResult{Content: "cancelled", IsError: true}, nil

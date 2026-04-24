@@ -131,4 +131,3 @@ func (a *App) handleProviderKeyValidated(msg providerKeyValidatedMsg) (tea.Model
 	a.prompt.Hide()
 	return a, a.openProviderPicker()
 }
-

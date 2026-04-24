@@ -96,6 +96,9 @@ func (m *Manager) Current() *Session {
 
 // Load reads a session by ID and sets it as current.
 func (m *Manager) Load(id string) (*Session, error) {
+	if err := validateSessionID(id); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(m.dir, id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -234,6 +237,9 @@ func (m *Manager) List() ([]Summary, error) {
 // (BackupManager.Cleanup) since the session package doesn't know the
 // backup dir layout.
 func (m *Manager) Delete(id string) error {
+	if err := validateSessionID(id); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(m.dir, id+".json")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -255,6 +261,13 @@ func (m *Manager) Rename(name string) error {
 	m.current.Name = sanitizeName(name)
 	m.mu.Unlock()
 	return m.Save()
+}
+
+func validateSessionID(id string) error {
+	if id == "" || id == "." || id == ".." || filepath.IsAbs(id) || filepath.Clean(id) != id || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("invalid session id")
+	}
+	return nil
 }
 
 // sanitizeName converts a string to a session-name-safe form: trimmed,

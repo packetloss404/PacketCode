@@ -289,9 +289,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 
 	// Register MCP tools AFTER every native tool + spawn_agent so the
 	// Agent's initial tool enumeration (on its first turn) sees them.
-	for _, c := range mcpMgr.Clients() {
-		for _, st := range c.Tools() {
-			toolReg.Register(mcp.NewMcpTool(c, st))
+	for _, r := range mcp.RegisterTools(toolReg, mcpMgr.Clients()) {
+		if r.Status == "skipped" {
+			fmt.Fprintf(os.Stderr, "packetcode: mcp %s.%s skipped alias %s — %s\n", r.Server, r.Tool, r.Alias, r.Err)
 		}
 	}
 

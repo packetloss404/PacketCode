@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 const executeCommandSchema = `{
@@ -23,6 +25,7 @@ const executeCommandSchema = `{
 const (
 	defaultExecTimeout = 60 * time.Second
 	maxExecTimeout     = 10 * time.Minute
+	maxExecOutputBytes = 100 * 1024
 )
 
 type ExecuteCommandTool struct {
@@ -33,9 +36,9 @@ func NewExecuteCommandTool(root string) *ExecuteCommandTool {
 	return &ExecuteCommandTool{Root: root}
 }
 
-func (*ExecuteCommandTool) Name() string             { return "execute_command" }
-func (*ExecuteCommandTool) RequiresApproval() bool   { return true }
-func (*ExecuteCommandTool) Schema() json.RawMessage  { return json.RawMessage(executeCommandSchema) }
+func (*ExecuteCommandTool) Name() string            { return "execute_command" }
+func (*ExecuteCommandTool) RequiresApproval() bool  { return true }
+func (*ExecuteCommandTool) Schema() json.RawMessage { return json.RawMessage(executeCommandSchema) }
 func (*ExecuteCommandTool) Description() string {
 	return "Execute a shell command and capture stdout+stderr. Requires user approval. Output is truncated past 100KB."
 }
@@ -57,7 +60,7 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, raw json.RawMessage) (
 
 	cwd := t.Root
 	if p.CWD != "" {
-		resolved, err := resolveInRoot(t.Root, p.CWD)
+		resolved, err := resolveExistingInRoot(t.Root, p.CWD)
 		if err != nil {
 			return ToolResult{Content: err.Error(), IsError: true}, nil
 		}
@@ -77,7 +80,10 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, raw json.RawMessage) (
 	cmd := buildShellCommand(cmdCtx, p.Command)
 	cmd.Dir = cwd
 
-	out, runErr := cmd.CombinedOutput()
+	out := procrun.NewBoundedBuffer(maxExecOutputBytes)
+	cmd.Stdout = out
+	cmd.Stderr = out
+	runErr := cmd.Run()
 	exitCode := 0
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -87,23 +93,19 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, raw json.RawMessage) (
 		}
 	}
 
-	const maxOutBytes = 100 * 1024
-	truncated := false
-	if len(out) > maxOutBytes {
-		out = out[:maxOutBytes]
-		truncated = true
-	}
-
 	timedOut := cmdCtx.Err() == context.DeadlineExceeded
+	canceled := cmdCtx.Err() == context.Canceled
+	truncated := out.Truncated()
+	outBytes := out.Bytes()
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "$ %s\n", p.Command)
 	if cwd != t.Root {
 		fmt.Fprintf(&b, "(cwd: %s)\n", cwd)
 	}
-	if len(out) > 0 {
-		b.Write(out)
-		if !strings.HasSuffix(string(out), "\n") {
+	if len(outBytes) > 0 {
+		b.Write(outBytes)
+		if !strings.HasSuffix(string(outBytes), "\n") {
 			b.WriteByte('\n')
 		}
 	}
@@ -112,20 +114,23 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, raw json.RawMessage) (
 	}
 	switch {
 	case timedOut:
-		fmt.Fprintf(&b, "[timed out after %s]\n", timeout)
+		fmt.Fprintf(&b, "[timed out after %s; process tree cancellation requested]\n", timeout)
+	case canceled:
+		b.WriteString("[canceled; process tree cancellation requested]\n")
 	case exitCode == 0:
 		b.WriteString("[exit 0]")
 	default:
 		fmt.Fprintf(&b, "[exit %d]", exitCode)
 	}
 
-	isError := timedOut || exitCode != 0
+	isError := timedOut || canceled || exitCode != 0
 	return ToolResult{
 		Content: b.String(),
 		IsError: isError,
 		Metadata: map[string]any{
 			"exit_code": exitCode,
 			"timed_out": timedOut,
+			"canceled":  canceled,
 			"truncated": truncated,
 			"cwd":       cwd,
 		},
@@ -136,8 +141,12 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, raw json.RawMessage) (
 // the shell rather than direct argv splitting so the LLM can use pipes,
 // redirects, env-var expansion, etc. — closer to what a developer would type.
 func buildShellCommand(ctx context.Context, command string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "cmd", "/C", command)
+		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
+	procrun.ConfigureTreeCancel(cmd)
+	return cmd
 }

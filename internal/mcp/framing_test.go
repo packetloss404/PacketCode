@@ -68,7 +68,7 @@ func TestFraming_LargeMessage(t *testing.T) {
 
 	var got Request
 	require.NoError(t, json.Unmarshal(scanner.Bytes(), &got))
-	assert.Equal(t, int64(42), got.ID)
+	assert.JSONEq(t, `42`, string(got.ID))
 	assert.Equal(t, "huge", got.Method)
 	var params struct {
 		Blob string `json:"blob"`

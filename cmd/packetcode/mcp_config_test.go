@@ -39,7 +39,7 @@ func TestMCPConfigFlatten_SortedByName(t *testing.T) {
 func TestMCPConfigFlatten_DefaultsTimeout(t *testing.T) {
 	cfg := &config.Config{
 		MCP: map[string]config.MCPServerConfig{
-			"zero":    {Command: "a"},
+			"zero":     {Command: "a"},
 			"explicit": {Command: "b", TimeoutSec: 42},
 		},
 	}

@@ -25,9 +25,9 @@ type ReadFileTool struct {
 
 func NewReadFileTool(root string) *ReadFileTool { return &ReadFileTool{Root: root} }
 
-func (*ReadFileTool) Name() string             { return "read_file" }
-func (*ReadFileTool) RequiresApproval() bool   { return false }
-func (*ReadFileTool) Schema() json.RawMessage  { return json.RawMessage(readFileSchema) }
+func (*ReadFileTool) Name() string            { return "read_file" }
+func (*ReadFileTool) RequiresApproval() bool  { return false }
+func (*ReadFileTool) Schema() json.RawMessage { return json.RawMessage(readFileSchema) }
 func (*ReadFileTool) Description() string {
 	return "Read the contents of a file from the project. Optional start_line/end_line restrict the slice returned. Output is prefixed with line numbers."
 }
@@ -43,7 +43,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolRe
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return ToolResult{}, fmt.Errorf("read_file: parse params: %w", err)
 	}
-	abs, err := resolveInRoot(t.Root, p.Path)
+	abs, err := resolveExistingInRoot(t.Root, p.Path)
 	if err != nil {
 		return ToolResult{Content: err.Error(), IsError: true}, nil
 	}

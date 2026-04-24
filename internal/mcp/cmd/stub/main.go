@@ -10,6 +10,8 @@
 //   - PACKETCODE_STUB_NO_TOOLS=1 — omit the `tools` capability.
 //   - PACKETCODE_STUB_TOOLS=N — number of fake tools to expose (default 1).
 //   - PACKETCODE_STUB_NAME=<name> — serverInfo.name (default "stub").
+//   - PACKETCODE_STUB_PROTOCOL_VERSION=<version> — initialize protocol version.
+//   - PACKETCODE_STUB_EXIT_AFTER_TOOLS=<code> — exit after replying tools/list.
 package main
 
 import (
@@ -37,7 +39,7 @@ type errObj struct {
 
 type resp struct {
 	JSONRPC string  `json:"jsonrpc"`
-	ID      int64   `json:"id"`
+	ID      any     `json:"id"`
 	Result  any     `json:"result,omitempty"`
 	Error   *errObj `json:"error,omitempty"`
 }
@@ -58,6 +60,11 @@ func main() {
 	if name == "" {
 		name = "stub"
 	}
+	proto := os.Getenv("PACKETCODE_STUB_PROTOCOL_VERSION")
+	if proto == "" {
+		proto = protocolVersion
+	}
+	exitAfterTools, _ := strconv.Atoi(os.Getenv("PACKETCODE_STUB_EXIT_AFTER_TOOLS"))
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -92,7 +99,7 @@ func main() {
 				JSONRPC: "2.0",
 				ID:      id,
 				Result: map[string]any{
-					"protocolVersion": protocolVersion,
+					"protocolVersion": proto,
 					"capabilities":    caps,
 					"serverInfo": map[string]any{
 						"name":    name,
@@ -117,6 +124,9 @@ func main() {
 				ID:      id,
 				Result:  map[string]any{"tools": tools},
 			})
+			if exitAfterTools != 0 {
+				os.Exit(exitAfterTools)
+			}
 		case "tools/call":
 			writeResp(w, resp{
 				JSONRPC: "2.0",

@@ -24,8 +24,8 @@ import (
 // package uses in its tests; duplicated here so we don't import a test
 // file across packages.
 type scriptedProvider struct {
-	turns   [][]provider.StreamEvent
-	turnIdx int32
+	turns    [][]provider.StreamEvent
+	turnIdx  int32
 	holdOpen bool // when true, ignore turns and stream until ctx cancels
 	pricing  func(string) (float64, float64)
 }
@@ -41,7 +41,7 @@ func (s *scriptedProvider) Pricing(model string) (float64, float64) {
 	}
 	return 1.0, 5.0
 }
-func (s *scriptedProvider) ContextWindow(string) int { return 100_000 }
+func (s *scriptedProvider) ContextWindow(string) int  { return 100_000 }
 func (s *scriptedProvider) SupportsTools(string) bool { return true }
 
 func (s *scriptedProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
@@ -118,10 +118,10 @@ type noopTool struct {
 	executor func(ctx context.Context, raw json.RawMessage) (tools.ToolResult, error)
 }
 
-func (n *noopTool) Name() string             { return n.name }
-func (n *noopTool) Description() string      { return "test tool " + n.name }
-func (n *noopTool) Schema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
-func (n *noopTool) RequiresApproval() bool   { return n.approval }
+func (n *noopTool) Name() string            { return n.name }
+func (n *noopTool) Description() string     { return "test tool " + n.name }
+func (n *noopTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (n *noopTool) RequiresApproval() bool  { return n.approval }
 func (n *noopTool) Execute(ctx context.Context, raw json.RawMessage) (tools.ToolResult, error) {
 	atomic.AddInt32(&n.executed, 1)
 	if n.executor != nil {

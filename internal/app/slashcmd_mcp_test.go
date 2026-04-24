@@ -97,6 +97,13 @@ func TestRenderMCPTable_MixedStatuses(t *testing.T) {
 	}
 }
 
+func TestMCPReportExists_FailedServer(t *testing.T) {
+	reports := []mcp.StartupReport{{Name: "broken", Status: "failed", Err: "start: no such file"}}
+	if !mcpReportExists(reports, "broken") {
+		t.Fatalf("failed configured server should be accepted for /mcp logs lookup")
+	}
+}
+
 // TestTailMCPLog_MissingFile asserts a helpful error when the log file
 // doesn't exist. We isolate HOME so tailMCPLog resolves to a temp dir
 // where the file definitely doesn't exist.

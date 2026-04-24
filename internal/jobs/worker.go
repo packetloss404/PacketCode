@@ -263,4 +263,3 @@ func summarise(text string) string {
 	out := strings.TrimRight(t[:cut], " \t\n")
 	return out + "…"
 }
-

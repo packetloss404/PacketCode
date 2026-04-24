@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,6 +62,36 @@ func TestWriteFile_PathValidation(t *testing.T) {
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"path":"../escape.txt","content":"x"}`))
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
+}
+
+func TestWriteFile_RejectsSymlinkParentEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		require.NoError(t, err)
+	}
+
+	tool := NewWriteFileTool(root, nil)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"path":"link/escape.txt","content":"x"}`))
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	_, err = os.Stat(filepath.Join(outside, "escape.txt"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestWriteFile_RejectsFileAsParent(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "not-dir"), []byte("x"), 0o644))
+	tool := NewWriteFileTool(root, nil)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"path":"not-dir/child.txt","content":"x"}`))
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content, "parent is not a directory")
 }
 
 func TestWriteFile_PreviewDiff_NewFile(t *testing.T) {

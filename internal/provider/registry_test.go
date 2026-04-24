@@ -20,11 +20,13 @@ type fakeProvider struct {
 	listModelErr error
 }
 
-func (f *fakeProvider) Name() string                                                    { return f.name }
-func (f *fakeProvider) Slug() string                                                    { return f.slug }
-func (f *fakeProvider) BrandColor() lipgloss.Color                                      { return lipgloss.Color("#000000") }
-func (f *fakeProvider) ValidateKey(ctx context.Context, apiKey string) error            { return f.validateErr }
-func (f *fakeProvider) ListModels(ctx context.Context) ([]Model, error)                 { return f.models, f.listModelErr }
+func (f *fakeProvider) Name() string                                         { return f.name }
+func (f *fakeProvider) Slug() string                                         { return f.slug }
+func (f *fakeProvider) BrandColor() lipgloss.Color                           { return lipgloss.Color("#000000") }
+func (f *fakeProvider) ValidateKey(ctx context.Context, apiKey string) error { return f.validateErr }
+func (f *fakeProvider) ListModels(ctx context.Context) ([]Model, error) {
+	return f.models, f.listModelErr
+}
 func (f *fakeProvider) ChatCompletion(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
 	return nil, nil
 }

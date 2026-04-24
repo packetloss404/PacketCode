@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,11 +84,11 @@ func TestManager_Delete(t *testing.T) {
 
 func TestSanitizeName(t *testing.T) {
 	tests := map[string]string{
-		"":                              "untitled",
-		"   ":                           "untitled",
-		"Refactor Auth Middleware!":     "refactor-auth-middleware",
-		"path/with/slashes":             "pathwithslashes",
-		"already-slug-form":             "already-slug-form",
+		"":                          "untitled",
+		"   ":                       "untitled",
+		"Refactor Auth Middleware!": "refactor-auth-middleware",
+		"path/with/slashes":         "pathwithslashes",
+		"already-slug-form":         "already-slug-form",
 	}
 	for input, want := range tests {
 		assert.Equal(t, want, sanitizeName(input), input)
@@ -179,4 +180,85 @@ func TestBackupManager_Cleanup(t *testing.T) {
 
 	_, err := os.Stat(filepath.Join(backupsDir, "sess"))
 	assert.True(t, os.IsNotExist(err))
+}
+
+func TestBackupManager_UndoPopsOnlyAfterSuccessfulDelete(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "fresh")
+
+	bk := NewBackupManager(t.TempDir(), "session-x")
+	require.NoError(t, bk.Backup(target))
+	require.NoError(t, os.Mkdir(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "child.txt"), []byte("x"), 0o644))
+
+	_, err := bk.Undo()
+	require.Error(t, err)
+	assert.Equal(t, 1, bk.Depth())
+
+	require.NoError(t, os.Remove(filepath.Join(target, "child.txt")))
+	restored, err := bk.Undo()
+	require.NoError(t, err)
+	assert.Equal(t, target, restored)
+	assert.Equal(t, 0, bk.Depth())
+}
+
+func TestBackupManager_RollbackBackupRemovesPendingEntry(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "main.go")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	bk := NewBackupManager(t.TempDir(), "session-rollback")
+	require.NoError(t, bk.Backup(target))
+	assert.Equal(t, 1, bk.Depth())
+	require.NoError(t, bk.RollbackBackup(target))
+	assert.Equal(t, 0, bk.Depth())
+
+	restored, err := bk.Undo()
+	require.NoError(t, err)
+	assert.Empty(t, restored)
+}
+
+func TestBackupManager_RollbackBackupIgnoresNonLastEntry(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	b := filepath.Join(root, "b.txt")
+	require.NoError(t, os.WriteFile(a, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(b, []byte("b"), 0o644))
+
+	bk := NewBackupManager(t.TempDir(), "session-rollback-order")
+	require.NoError(t, bk.Backup(a))
+	require.NoError(t, bk.Backup(b))
+	require.NoError(t, bk.RollbackBackup(a))
+	assert.Equal(t, 2, bk.Depth())
+}
+
+func TestBackupManager_UndoRestoresMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not reliable on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "script.sh")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+
+	bk := NewBackupManager(t.TempDir(), "session-mode")
+	require.NoError(t, bk.Backup(target))
+	require.NoError(t, os.WriteFile(target, []byte("new"), 0o600))
+
+	_, err := bk.Undo()
+	require.NoError(t, err)
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+}
+
+func TestManager_LoadRejectsTraversalID(t *testing.T) {
+	m := NewManager(t.TempDir())
+	_, err := m.Load(filepath.Join("..", "escape"))
+	require.Error(t, err)
+}
+
+func TestManager_DeleteRejectsTraversalID(t *testing.T) {
+	m := NewManager(t.TempDir())
+	err := m.Delete(filepath.Join("..", "escape"))
+	require.Error(t, err)
 }

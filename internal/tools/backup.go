@@ -10,6 +10,16 @@ type BackupManager interface {
 	Backup(filePath string) error
 }
 
+type rollbackBackupManager interface {
+	RollbackBackup(filePath string) error
+}
+
+func rollbackBackup(backups BackupManager, filePath string) {
+	if rb, ok := backups.(rollbackBackupManager); ok {
+		_ = rb.RollbackBackup(filePath)
+	}
+}
+
 // noopBackup is a BackupManager that does nothing — useful in tests and
 // in code paths where backups are explicitly unwanted.
 type noopBackup struct{}

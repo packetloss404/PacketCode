@@ -25,6 +25,16 @@ type McpTool struct {
 	schema     json.RawMessage
 }
 
+// ToolRegistrationReport records whether an MCP tool alias was added to
+// the global tool registry or skipped because it would collide.
+type ToolRegistrationReport struct {
+	Server string
+	Tool   string
+	Alias  string
+	Status string
+	Err    string
+}
+
 // NewMcpTool constructs an adapter for the given (client, serverTool)
 // pair. The exposed tool name is provider-safe; Execute still forwards
 // calls to the original MCP tool name.
@@ -43,6 +53,34 @@ func NewMcpTool(c *Client, t ServerTool) *McpTool {
 		desc:       t.Description,
 		schema:     schema,
 	}
+}
+
+// RegisterTools adds every tool from clients to reg, skipping aliases
+// that already exist. This prevents MCP aliases from silently replacing
+// built-ins or other MCP tools after sanitization.
+func RegisterTools(reg *tools.Registry, clients []*Client) []ToolRegistrationReport {
+	if reg == nil {
+		return nil
+	}
+	var reports []ToolRegistrationReport
+	for _, c := range clients {
+		if c == nil {
+			continue
+		}
+		for _, st := range c.Tools() {
+			mt := NewMcpTool(c, st)
+			report := ToolRegistrationReport{Server: c.Name(), Tool: st.Name, Alias: mt.Name(), Status: "registered"}
+			if _, exists := reg.Get(mt.Name()); exists {
+				report.Status = "skipped"
+				report.Err = "tool alias already registered"
+				reports = append(reports, report)
+				continue
+			}
+			reg.Register(mt)
+			reports = append(reports, report)
+		}
+	}
+	return reports
 }
 
 // Name returns the provider-safe public name for this MCP tool.
