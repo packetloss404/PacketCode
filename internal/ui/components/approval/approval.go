@@ -54,7 +54,7 @@ func (m *Model) Show(tool tools.Tool, call provider.ToolCall) {
 	m.result = Pending
 }
 
-func (m *Model) Hide() { m.visible = false }
+func (m *Model) Hide()         { m.visible = false }
 func (m *Model) Visible() bool { return m.visible }
 
 func (m *Model) SetWidth(w int) { m.width = w }
@@ -92,7 +92,11 @@ func (m Model) View() string {
 	if width <= 0 {
 		width = 80
 	}
-	header := theme.LabelBadge(m.tool.Name(), theme.Warning)
+	displayName := m.tool.Name()
+	if m.toolCall.Name != "" && m.toolCall.Name != displayName {
+		displayName = m.toolCall.Name
+	}
+	header := theme.LabelBadge(displayName, theme.Warning)
 	var body string
 	if r, ok := renderers[m.tool.Name()]; ok {
 		body = r(RenderContext{

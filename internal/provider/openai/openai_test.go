@@ -98,14 +98,21 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 	for i, m := range models {
 		ids[i] = m.ID
 	}
-	assert.ElementsMatch(t, []string{"gpt-5.5", "gpt-4.1", "gpt-4.1-mini", "o3"}, ids)
+	// Upstream chat models plus any pricingTable seed the catalog omits.
+	assert.Subset(t, ids, []string{"gpt-5.5", "gpt-4.1", "gpt-4.1-mini", "o3"})
+	for id := range pricingTable {
+		assert.Contains(t, ids, id, "pricingTable entry %q must appear", id)
+	}
+	assert.NotContains(t, ids, "text-embedding-3-small")
+	assert.NotContains(t, ids, "tts-1")
 	assert.Equal(t, DefaultModel, models[0].ID)
 	assert.Equal(t, 400_000, models[0].ContextWindow)
 }
 
 // TestProvider_ListModels_ExcludesProFamily confirms the "-pro" filter
 // that hides Responses-API-only models (o1-pro, o3-pro, gpt-5.5-pro).
-// Plain (non-pro) variants and their dated snapshots still pass.
+// Plain (non-pro) variants and their dated snapshots still pass. The
+// pricingTable seed still applies, so baseline entries appear too.
 func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
@@ -129,9 +136,12 @@ func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 	for i, m := range models {
 		ids[i] = m.ID
 	}
-	assert.ElementsMatch(t, []string{
-		"gpt-5.5", "gpt-5.5-2026-04-23", "o4-mini",
-	}, ids)
+	assert.Contains(t, ids, "gpt-5.5")
+	assert.Contains(t, ids, "gpt-5.5-2026-04-23")
+	assert.Contains(t, ids, "o4-mini")
+	assert.NotContains(t, ids, "gpt-5.5-pro")
+	assert.NotContains(t, ids, "gpt-5.5-pro-2026-04-23")
+	assert.NotContains(t, ids, "o3-pro")
 	assert.Equal(t, DefaultModel, models[0].ID)
 }
 

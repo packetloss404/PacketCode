@@ -103,7 +103,10 @@ func TestApp_CtrlP_SelectAppliesSwitch(t *testing.T) {
 	r := newTestApp(t)
 	second := &fakeProvider{slug: "second", name: "Second", models: []provider.Model{{ID: "m1"}}}
 	r.reg.Register(second)
-	r.cfg.Providers["second"] = config.ProviderConfig{DefaultModel: "m1"}
+	// APIKey non-empty so the SelectMsg handler treats this as a real
+	// provider and applies the switch — a key-less row would route to
+	// the new key-entry prompt instead.
+	r.cfg.Providers["second"] = config.ProviderConfig{APIKey: "sk-test", DefaultModel: "m1"}
 
 	routeKey(t, r.app, "ctrl+p")
 

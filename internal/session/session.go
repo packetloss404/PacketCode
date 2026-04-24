@@ -2,8 +2,9 @@
 // backup stack that backs the /undo slash command.
 //
 // Layout under ~/.packetcode:
-//   sessions/<id>.json      one file per session, atomic writes
-//   backups/<id>/...        per-session file snapshots for /undo
+//
+//	sessions/<id>.json      one file per session, atomic writes
+//	backups/<id>/...        per-session file snapshots for /undo
 package session
 
 import (
@@ -86,11 +87,11 @@ func (m *Manager) New(providerSlug, model string) (*Session, error) {
 	return s, nil
 }
 
-// Current returns the active session (nil if none).
+// Current returns a defensive copy of the active session (nil if none).
 func (m *Manager) Current() *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.current
+	return cloneSession(m.current)
 }
 
 // Load reads a session by ID and sets it as current.
@@ -112,9 +113,9 @@ func (m *Manager) Load(id string) (*Session, error) {
 
 // Save writes the current session to disk atomically.
 func (m *Manager) Save() error {
-	m.mu.RLock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s := m.current
-	m.mu.RUnlock()
 	if s == nil {
 		return fmt.Errorf("save session: no current session")
 	}
@@ -177,6 +178,18 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 	m.current.TokenUsage.TotalOutput += usage.OutputTokens
 	m.current.Cost.TotalUSD = float64(m.current.TokenUsage.TotalInput)*inputPer1M/1_000_000 +
 		float64(m.current.TokenUsage.TotalOutput)*outputPer1M/1_000_000
+	m.mu.Unlock()
+	return m.Save()
+}
+
+// ReplaceMessages swaps the current session transcript and saves it.
+func (m *Manager) ReplaceMessages(messages []provider.Message) error {
+	m.mu.Lock()
+	if m.current == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("replace messages: no current session")
+	}
+	m.current.Messages = cloneMessages(messages)
 	m.mu.Unlock()
 	return m.Save()
 }
@@ -266,6 +279,29 @@ func sanitizeName(s string) string {
 	out := strings.Trim(b.String(), "-")
 	if out == "" {
 		return "untitled"
+	}
+	return out
+}
+
+func cloneSession(s *Session) *Session {
+	if s == nil {
+		return nil
+	}
+	out := *s
+	out.Messages = cloneMessages(s.Messages)
+	return &out
+}
+
+func cloneMessages(messages []provider.Message) []provider.Message {
+	if messages == nil {
+		return nil
+	}
+	out := make([]provider.Message, len(messages))
+	copy(out, messages)
+	for i := range out {
+		if messages[i].ToolCalls != nil {
+			out[i].ToolCalls = append([]provider.ToolCall(nil), messages[i].ToolCalls...)
+		}
 	}
 	return out
 }

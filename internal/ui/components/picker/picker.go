@@ -149,6 +149,10 @@ func (m *Model) Hide() { m.visible = false }
 // Visible reports whether the picker is currently on-screen.
 func (m Model) Visible() bool { return m.visible }
 
+// ID returns the identifier passed to New. Lets the App disambiguate
+// which picker is active when intercepting keys before Update.
+func (m Model) ID() string { return m.id }
+
 // CursorID returns the ID of the currently-highlighted row, or ""
 // when the filtered list is empty. Useful for tests and for callers
 // that want to mirror the cursor somewhere else (e.g. a preview).

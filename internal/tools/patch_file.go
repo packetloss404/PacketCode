@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
@@ -42,9 +43,9 @@ func NewPatchFileTool(root string, backups BackupManager) *PatchFileTool {
 	return &PatchFileTool{Root: root, Backups: backups}
 }
 
-func (*PatchFileTool) Name() string             { return "patch_file" }
-func (*PatchFileTool) RequiresApproval() bool   { return true }
-func (*PatchFileTool) Schema() json.RawMessage  { return json.RawMessage(patchFileSchema) }
+func (*PatchFileTool) Name() string            { return "patch_file" }
+func (*PatchFileTool) RequiresApproval() bool  { return true }
+func (*PatchFileTool) Schema() json.RawMessage { return json.RawMessage(patchFileSchema) }
 func (*PatchFileTool) Description() string {
 	return "Apply one or more search/replace patches to an existing file. Each search must appear exactly once. Returns a unified diff. Requires user approval."
 }
@@ -114,6 +115,9 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
 	}
+	if !utf8.Valid(original) {
+		return ToolResult{Content: "patch_file: refusing to patch binary or non-UTF-8 file", IsError: true}, nil
+	}
 
 	updated, diff, err := applyPatches(string(original), p.Patches, p.Path)
 	if err != nil {
@@ -151,6 +155,9 @@ func (t *PatchFileTool) PreviewPatchDiff(path string, patches []PatchOp) (string
 	original, err := os.ReadFile(abs)
 	if err != nil {
 		return "", err
+	}
+	if !utf8.Valid(original) {
+		return "", fmt.Errorf("refusing to patch binary or non-UTF-8 file")
 	}
 	_, unified, err := applyPatches(string(original), patches, path)
 	if err != nil {

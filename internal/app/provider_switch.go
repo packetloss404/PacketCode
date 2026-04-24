@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/provider"
 )
 
@@ -16,6 +17,9 @@ import (
 // prefix — callers (slash handler, picker) decide whether to annotate
 // with "provider: " before surfacing to the user.
 func (a *App) applyProviderSwitch(slug string) error {
+	if a.streaming {
+		return fmt.Errorf("turn already running; press Ctrl+C to cancel before switching providers")
+	}
 	prov, ok := a.deps.Registry.Get(slug)
 	if !ok {
 		return fmt.Errorf("unknown provider %q", slug)
@@ -45,6 +49,7 @@ func (a *App) applyProviderSwitch(slug string) error {
 	if err := a.deps.Registry.SetActive(slug, modelID); err != nil {
 		return err
 	}
+	a.persistDefault(slug, modelID)
 	a.refreshTopBar()
 	a.conversation.AppendSystem(fmt.Sprintf("switched provider: %s (%s)", slug, modelID))
 	return nil
@@ -56,6 +61,9 @@ func (a *App) applyProviderSwitch(slug string) error {
 // catalog can't be fetched — we don't want a transient network blip
 // to prevent the user from changing models.
 func (a *App) applyModelSwitch(modelID string) error {
+	if a.streaming {
+		return fmt.Errorf("turn already running; press Ctrl+C to cancel before switching models")
+	}
 	prov, _ := a.deps.Registry.Active()
 	if prov == nil {
 		return fmt.Errorf("no active provider")
@@ -66,9 +74,35 @@ func (a *App) applyModelSwitch(modelID string) error {
 	if err := a.deps.Registry.SetActive(prov.Slug(), modelID); err != nil {
 		return err
 	}
+	a.persistDefault(prov.Slug(), modelID)
 	a.refreshTopBar()
 	a.conversation.AppendSystem(fmt.Sprintf("switched model: %s/%s", prov.Slug(), modelID))
 	return nil
+}
+
+// persistDefault writes the current (provider, model) selection to
+// ~/.packetcode/config.toml so the next launch opens on the same pair
+// instead of falling back to whatever the setup flow originally wrote.
+// Also updates the per-provider default model so /provider <slug>
+// lands on this model when the user switches back later. Save errors
+// are surfaced to the conversation but do not undo the in-memory
+// switch — the worst case is that the preference is lost on restart.
+func (a *App) persistDefault(slug, modelID string) {
+	if a.deps.Config == nil {
+		return
+	}
+	cfg := a.deps.Config
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]config.ProviderConfig{}
+	}
+	pc := cfg.Providers[slug]
+	pc.DefaultModel = modelID
+	cfg.Providers[slug] = pc
+	cfg.Default.Provider = slug
+	cfg.Default.Model = modelID
+	if err := cfg.Save(); err != nil {
+		a.conversation.AppendSystem("warning: could not persist default: " + err.Error())
+	}
 }
 
 // validateModelID returns nil if modelID appears in the provider's

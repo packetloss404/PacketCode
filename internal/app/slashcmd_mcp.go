@@ -34,7 +34,7 @@ func (a *App) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
 		a.conversation.AppendSystem(renderMCPTable(a.mcp.Reports(), a.mcp.Clients()))
 		return a, nil
 	case "logs":
-		if _, ok := a.mcp.Client(name); !ok {
+		if _, ok := a.mcp.Client(name); !ok && !mcpReportExists(a.mcp.Reports(), name) {
 			a.conversation.AppendSystem(fmt.Sprintf("mcp logs: no server named %s", name))
 			return a, nil
 		}
@@ -49,6 +49,15 @@ func (a *App) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
 	// Unreachable: parseMCPArgs rejects any other shape.
 	a.conversation.AppendSystem("mcp: unexpected subcommand")
 	return a, nil
+}
+
+func mcpReportExists(reports []mcp.StartupReport, name string) bool {
+	for _, r := range reports {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // renderMCPTable formats a monospace ASCII table of configured MCP

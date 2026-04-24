@@ -40,6 +40,7 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/components/input"
 	jobs_ui "github.com/packetcode/packetcode/internal/ui/components/jobs"
 	"github.com/packetcode/packetcode/internal/ui/components/picker"
+	"github.com/packetcode/packetcode/internal/ui/components/prompt"
 	"github.com/packetcode/packetcode/internal/ui/components/spinner"
 	"github.com/packetcode/packetcode/internal/ui/components/topbar"
 	"github.com/packetcode/packetcode/internal/ui/layout"
@@ -86,6 +87,12 @@ type Deps struct {
 	SystemPrompt string
 	Hooks        *hooks.Runner
 	Version      string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
+
+	// Factories maps provider slug → constructor. Used at runtime when
+	// the user sets or updates an API key through the provider picker,
+	// so the registry can be re-seeded with a fresh Provider instance
+	// carrying the new key. Optional — handlers guard on nil.
+	Factories FactoryMap
 }
 
 type App struct {
@@ -98,6 +105,7 @@ type App struct {
 	approval     approval.Model
 	jobsPanel    jobs_ui.Model
 	picker       picker.Model
+	prompt       prompt.Model
 	spinner      spinner.Model
 	autocomplete autocomplete.Model
 
@@ -206,6 +214,7 @@ func New(deps Deps) (*App, error) {
 		approval:     approval.New(),
 		jobsPanel:    jobs_ui.New(),
 		picker:       picker.New("", ""),
+		prompt:       prompt.New(""),
 		spinner:      spinner.New(),
 		autocomplete: autocomplete.New(buildAutocompleteEntries()),
 		agent:        a,
@@ -296,6 +305,10 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, args, ok := ParseSlashCommand(msg.Text); ok {
 			return a.handleSlashCommand(cmd, args, msg.Text)
 		}
+		if a.streaming {
+			a.conversation.AppendSystem("turn already running; press Ctrl+C to cancel before sending another prompt")
+			return a, nil
+		}
 		return a.startTurn(msg.Text)
 
 	case jobUpdateMsg:
@@ -333,6 +346,13 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case picker.SelectMsg:
 		switch msg.PickerID {
 		case "provider":
+			// Selecting a provider that has no key yet opens the key
+			// prompt instead of attempting a switch that would fail at
+			// the first turn. Everything else goes through the normal
+			// switch path.
+			if !a.providerHasKey(msg.Item.ID) {
+				return a, a.openProviderKeyPrompt(msg.Item.ID)
+			}
 			if err := a.applyProviderSwitch(msg.Item.ID); err != nil {
 				a.conversation.AppendSystem("provider: " + err.Error())
 			}
@@ -346,7 +366,20 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case picker.CloseMsg:
 		return a, nil
 
+	case prompt.SubmitMsg:
+		return a.handlePromptSubmit(msg)
+
+	case prompt.CancelMsg:
+		a.prompt.Hide()
+		return a, nil
+
+	case providerKeyValidatedMsg:
+		return a.handleProviderKeyValidated(msg)
+
 	case pollApproverMsg:
+		if a.approval.Visible() {
+			return a, pollApprover()
+		}
 		if req, ok := a.approver.Pending(); ok {
 			a.approval.Show(req.Tool, req.ToolCall)
 			a.approval.SetWidth(a.width)
@@ -484,12 +517,25 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleClearCommand(nil)
 	}
 
+	if a.prompt.Visible() {
+		var cmd tea.Cmd
+		a.prompt, cmd = a.prompt.Update(msg)
+		return a, cmd
+	}
 	if a.approval.Visible() {
 		var cmd tea.Cmd
 		a.approval, cmd = a.approval.Update(msg)
 		return a, cmd
 	}
 	if a.picker.Visible() {
+		// Intercept ctrl+a on the provider picker to jump into the
+		// API-key-entry flow for the focused row. Everything else falls
+		// through to the picker's own Update.
+		if msg.String() == "ctrl+a" && a.picker.ID() == "provider" {
+			if slug := a.picker.CursorID(); slug != "" {
+				return a, a.openProviderKeyPrompt(slug)
+			}
+		}
 		var cmd tea.Cmd
 		a.picker, cmd = a.picker.Update(msg)
 		return a, cmd
@@ -559,7 +605,9 @@ func (a *App) View() string {
 	pending := a.conversation.PendingView()
 
 	overlay := ""
-	if a.approval.Visible() {
+	if a.prompt.Visible() {
+		overlay = a.prompt.View()
+	} else if a.approval.Visible() {
 		overlay = a.approval.View()
 	} else if a.picker.Visible() {
 		overlay = a.picker.View()
@@ -598,6 +646,7 @@ func (a *App) resize(w, h int) {
 	}
 	a.jobsPanel.Resize(w, modalH)
 	a.picker.Resize(w, h)
+	a.prompt.Resize(w, h)
 	a.autocomplete.SetWidth(w)
 	a.conversation.Resize(w, h)
 	// First WindowSizeMsg after startup: commit the welcome splash to
@@ -622,10 +671,6 @@ func (a *App) refreshTopBar() {
 
 	root := a.deps.WorkingDir
 	a.topbar.SetProject(filepath.Base(root), git.Branch(root))
-
-	if a.deps.CostTracker != nil {
-		a.topbar.SetCost(a.deps.CostTracker.TotalCost())
-	}
 
 	// The ⚙ N jobs counter reflects StateQueued + StateRunning jobs. We
 	// pass 0 when no manager is wired so the segment stays hidden in
@@ -738,7 +783,7 @@ func (a *App) startTurn(text string) (tea.Model, tea.Cmd) {
 		// blocking tea.Cmd that fires once per event.
 	}()
 
-	return a, readAgentEvent(stream)
+	return a, tea.Batch(a.spinner.Start("Thinking..."), readAgentEvent(stream))
 }
 
 func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
@@ -963,6 +1008,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleStatusLineCommand(args)
 	case "mcp":
 		return a.handleMCPCommand(args)
+	case "exit", "quit":
+		return a, tea.Quit
 	}
 	// ParseSlashCommand only returns ok=true for the names above, so
 	// this branch is unreachable — but render a friendly fallback for
@@ -1112,7 +1159,7 @@ func trunc(s string, n int) string {
 // Open. Appends a system message and returns nil if no providers are
 // registered — we never want to show an empty modal.
 func (a *App) openProviderPicker() tea.Cmd {
-	provs := a.deps.Registry.List()
+	provs := a.pickerProviders()
 	if len(provs) == 0 {
 		a.conversation.AppendSystem("provider picker: no providers configured")
 		return nil
@@ -1126,6 +1173,34 @@ func (a *App) openProviderPicker() tea.Cmd {
 	a.picker.SetItems(providerItems(provs, a.deps.Config, activeSlug))
 	a.picker.SetActive(activeSlug)
 	return a.picker.Open(nil)
+}
+
+// pickerProviders returns every provider the picker should show:
+// registered ones first, then any factory-known provider the user
+// hasn't configured yet (as a placeholder constructed with an empty
+// key) so the ctrl+a setup flow can still target it.
+func (a *App) pickerProviders() []provider.Provider {
+	registered := a.deps.Registry.List()
+	seen := make(map[string]struct{}, len(registered))
+	for _, p := range registered {
+		seen[p.Slug()] = struct{}{}
+	}
+	out := append([]provider.Provider{}, registered...)
+	if a.deps.Factories == nil {
+		return out
+	}
+	// displayOrder mirrors provider.displayOrder so unconfigured rows
+	// sort naturally after registered ones but keep their place in the
+	// canonical UI sequence.
+	for _, slug := range []string{"openai", "gemini", "minimax", "openrouter", "ollama"} {
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		if factory, ok := a.deps.Factories[slug]; ok {
+			out = append(out, factory(""))
+		}
+	}
+	return out
 }
 
 // openModelPicker constructs the model picker. When Registry has a

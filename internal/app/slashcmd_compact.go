@@ -41,8 +41,7 @@ func (a *App) handleCompactCommand(args []string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	cur.Messages = after
-	if saveErr := a.deps.Sessions.Save(); saveErr != nil {
+	if saveErr := a.deps.Sessions.ReplaceMessages(after); saveErr != nil {
 		a.conversation.AppendSystem("compact: save failed: " + saveErr.Error())
 		return a, nil
 	}

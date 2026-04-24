@@ -65,6 +65,26 @@ func TestPatchFile_FailsWhenSearchAmbiguous(t *testing.T) {
 	assert.Contains(t, res.Content, "matches 2 times")
 }
 
+func TestPatchFile_RejectsInvalidUTF8(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "binary.dat")
+	require.NoError(t, os.WriteFile(target, []byte{0xff, 0xfe, 'x'}, 0o644))
+
+	tool := NewPatchFileTool(root, NoopBackupManager())
+	body, _ := json.Marshal(map[string]any{
+		"path":    "binary.dat",
+		"patches": []map[string]string{{"search": "x", "replace": "y"}},
+	})
+	res, err := tool.Execute(context.Background(), body)
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content, "non-UTF-8")
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0xff, 0xfe, 'x'}, got)
+}
+
 func TestPatchFile_AppliesMultipleSequentially(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "a.txt")
@@ -161,6 +181,16 @@ func TestPatchFile_PreviewPatchDiff_SearchAmbiguous(t *testing.T) {
 	_, err := tool.PreviewPatchDiff("a.txt", []PatchOp{{Search: "dup", Replace: "uniq"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matches 2 times")
+}
+
+func TestPatchFile_PreviewPatchDiff_RejectsInvalidUTF8(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "binary.dat")
+	require.NoError(t, os.WriteFile(target, []byte{0xff, 0xfe, 'x'}, 0o644))
+	tool := NewPatchFileTool(root, NoopBackupManager())
+	_, err := tool.PreviewPatchDiff("binary.dat", []PatchOp{{Search: "x", Replace: "y"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-UTF-8")
 }
 
 func TestPatchFile_PreviewPatchDiff_PathTraversal(t *testing.T) {

@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -16,8 +15,8 @@ import (
 //
 // The merged environment is os.Environ() overlaid with cfg.Env (cfg
 // wins on key collision).
-func spawnServerProcess(ctx context.Context, cfg ServerConfig, logDir string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, *os.File, error) {
-	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+func spawnServerProcess(cfg ServerConfig, logDir string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, *os.File, error) {
+	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Env = mergeEnv(os.Environ(), cfg.Env)
 
 	stdin, err := cmd.StdinPipe()

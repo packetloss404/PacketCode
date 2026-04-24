@@ -26,6 +26,8 @@ var knownSlashCommands = map[string]struct{}{
 	"clear":      {},
 	"mcp":        {},
 	"statusline": {},
+	"exit":       {},
+	"quit":       {},
 }
 
 // ParseSlashCommand inspects a raw input line and, if it starts with "/"

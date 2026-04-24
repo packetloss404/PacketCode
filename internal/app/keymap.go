@@ -70,6 +70,8 @@ var (
 		{"/statusline", "Show or refresh the configured statusline command"},
 		{"/mcp", "List configured MCP servers"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
+		{"/exit", "Quit packetcode"},
+		{"/quit", "Quit packetcode"},
 	}
 )
 

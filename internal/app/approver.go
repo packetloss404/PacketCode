@@ -12,43 +12,59 @@ import (
 // uiApprover is the bridge between the agent's blocking Approver call
 // and the TUI's event-loop-driven approval prompt.
 //
-// Mechanism: Approve() pushes the request onto pendingCh and blocks on
-// resultCh. The App's tea.Update() reads pendingCh, raises the approval
-// modal, waits for the user to hit y/n, and posts the decision back via
-// resultCh. Both sides are size-1 channels — the agent loop is serial,
-// so there's never more than one approval in flight.
+// Mechanism: Approve() pushes the request onto pendingCh and blocks on a
+// per-request response channel. The App's tea.Update() reads pendingCh,
+// raises the approval modal, waits for the user to hit y/n, and resolves
+// only the request currently shown. Background agents can ask for approvals
+// concurrently, so decisions must never share one global response channel.
 type uiApprover struct {
-	pendingCh chan agent.ApprovalRequest
-	resultCh  chan agent.ApprovalDecision
+	pendingCh chan approvalEnvelope
 
 	mu        sync.Mutex
 	autoTrust bool // when true, every Approve returns Approved without prompting
+	nextID    uint64
+	active    *approvalEnvelope
+}
+
+type approvalEnvelope struct {
+	id     uint64
+	ctx    context.Context
+	req    agent.ApprovalRequest
+	result chan agent.ApprovalDecision
 }
 
 func newUIApprover() *uiApprover {
 	return &uiApprover{
-		pendingCh: make(chan agent.ApprovalRequest, 1),
-		resultCh:  make(chan agent.ApprovalDecision, 1),
+		pendingCh: make(chan approvalEnvelope, 16),
 	}
 }
 
 func (u *uiApprover) Approve(ctx context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
 	u.mu.Lock()
 	trusted := u.autoTrust
+	u.nextID++
+	id := u.nextID
 	u.mu.Unlock()
 	if trusted {
 		return agent.ApprovalDecision{Approved: true, EditedParams: req.Params}
 	}
+	env := approvalEnvelope{
+		id:     id,
+		ctx:    ctx,
+		req:    req,
+		result: make(chan agent.ApprovalDecision, 1),
+	}
 
 	select {
-	case u.pendingCh <- req:
+	case u.pendingCh <- env:
 	case <-ctx.Done():
 		return agent.ApprovalDecision{Approved: false, Reason: "cancelled"}
 	}
 	select {
-	case dec := <-u.resultCh:
+	case dec := <-env.result:
 		return dec
 	case <-ctx.Done():
+		u.clearActive(id)
 		return agent.ApprovalDecision{Approved: false, Reason: "cancelled"}
 	}
 }
@@ -57,20 +73,53 @@ func (u *uiApprover) Approve(ctx context.Context, req agent.ApprovalRequest) age
 // (zero, false) if the queue is empty. The App polls this from its
 // Update loop.
 func (u *uiApprover) Pending() (agent.ApprovalRequest, bool) {
-	select {
-	case r := <-u.pendingCh:
-		return r, true
-	default:
-		return agent.ApprovalRequest{}, false
+	u.mu.Lock()
+	if u.active != nil {
+		if u.active.ctx.Err() == nil {
+			u.mu.Unlock()
+			return agent.ApprovalRequest{}, false
+		}
+		u.active = nil
+	}
+	u.mu.Unlock()
+
+	for {
+		select {
+		case env := <-u.pendingCh:
+			if env.ctx.Err() != nil {
+				continue
+			}
+			u.mu.Lock()
+			u.active = &env
+			u.mu.Unlock()
+			return env.req, true
+		default:
+			return agent.ApprovalRequest{}, false
+		}
 	}
 }
 
-// Resolve posts the user's decision back to the waiting Approve() call.
+// Resolve posts the user's decision back to the approval currently visible.
 func (u *uiApprover) Resolve(decision agent.ApprovalDecision) {
+	u.mu.Lock()
+	env := u.active
+	u.active = nil
+	u.mu.Unlock()
+	if env == nil {
+		return
+	}
 	select {
-	case u.resultCh <- decision:
+	case env.result <- decision:
 	default:
 	}
+}
+
+func (u *uiApprover) clearActive(id uint64) {
+	u.mu.Lock()
+	if u.active != nil && u.active.id == id {
+		u.active = nil
+	}
+	u.mu.Unlock()
 }
 
 // SetTrust toggles trust mode. When enabled, future Approve() calls

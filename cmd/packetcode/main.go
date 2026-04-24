@@ -96,7 +96,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 	}
 
 	// First-run: no provider configured yet → walk through setup.
-	if cfg.Default.Provider == "" || cfg.Providers[cfg.Default.Provider].APIKey == "" && cfg.Default.Provider != "ollama" {
+	if cfg.Default.Provider == "" || (cfg.Default.Provider != "ollama" && cfg.GetProviderKey(cfg.Default.Provider) == "") {
 		_, err := app.RunSetup(os.Stdin, os.Stdout, cfg, factories)
 		if err != nil {
 			return err
@@ -133,17 +133,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		}
 		reg.Register(factory(key))
 	}
-	if _, ok := reg.Get(activeSlug); !ok {
-		return fmt.Errorf("active provider %q is not configured; run packetcode without --provider to set one up", activeSlug)
-	}
-	if activeModel == "" {
-		// Fall back to the provider's configured default model.
-		activeModel = cfg.Providers[activeSlug].DefaultModel
-	}
-	if err := reg.SetActive(activeSlug, activeModel); err != nil {
-		return err
-	}
-
 	// Resolve the working directory to the git repo root if we're in one.
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -166,10 +155,28 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 	}
 	sessions := session.NewManager(sessionsDir)
 	if resumeID != "" {
-		if _, err := sessions.Load(resumeID); err != nil {
+		loaded, err := sessions.Load(resumeID)
+		if err != nil {
 			return fmt.Errorf("resume %s: %w", resumeID, err)
 		}
-	} else {
+		if providerOverride == "" && loaded.Provider != "" {
+			activeSlug = loaded.Provider
+		}
+		if modelOverride == "" && loaded.Model != "" {
+			activeModel = loaded.Model
+		}
+	}
+	if _, ok := reg.Get(activeSlug); !ok {
+		return fmt.Errorf("active provider %q is not configured; run packetcode without --provider to set one up", activeSlug)
+	}
+	if activeModel == "" {
+		// Fall back to the provider's configured default model.
+		activeModel = cfg.Providers[activeSlug].DefaultModel
+	}
+	if err := reg.SetActive(activeSlug, activeModel); err != nil {
+		return err
+	}
+	if resumeID == "" {
 		if _, err := sessions.New(activeSlug, activeModel); err != nil {
 			return fmt.Errorf("create session: %w", err)
 		}
@@ -301,6 +308,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool) error {
 		SystemPrompt: systemPrompt,
 		Hooks:        hooks.New(cfg.Hooks, root),
 		Version:      welcomeVersion(),
+		Factories:    factories,
 	})
 	if err != nil {
 		return err

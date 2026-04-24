@@ -142,7 +142,9 @@ func newTestApp(t *testing.T) *testAppRig {
 
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{
-			"fake": {DefaultModel: "fake-model"},
+			// APIKey non-empty so provider-picker flows treat this as a
+			// configured provider (not a key-entry target).
+			"fake": {APIKey: "sk-test", DefaultModel: "fake-model"},
 		},
 		Behavior: config.BehaviorConfig{AutoCompactThreshold: 80},
 	}
@@ -197,13 +199,18 @@ func convContains(t *testing.T, a *App, needle string) {
 
 // ─── /provider ────────────────────────────────────────────────────────
 
-func TestApp_Provider_ListWithActiveMarker(t *testing.T) {
+// TestApp_Provider_ListOpensPicker verifies bare /provider opens the
+// centred picker modal (same code path as Ctrl+P). The table output
+// from the old handler is replaced by the picker's View.
+func TestApp_Provider_ListOpensPicker(t *testing.T) {
 	r := newTestApp(t)
 	r.app.handleSlashCommand("provider", nil, "/provider")
-	convContains(t, r.app, "PROVIDER")
-	convContains(t, r.app, "fake")
-	// Active marker precedes the active row.
-	convContains(t, r.app, "* ")
+	if !r.app.picker.Visible() {
+		t.Fatalf("/provider should open the picker; picker is not visible")
+	}
+	if r.app.picker.ID() != "provider" {
+		t.Fatalf("wrong picker opened: id=%q", r.app.picker.ID())
+	}
 }
 
 func TestApp_Provider_SwitchWithDefaultModel(t *testing.T) {
@@ -249,12 +256,16 @@ func TestApp_Provider_NoModelFallback(t *testing.T) {
 
 // ─── /model ────────────────────────────────────────────────────────────
 
+// TestApp_Model_List verifies bare /model opens the centred picker
+// modal rather than printing a table into the conversation. Loader
+// error handling is covered by TestApp_CtrlM_ListError, which shares
+// the same openModelPicker code path.
 func TestApp_Model_List(t *testing.T) {
 	r := newTestApp(t)
 	r.app.handleSlashCommand("model", nil, "/model")
-	convContains(t, r.app, "MODEL")
-	convContains(t, r.app, "fake-model")
-	convContains(t, r.app, "fake-mini")
+	if !r.app.picker.Visible() {
+		t.Fatalf("/model should open the picker; picker is not visible")
+	}
 }
 
 func TestApp_Model_Switch(t *testing.T) {
@@ -264,13 +275,6 @@ func TestApp_Model_Switch(t *testing.T) {
 	if _, m := r.reg.Active(); m != "fake-mini" {
 		t.Fatalf("active model = %q, want fake-mini", m)
 	}
-}
-
-func TestApp_Model_ListModelsError(t *testing.T) {
-	r := newTestApp(t)
-	r.prov.listErr = errors.New("boom")
-	r.app.handleSlashCommand("model", nil, "/model")
-	convContains(t, r.app, "model: list failed: boom")
 }
 
 // TestApp_Model_Switch_RejectsUnknownID ensures validateModelID blocks

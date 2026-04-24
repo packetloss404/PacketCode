@@ -1,14 +1,17 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 const searchCodebaseSchema = `{
@@ -30,16 +33,16 @@ type SearchCodebaseTool struct {
 	Root string
 	// rgPath caches the ripgrep binary lookup. Empty until first use.
 	rgPath string
-	rgChecked bool
+	rgOnce sync.Once
 }
 
 func NewSearchCodebaseTool(root string) *SearchCodebaseTool {
 	return &SearchCodebaseTool{Root: root}
 }
 
-func (*SearchCodebaseTool) Name() string             { return "search_codebase" }
-func (*SearchCodebaseTool) RequiresApproval() bool   { return false }
-func (*SearchCodebaseTool) Schema() json.RawMessage  { return json.RawMessage(searchCodebaseSchema) }
+func (*SearchCodebaseTool) Name() string            { return "search_codebase" }
+func (*SearchCodebaseTool) RequiresApproval() bool  { return false }
+func (*SearchCodebaseTool) Schema() json.RawMessage { return json.RawMessage(searchCodebaseSchema) }
 func (*SearchCodebaseTool) Description() string {
 	return "Regex-search the codebase. Uses ripgrep when available (much faster) and a Go fallback otherwise. Results are formatted as path:line:match."
 }
@@ -77,42 +80,77 @@ func (t *SearchCodebaseTool) Execute(ctx context.Context, raw json.RawMessage) (
 }
 
 func (t *SearchCodebaseTool) ripgrepPath() string {
-	if t.rgChecked {
-		return t.rgPath
-	}
-	t.rgChecked = true
-	if path, err := exec.LookPath("rg"); err == nil {
-		t.rgPath = path
-	}
+	t.rgOnce.Do(func() {
+		if path, err := exec.LookPath("rg"); err == nil {
+			t.rgPath = path
+		}
+	})
 	return t.rgPath
 }
 
 func (t *SearchCodebaseTool) searchWithRipgrep(ctx context.Context, rg, pattern, glob string, limit int) (ToolResult, error) {
-	args := []string{"--no-heading", "--with-filename", "--line-number", "--color=never", "--max-count", fmt.Sprintf("%d", limit)}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	args := []string{"--no-heading", "--with-filename", "--line-number", "--color=never", "--max-filesize", "1M"}
+	for dir := range skippedDirs {
+		args = append(args, "--glob", "!"+dir+"/**")
+	}
 	if glob != "" {
 		args = append(args, "--glob", glob)
 	}
 	args = append(args, "--", pattern, t.Root)
 
-	cmd := exec.CommandContext(ctx, rg, args...)
-	out, err := cmd.Output()
+	cmd := exec.CommandContext(runCtx, rg, args...)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		// ripgrep exits 1 when no matches; treat that as an empty result,
-		// not an error.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return ToolResult{Content: fmt.Sprintf("No matches for /%s/.", pattern)}, nil
-		}
 		return ToolResult{}, err
 	}
-	return formatSearchOutput(out, t.Root, pattern, limit), nil
+	if err := cmd.Start(); err != nil {
+		return ToolResult{}, err
+	}
+
+	var lines []string
+	hitLimit := false
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		if len(lines) >= limit {
+			hitLimit = true
+			cancel()
+			break
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if scanErr != nil && !hitLimit && ctx.Err() == nil {
+		return ToolResult{}, scanErr
+	}
+	if waitErr != nil && !hitLimit {
+		if ctx.Err() != nil {
+			return ToolResult{}, ctx.Err()
+		}
+		// ripgrep exits 1 when no matches; treat that as an empty result,
+		// not an error.
+		if exitErr, ok := waitErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return ToolResult{Content: fmt.Sprintf("No matches for /%s/.", pattern)}, nil
+		}
+		return ToolResult{}, waitErr
+	}
+	return formatSearchLines(lines, t.Root, pattern, limit), nil
 }
 
 // formatSearchOutput converts ripgrep's path:line:text output into a
 // project-relative form and applies a hard line cap.
 func formatSearchOutput(out []byte, root, pattern string, limit int) ToolResult {
-	rootAbs, _ := filepath.Abs(root)
 	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
+	return formatSearchLines(lines, root, pattern, limit)
+}
+
+func formatSearchLines(lines []string, root, pattern string, limit int) ToolResult {
+	rootAbs, _ := filepath.Abs(root)
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
 		return ToolResult{Content: fmt.Sprintf("No matches for /%s/.", pattern)}
 	}
 	if len(lines) > limit {
@@ -156,8 +194,9 @@ func (t *SearchCodebaseTool) searchWithGo(ctx context.Context, pattern, glob str
 			}
 			return nil
 		}
+		rel, _ := filepath.Rel(rootAbs, path)
 		if glob != "" {
-			match, matchErr := filepath.Match(glob, d.Name())
+			match, matchErr := matchSearchGlob(glob, rel, d.Name())
 			if matchErr != nil || !match {
 				return nil
 			}
@@ -172,7 +211,6 @@ func (t *SearchCodebaseTool) searchWithGo(ctx context.Context, pattern, glob str
 		if readErr != nil {
 			return nil
 		}
-		rel, _ := filepath.Rel(rootAbs, path)
 		for i, line := range strings.Split(data, "\n") {
 			if re.MatchString(line) {
 				matches = append(matches, fmt.Sprintf("%s:%d:%s", rel, i+1, line))
@@ -220,3 +258,16 @@ var skippedDirs = map[string]bool{
 }
 
 func shouldSkipDir(name string) bool { return skippedDirs[name] }
+
+func matchSearchGlob(glob, rel, base string) (bool, error) {
+	rel = filepath.ToSlash(rel)
+	if ok, err := path.Match(glob, rel); err != nil || ok {
+		return ok, err
+	}
+	if strings.HasPrefix(glob, "**/") {
+		if ok, err := path.Match(strings.TrimPrefix(glob, "**/"), base); err != nil || ok {
+			return ok, err
+		}
+	}
+	return path.Match(glob, base)
+}

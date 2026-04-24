@@ -64,28 +64,33 @@ func Render(width, height int, version string) string {
 	return box
 }
 
-// RenderInline returns the welcome splash sized for inline mode: the
-// wordmark is left-aligned at its natural height (no fullscreen
-// centring). Used by the App to commit the splash to terminal scrollback
-// once at startup.
+// RenderInline returns the welcome splash sized for inline mode:
+// three leading blank lines, then the wordmark + version + help line
+// centred horizontally across the full terminal width. Used by the App
+// to commit the splash to terminal scrollback once at startup.
 func RenderInline(width int, version string) string {
 	if width <= 0 {
 		return ""
 	}
-	var lines []string
+	centered := lipgloss.NewStyle().Width(width).Align(lipgloss.Center)
+	// Three leading blank lines for breathing room above the banner.
+	lines := []string{"", "", ""}
 	if width >= artWidth {
 		artStyle := lipgloss.NewStyle().Foreground(theme.AccentPrimary)
 		for _, line := range art {
-			lines = append(lines, artStyle.Render(line))
+			lines = append(lines, centered.Render(artStyle.Render(line)))
 		}
 	} else {
-		lines = []string{
-			lipgloss.NewStyle().Foreground(theme.AccentPrimary).Bold(true).Render("packetcode"),
-		}
+		lines = append(lines,
+			centered.Render(lipgloss.NewStyle().Foreground(theme.AccentPrimary).Bold(true).Render("packetcode")),
+		)
 	}
 	lines = append(lines,
-		theme.StyleDim.Render(version),
-		theme.StyleSecondary.Render("type a message below to begin · / for commands"),
+		"",
+		centered.Render(theme.StyleDim.Render(version)),
+		"",
+		centered.Render(theme.StyleSecondary.Render("type a message below to begin · / for commands")),
+		"",
 	)
 	return strings.Join(lines, "\n")
 }

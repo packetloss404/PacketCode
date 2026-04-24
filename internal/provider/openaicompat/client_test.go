@@ -137,6 +137,21 @@ func TestParseSSE_SuppressesTextOnToolCallFrames(t *testing.T) {
 	assert.JSONEq(t, `{"path":"main.go"}`, args.String())
 }
 
+func TestValidateKeyUsesCandidateWithoutMutatingClientKey(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "sk-live")
+	require.NoError(t, c.ValidateKey(context.Background(), "sk-candidate"))
+	assert.Equal(t, "Bearer sk-candidate", gotAuth)
+	assert.Equal(t, "sk-live", c.APIKey)
+}
+
 // TestExtractAPIErrorMessage_JSONBody confirms the OpenAI-style wrapper
 // is unwrapped to just the message string, so UI error rendering shows
 // "This is not a chat model..." instead of the full JSON blob.

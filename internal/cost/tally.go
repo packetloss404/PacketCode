@@ -3,15 +3,15 @@
 //
 // On-disk format (~/.packetcode/cost-tally.json):
 //
-//   {
-//     "sessions": {
-//       "<session-uuid>": {
-//         "input": 84000, "output": 12000,
-//         "provider": "openai", "model": "gpt-4.1"
-//       }
-//     },
-//     "start_time": 1736942400
-//   }
+//	{
+//	  "sessions": {
+//	    "<session-uuid>": {
+//	      "input": 84000, "output": 12000,
+//	      "provider": "openai", "model": "gpt-4.1"
+//	    }
+//	  },
+//	  "start_time": 1736942400
+//	}
 //
 // Per-session counts are recorded as high-water marks (only ever increase
 // within a session) — the same pattern the existing Claude Code status
@@ -110,10 +110,10 @@ type PricingFunc func(providerSlug, modelID string) (inputPer1M, outputPer1M flo
 // session. It implements the high-water-mark logic and is the type the
 // agent loop and status line both consume.
 type Tracker struct {
-	path      string
-	pricing   PricingFunc
-	mu        sync.Mutex
-	tally     *Tally
+	path    string
+	pricing PricingFunc
+	mu      sync.Mutex
+	tally   *Tally
 }
 
 func NewTracker(path string, pricing PricingFunc) (*Tracker, error) {
@@ -140,7 +140,7 @@ func (t *Tracker) RecordUsage(sessionID, providerSlug, modelID string, input, ou
 	cur.Provider = providerSlug
 	cur.Model = modelID
 	t.tally.Sessions[sessionID] = cur
-	t.mu.Unlock()
+	defer t.mu.Unlock()
 	return t.tally.Save(t.path)
 }
 
@@ -194,7 +194,7 @@ func (t *Tracker) SessionTokens(sessionID string) (int, int) {
 func (t *Tracker) Reset() error {
 	t.mu.Lock()
 	t.tally = Empty()
-	t.mu.Unlock()
+	defer t.mu.Unlock()
 	return t.tally.Save(t.path)
 }
 

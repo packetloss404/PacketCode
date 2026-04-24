@@ -109,15 +109,11 @@ func (c *Client) ValidateKey(ctx context.Context, apiKey string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	prev := c.APIKey
-	c.APIKey = apiKey
-	defer func() { c.APIKey = prev }()
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/models", nil)
 	if err != nil {
 		return err
 	}
-	c.applyHeaders(req, false)
+	c.applyHeadersWithKey(req, false, apiKey)
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -277,8 +273,12 @@ func extractAPIErrorMessage(body []byte) string {
 }
 
 func (c *Client) applyHeaders(req *http.Request, json bool) {
-	if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	c.applyHeadersWithKey(req, json, c.APIKey)
+}
+
+func (c *Client) applyHeadersWithKey(req *http.Request, json bool, apiKey string) {
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	if json {
 		req.Header.Set("Content-Type", "application/json")

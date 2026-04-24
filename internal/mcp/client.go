@@ -84,7 +84,10 @@ type Client struct {
 // fully connected client. Any failure during handshake kills the child
 // process before returning.
 func NewClient(ctx context.Context, cfg ServerConfig, logDir string, info ClientInfo) (*Client, error) {
-	cmd, stdin, stdout, logFile, err := spawnServerProcess(ctx, cfg, logDir)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cmd, stdin, stdout, logFile, err := spawnServerProcess(cfg, logDir)
 	if err != nil {
 		return nil, err
 	}

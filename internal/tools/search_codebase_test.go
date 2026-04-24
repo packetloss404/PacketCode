@@ -51,6 +51,16 @@ func TestSearchCodebase_GlobFilter(t *testing.T) {
 	assert.NotContains(t, res.Content, ".txt", "glob should restrict to .go files")
 }
 
+func TestSearchCodebase_GoFallbackGlobMatchesRelativePath(t *testing.T) {
+	tool := NewSearchCodebaseTool(setupSearchTree(t))
+	tool.rgOnce.Do(func() { tool.rgPath = "" })
+	body, _ := json.Marshal(map[string]any{"pattern": "greet", "file_glob": "**/*.go"})
+	res, err := tool.Execute(context.Background(), body)
+	require.NoError(t, err)
+	assert.Contains(t, res.Content, "main.go")
+	assert.NotContains(t, res.Content, ".txt", "glob should restrict to .go files")
+}
+
 func TestSearchCodebase_EmptyPattern(t *testing.T) {
 	tool := NewSearchCodebaseTool(t.TempDir())
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"pattern":""}`))

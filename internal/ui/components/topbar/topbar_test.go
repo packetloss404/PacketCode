@@ -13,13 +13,13 @@ func TestTopBar_RendersProvider(t *testing.T) {
 	m.SetProvider("openai", "OpenAI", "gpt-4.1")
 	m.SetContext(50_000, 200_000)
 	m.SetProject("my-app", "main")
-	m.SetCost(1.24)
 
 	out := m.View()
 	assert.Contains(t, out, "packetcode")
 	assert.Contains(t, out, "OpenAI")
 	assert.Contains(t, out, "gpt-4.1")
 	assert.Contains(t, out, "my-app")
+	assert.NotContains(t, out, "$")
 }
 
 func TestTopBar_DropsSegmentsWhenNarrow(t *testing.T) {
@@ -27,14 +27,14 @@ func TestTopBar_DropsSegmentsWhenNarrow(t *testing.T) {
 	m.SetProvider("openai", "OpenAI", "gpt-4.1")
 	m.SetContext(50_000, 200_000)
 	m.SetProject("very-long-project-name-here", "feature/long-branch-name-here")
-	m.SetCost(123.45)
 
 	wide := m.copyWith(120).View()
 	narrow := m.copyWith(40).View()
 
-	// Narrow rendering must drop at least one segment (cost or project).
+	// Narrow rendering must drop at least one segment.
 	assert.True(t,
-		!strings.Contains(narrow, "$123.45") || !strings.Contains(narrow, "very-long-project"),
+		!strings.Contains(narrow, "very-long-project") ||
+			!strings.Contains(narrow, "feature/long-branch-name-here"),
 		"narrow rendering should shed at least one droppable segment",
 	)
 	// Wide rendering shouldn't drop those segments.
@@ -105,14 +105,13 @@ func TestTopbar_JobsSegment_Singular(t *testing.T) {
 // jobs segment survives longer than every other droppable on a narrow
 // terminal. In the implementation the droppable slice is ordered so
 // that `jobsSeg` is the last entry (right-most drops first), meaning
-// duration / cost / git / project / context all get shed before the
-// jobs counter.
+// duration / git / project / context all get shed before the jobs
+// counter.
 func TestTopbar_JobsSegment_SurvivesNarrowDrops(t *testing.T) {
 	m := New()
 	m.SetProvider("openai", "OpenAI", "gpt-4.1")
 	m.SetContext(50_000, 200_000)
 	m.SetProject("very-long-project-name-here", "feature/long-branch-name-here")
-	m.SetCost(123.45)
 	m.SetJobs(2)
 
 	// Narrow enough that at least one droppable (duration) gets dropped.

@@ -248,8 +248,8 @@ examples (filesystem, git, fetch), and debugging tips.
 
 - Conversations auto-save to `~/.packetcode/sessions/<uuid>.json` after every message via atomic temp-file rename.
 - `--resume <session-id>` picks up where you left off.
-- Per-session token totals + global cumulative cost recorded with high-water-mark logic; reset via `/cost reset` (planned slash command).
-- File backups under `~/.packetcode/backups/<session-id>/` give `/undo` a real safety net (planned slash command).
+- Per-session token totals + global cumulative cost recorded with high-water-mark logic; reset via `/cost reset`.
+- File backups under `~/.packetcode/backups/<session-id>/` give `/undo` a real safety net.
 
 ---
 
@@ -265,7 +265,7 @@ Set `INSTALL_DIR=$HOME/.local/bin` to avoid sudo.
 
 ### From source
 
-Requires Go 1.23+.
+Requires Go 1.24.2+.
 
 ```bash
 git clone https://github.com/packetcode/packetcode.git
@@ -399,7 +399,7 @@ The whole thing is one static Go binary (~8.5 MB). No CGO, no runtime, no `node_
 ## Development
 
 ```bash
-go test ./...              # full test suite (14 packages, all green)
+go test ./...              # full test suite
 go build ./cmd/packetcode  # build the binary
 golangci-lint run ./...    # lint (config in .golangci.yml)
 ```

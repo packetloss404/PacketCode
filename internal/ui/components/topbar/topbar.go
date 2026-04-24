@@ -1,12 +1,12 @@
 // Package topbar renders the always-visible status row at the top of the
 // TUI: brand, active provider/model, context-window gauge, project name,
-// git branch, cumulative cost, session duration, and (when any
-// background agents are alive) an active-jobs counter.
+// git branch, session duration, and (when any background agents are
+// alive) an active-jobs counter.
 //
 // The top bar is responsive — when the terminal is narrow, it sheds
 // segments in this priority order (right-most first):
 //
-//	duration → cost → git branch → project name → context %
+//	duration → git branch → project name → context %
 //
 // Provider/model and the brand are always shown. The jobs segment is
 // deliberately placed FIRST in the droppable slice (so it's the last
@@ -39,7 +39,6 @@ type Model struct {
 
 	projectName string
 	gitBranch   string
-	costUSD     float64
 	startTime   time.Time
 
 	activeJobs int
@@ -79,8 +78,6 @@ func (m *Model) SetProject(name, branch string) {
 	m.projectName = name
 	m.gitBranch = branch
 }
-
-func (m *Model) SetCost(usd float64) { m.costUSD = usd }
 
 // SetJobs updates the active-background-jobs counter. n ≤ 0 hides the
 // segment entirely; positive values render as "⚙ N job(s)".
@@ -134,10 +131,6 @@ func (m Model) View() string {
 	if m.gitBranch != "" {
 		gitSeg = theme.StyleSecondary.Render("⎇ " + m.gitBranch)
 	}
-	costSeg := ""
-	if m.costUSD > 0 {
-		costSeg = theme.StyleSecondary.Render(fmt.Sprintf("$%.2f", m.costUSD))
-	}
 	durSeg := theme.StyleDim.Render("⏱ " + formatDuration(time.Since(m.startTime)))
 
 	jobsSeg := ""
@@ -157,12 +150,12 @@ func (m Model) View() string {
 	// so lower-priority segments live at the TAIL and higher-priority
 	// ones at the HEAD. We place jobsSeg first — it survives longer
 	// than every other droppable because an active background agent is
-	// time-sensitive, so we'd rather shed duration / cost / git /
-	// project / context than hide the ⚙ N jobs counter. Concretely,
-	// the narrow-mode drop sequence becomes:
-	//   duration → cost → git → project → context → jobs
+	// time-sensitive, so we'd rather shed duration / git / project /
+	// context than hide the ⚙ N jobs counter. Concretely, the
+	// narrow-mode drop sequence becomes:
+	//   duration → git → project → context → jobs
 	required := []string{brand, providerSeg}
-	droppable := []string{jobsSeg, contextSeg, projectSeg, gitSeg, costSeg, durSeg}
+	droppable := []string{jobsSeg, contextSeg, projectSeg, gitSeg, durSeg}
 
 	// Drop right-most droppable segments until the line fits inside the
 	// content area (width minus border + padding budget).

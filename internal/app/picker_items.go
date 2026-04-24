@@ -40,6 +40,9 @@ func providerItems(regs []provider.Provider, cfg *config.Config, activeSlug stri
 		if defModel != "" {
 			detail = defModel + " · " + keyStatus
 		}
+		if keyStatus == "(no key)" {
+			detail = "ctrl+a to set key"
+		}
 		marker := ""
 		if slug == activeSlug {
 			marker = "●"
