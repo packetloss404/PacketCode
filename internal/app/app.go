@@ -168,6 +168,15 @@ type App struct {
 	planMode        bool
 	planPrevProfile permissions.Profile
 
+	// Prompt history for Up/Down recall in the input bar. promptHistory is
+	// the list of submitted inputs (oldest first); historyIdx points at the
+	// current recall position (== len means "not navigating, showing the
+	// live draft"); historyDraft stashes the in-progress buffer while the
+	// user pages back through history so Down can restore it. See history.go.
+	promptHistory []string
+	historyIdx    int
+	historyDraft  string
+
 	// Background-agents manager. Non-nil when deps.Jobs is set. All
 	// job-related UI code paths guard on `a.jobs != nil`.
 	jobs *jobs.Manager
@@ -438,6 +447,8 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleKey(msg)
 
 	case input.SubmitMsg:
+		// Record every submission for Up/Down recall before it is dispatched.
+		a.recordHistory(msg.Text)
 		// Force-close the autocomplete popup at the start of the submit
 		// path so it doesn't linger across a send (the buffer is about
 		// to be reset anyway, but be explicit — cheaper than audit).
@@ -830,12 +841,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.workflowView, cmd = a.workflowView.Update(msg)
 		return a, cmd
 	}
-	// Shift+Tab cycles the permission mode (normal → accept edits → plan),
-	// Claude Code-style. Reached here only when no modal is up (each modal
-	// above returns early while visible), so it never fights an overlay.
+	// Shift+Tab cycles the permission mode (normal → accept edits → auto →
+	// plan), Claude Code-style. Reached here only when no modal is up (each
+	// modal above returns early while visible), so it never fights an overlay.
 	if msg.String() == "shift+tab" {
 		a.cyclePermissionMode()
 		return a, nil
+	}
+	// Up/Down page through previously submitted prompts, shell-style — but
+	// only when the caret is at the top/bottom of the buffer, so multi-line
+	// editing keeps normal caret movement. The autocomplete popup, when
+	// visible, consumes Up/Down earlier and never reaches here.
+	switch msg.String() {
+	case "up":
+		if a.input.AtFirstLine() && a.historyPrev() {
+			return a, nil
+		}
+	case "down":
+		if a.input.AtLastLine() && a.historyNext() {
+			return a, nil
+		}
 	}
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)

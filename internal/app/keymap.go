@@ -23,6 +23,7 @@ var (
 	InputKeys = []KeyHelp{
 		{"Enter", "Send message"},
 		{"Shift+Enter", "Insert newline"},
+		{"↑/↓", "Recall previous / next prompt (when caret is at top/bottom)"},
 	}
 	// AutocompleteKeys documents the slash-command autocomplete popup's
 	// bindings. The popup opens automatically when the input buffer

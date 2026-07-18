@@ -59,6 +59,15 @@ func (m *Model) Blur()         { m.focused = false; m.ta.Blur() }
 func (m *Model) Reset()        { m.ta.Reset(); m.syncHeight() }
 func (m *Model) Value() string { return m.ta.Value() }
 
+// AtFirstLine reports whether the caret is on the first visual line of the
+// buffer. Used by prompt-history recall so Up only pages into history when
+// the caret is at the top, otherwise it moves between lines as usual.
+func (m *Model) AtFirstLine() bool { return m.ta.Line() == 0 }
+
+// AtLastLine reports whether the caret is on the last visual line of the
+// buffer — the mirror of AtFirstLine for Down.
+func (m *Model) AtLastLine() bool { return m.ta.Line() >= m.ta.LineCount()-1 }
+
 // SetValue replaces the textarea contents and moves the caret to the
 // end. Used by the slash-command autocomplete popup to swap in the
 // chosen "/<verb> " prefix without the user losing their typing flow.
