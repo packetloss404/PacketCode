@@ -81,6 +81,7 @@ var (
 		{"/mcp status <name>", "Show MCP server health details"},
 		{"/mcp tools <name>", "List tools exposed by an MCP server"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
+		{"/ollama [status|models|ps|pull <model>]", "Local Ollama status, models, and management"},
 		{"/transcript", "Open the current session transcript"},
 		{"/exit", "Quit packetcode"},
 		{"/quit", "Quit packetcode"},

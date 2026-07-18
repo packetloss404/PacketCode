@@ -536,6 +536,14 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case ollamaInfoMsg:
+		if msg.err != nil {
+			a.conversation.AppendSystem("ollama: " + msg.err.Error())
+		} else {
+			a.conversation.AppendSystem(msg.text)
+		}
+		return a, nil
 	}
 
 	// Delegate to the focused subcomponent. Focus precedence:
@@ -1463,6 +1471,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleStatusLineCommand(args)
 	case "mcp":
 		return a.handleMCPCommand(args)
+	case "ollama":
+		return a.handleOllamaCommand(args)
 	case "transcript":
 		return a.handleTranscriptCommand(args)
 	case "exit", "quit":

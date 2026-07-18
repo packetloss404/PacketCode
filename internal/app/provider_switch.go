@@ -51,6 +51,7 @@ func (a *App) applyProviderSwitch(slug string) error {
 	}
 	a.persistDefault(slug, modelID)
 	a.refreshTopBar()
+	a.warmupOllama(modelID)
 	a.conversation.AppendSystem(fmt.Sprintf("switched provider: %s (%s)", slug, modelID))
 	return nil
 }
@@ -76,6 +77,7 @@ func (a *App) applyModelSwitch(modelID string) error {
 	}
 	a.persistDefault(prov.Slug(), modelID)
 	a.refreshTopBar()
+	a.warmupOllama(modelID)
 	a.conversation.AppendSystem(fmt.Sprintf("switched model: %s/%s", prov.Slug(), modelID))
 	return nil
 }
