@@ -8,6 +8,7 @@ packetcode has not cut a stable 1.0 release yet. Entries under `Unreleased` desc
 
 ### Added
 
+- **@-file mentions** — write `@path/to/file` anywhere in a prompt and packetcode inlines that file's contents into the message sent to the model (your visible message keeps the literal `@path`, and a system note lists what was attached). Resolves relative/`~`/absolute paths, stays within the project, skips binaries, and caps large files. (Typed paths today; a fuzzy-find popup is a planned enhancement.)
 - **Reasoning/thinking display** — when a provider streams a reasoning summary (Responses API `summary:"auto"`), packetcode renders it live as dim "✻ thinking" text above the answer, in the same bubble. New `EventReasoningDelta` flows provider → agent → UI. (The current Codex ChatGPT backend reports `default_reasoning_summary=none` for the gpt-5.6 family, so it does not stream summaries yet; the display lights up automatically for any model that does.)
 
 - **Ollama overhaul for first-class local use (tuned for Apple Silicon).** Local `localhost:11434` remains the zero-config default; remote hosts and tuning are opt-in.

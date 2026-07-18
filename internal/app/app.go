@@ -968,6 +968,15 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	if emitUser {
 		a.conversation.AppendUser(text)
 	}
+
+	// @-file mentions: the displayed user message keeps the literal @path, but
+	// the model receives the referenced files' contents inlined as context.
+	turnText := text
+	if expanded, attached := expandFileMentions(text, a.deps.WorkingDir); len(attached) > 0 {
+		turnText = expanded
+		a.conversation.AppendSystem("attached " + plural(len(attached), "file", "files") + ": " + strings.Join(attached, ", "))
+	}
+
 	a.streaming = true
 	a.setOperation("thinking")
 
@@ -977,7 +986,7 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	// key handler and EventError / agentDoneMsg paths can reach it.
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancelTurn = cancel
-	stream := a.agent.Run(ctx, text)
+	stream := a.agent.Run(ctx, turnText)
 
 	return a, tea.Batch(a.spinner.Start("Thinking..."), readAgentEvent(stream))
 }
