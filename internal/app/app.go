@@ -1049,7 +1049,9 @@ func (a *App) refreshTopBar() {
 		ctxMax := prov.ContextWindow(modelID)
 		used := 0
 		if cur := a.deps.Sessions.Current(); cur != nil {
-			used = cur.TokenUsage.TotalInput
+			// Gauge current context occupancy, not the cumulative session
+			// total — the latter climbs past the window every few turns.
+			used = cur.TokenUsage.ContextTokens
 		}
 		a.topbar.SetContext(used, ctxMax)
 	}
@@ -1118,7 +1120,9 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 	var used int
 	if cur := a.deps.Sessions.Current(); cur != nil {
 		sessionID = cur.ID
-		used = cur.TokenUsage.TotalInput
+		// Current context occupancy (see refreshTopBar) — matches the top
+		// bar so the two gauges never disagree.
+		used = cur.TokenUsage.ContextTokens
 	}
 	var provSlug, provName, modelID string
 	var max int

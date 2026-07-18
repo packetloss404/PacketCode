@@ -36,8 +36,17 @@ type Session struct {
 }
 
 type TokenUsage struct {
+	// TotalInput and TotalOutput are cumulative across every request in the
+	// session — they drive cost, not the context gauge.
 	TotalInput  int `json:"total_input"`
 	TotalOutput int `json:"total_output"`
+
+	// ContextTokens is the current context-window occupancy: the token count
+	// of the most recent request's prompt plus its completion, i.e. roughly
+	// what the next request will re-send. Unlike TotalInput it does not
+	// accumulate across turns, so the gauge reflects the live conversation
+	// size and drops after a /compact. Zero until the first usage report.
+	ContextTokens int `json:"context_tokens"`
 }
 
 type CostInfo struct {
@@ -191,6 +200,14 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 	}
 	m.current.TokenUsage.TotalInput += usage.InputTokens
 	m.current.TokenUsage.TotalOutput += usage.OutputTokens
+	// Current context occupancy = this request's prompt + completion. Each
+	// request reports its full prompt size (not a delta), so overwriting —
+	// rather than accumulating — tracks the live conversation size. Only
+	// update when the provider actually reported input tokens, so a usage
+	// report that omits them doesn't zero the gauge mid-session.
+	if usage.InputTokens > 0 {
+		m.current.TokenUsage.ContextTokens = usage.InputTokens + usage.OutputTokens
+	}
 	m.current.Cost.TotalUSD = float64(m.current.TokenUsage.TotalInput)*inputPer1M/1_000_000 +
 		float64(m.current.TokenUsage.TotalOutput)*outputPer1M/1_000_000
 	m.mu.Unlock()

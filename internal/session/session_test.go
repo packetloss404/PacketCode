@@ -53,6 +53,27 @@ func TestManager_UpdateUsageComputesCost(t *testing.T) {
 	assert.InDelta(t, 6.00, got.Cost.TotalUSD, 1e-9, "cost = 1M*$2/M + 0.5M*$8/M")
 }
 
+func TestManager_ContextTokensTracksCurrentNotCumulative(t *testing.T) {
+	m := NewManager(t.TempDir())
+	_, err := m.New("openai", "gpt-4.1")
+	require.NoError(t, err)
+
+	// Three turns; each request reports its full (growing) prompt size.
+	require.NoError(t, m.UpdateUsage(provider.Usage{InputTokens: 1000, OutputTokens: 200}, 1, 1))
+	require.NoError(t, m.UpdateUsage(provider.Usage{InputTokens: 1800, OutputTokens: 300}, 1, 1))
+	require.NoError(t, m.UpdateUsage(provider.Usage{InputTokens: 2500, OutputTokens: 400}, 1, 1))
+
+	got := m.Current()
+	// TotalInput accumulates (for cost); ContextTokens is just the latest
+	// request's prompt + completion (current occupancy).
+	assert.Equal(t, 5300, got.TokenUsage.TotalInput, "cumulative input")
+	assert.Equal(t, 2900, got.TokenUsage.ContextTokens, "current occupancy = last 2500+400")
+
+	// A usage report without input tokens must not zero the gauge.
+	require.NoError(t, m.UpdateUsage(provider.Usage{InputTokens: 0, OutputTokens: 50}, 1, 1))
+	assert.Equal(t, 2900, m.Current().TokenUsage.ContextTokens, "missing input tokens leaves gauge intact")
+}
+
 func TestManager_ListSortsNewestFirst(t *testing.T) {
 	dir := t.TempDir()
 	m1 := NewManager(dir)
