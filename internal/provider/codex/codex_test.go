@@ -105,3 +105,22 @@ data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output
 		t.Fatalf("unexpected stream result: text=%q done=%v", text, done)
 	}
 }
+
+func TestSummaryFor_OmitsForUnsupportedModel(t *testing.T) {
+	p := New(writeAuth(t, "tok"))
+	// Inject a catalog with a spark-like model that rejects the summary param.
+	p.catalog = []cachedModel{
+		{Slug: "gpt-5.5", SummarySupported: true},
+		{Slug: "gpt-5.3-codex-spark", SummarySupported: false},
+	}
+	if got := p.summaryFor("gpt-5.5"); got != "auto" {
+		t.Fatalf("gpt-5.5 summary = %q, want auto", got)
+	}
+	if got := p.summaryFor("gpt-5.3-codex-spark"); got != "" {
+		t.Fatalf("spark summary = %q, want empty (omit to avoid 400)", got)
+	}
+	// Unknown model defaults to auto.
+	if got := p.summaryFor("something-new"); got != "auto" {
+		t.Fatalf("unknown summary = %q, want auto", got)
+	}
+}

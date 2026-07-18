@@ -298,6 +298,66 @@ func TestAutocomplete_WidthClamp(t *testing.T) {
 	}
 }
 
+// fileEntries returns a small set of path-shaped entries for the file
+// (@-mention) mode tests.
+func fileEntries() []Entry {
+	return []Entry{
+		{Verb: "internal/ui/components/input/input.go", Usage: "internal/ui/components/input/input.go", Desc: "internal/ui/components/input"},
+		{Verb: "internal/app/app.go", Usage: "internal/app/app.go", Desc: "internal/app"},
+		{Verb: "cmd/main.go", Usage: "cmd/main.go", Desc: "cmd"},
+		{Verb: "README.md", Usage: "README.md", Desc: "."},
+	}
+}
+
+// TestAutocomplete_FileMode_NoSlashStripAndBasenameMatch verifies KindFile
+// keeps the raw filter (no leading-"/" strip) and matches on the basename so
+// "inp" selects the input.go path.
+func TestAutocomplete_FileMode_NoSlashStripAndBasenameMatch(t *testing.T) {
+	m := New(nil)
+	m.SetWidth(80)
+	m.SetEntries(fileEntries())
+	m.SetKind(KindFile)
+	m.Open("inp")
+
+	if m.Kind() != KindFile {
+		t.Fatalf("Kind = %v, want KindFile", m.Kind())
+	}
+	if got := m.SelectedVerb(); got != "internal/ui/components/input/input.go" {
+		t.Fatalf("SelectedVerb = %q, want the input.go path", got)
+	}
+}
+
+// TestAutocomplete_FileMode_PathPrefixMatch verifies a leading path segment
+// filters by prefix without any "/" stripping.
+func TestAutocomplete_FileMode_PathPrefixMatch(t *testing.T) {
+	m := New(nil)
+	m.SetWidth(80)
+	m.SetEntries(fileEntries())
+	m.SetKind(KindFile)
+	m.Open("internal/app")
+
+	if got := m.SelectedVerb(); got != "internal/app/app.go" {
+		t.Fatalf("SelectedVerb = %q, want internal/app/app.go", got)
+	}
+}
+
+// TestAutocomplete_SetEntriesSwapsList verifies SetEntries fully replaces the
+// entry set (slash → file) and resets the cursor.
+func TestAutocomplete_SetEntriesSwapsList(t *testing.T) {
+	m := New(testEntries())
+	m.SetWidth(80)
+	m.SetEntries(fileEntries())
+	m.SetKind(KindFile)
+	m.Open("")
+	if got, want := m.Count(), len(fileEntries()); got != want {
+		t.Fatalf("Count after swap = %d, want %d", got, want)
+	}
+	// The old slash verbs must be gone.
+	if m.SelectedVerb() == "spawn" {
+		t.Fatalf("stale slash entry survived SetEntries")
+	}
+}
+
 func TestAutocomplete_SetFilterStripsLeadingSlash(t *testing.T) {
 	// Both "/sp" and "sp" should converge to the same filtered list:
 	// the leading "/" is stripped inside rebuild() before comparison.

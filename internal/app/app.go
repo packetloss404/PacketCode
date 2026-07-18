@@ -133,6 +133,18 @@ type App struct {
 	autocomplete  autocomplete.Model
 	slashCommands *SlashCommandRegistry
 
+	// Autocomplete entry sets. slashEntries is the canonical "/command"
+	// list, stashed so file-mention mode can swap it back out when the
+	// user returns to a slash buffer. fileIndex is the lazily-built
+	// "@file" list (built once from WorkingDir on the first @-mention).
+	// mentionStart is the byte offset of the "@" for the token the popup
+	// is currently completing, so acceptMentionAutocomplete knows where to
+	// splice the chosen path.
+	slashEntries   []autocomplete.Entry
+	fileIndex      []autocomplete.Entry
+	fileIndexBuilt bool
+	mentionStart   int
+
 	// Agent + bridge.
 	agent            *agent.Agent
 	approver         *uiApprover
@@ -282,6 +294,7 @@ func New(deps Deps) (*App, error) {
 	}
 
 	slashCommands := LoadSlashRegistry(deps.WorkingDir)
+	slashEntries := buildAutocompleteEntries(slashCommands.HelpRows())
 	app := &App{
 		deps:             deps,
 		topbar:           topbar.New(),
@@ -293,8 +306,9 @@ func New(deps Deps) (*App, error) {
 		picker:           picker.New("", ""),
 		prompt:           prompt.New(""),
 		spinner:          spinner.New(),
-		autocomplete:     autocomplete.New(buildAutocompleteEntries(slashCommands.HelpRows())),
+		autocomplete:     autocomplete.New(slashEntries),
 		slashCommands:    slashCommands,
+		slashEntries:     slashEntries,
 		agent:            a,
 		approver:         approver,
 		permissionPolicy: policy,
@@ -613,16 +627,30 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "tab":
 			if verb := a.autocomplete.SelectedVerb(); verb != "" {
+				if a.autocomplete.Kind() == autocomplete.KindFile {
+					return a, a.acceptMentionAutocomplete(verb)
+				}
 				return a, a.acceptAutocomplete(verb)
 			}
 			return a, nil
 		case "enter":
 			verb := a.autocomplete.SelectedVerb()
-			text := a.input.Value()
-			bufferIsBareVerb := strings.HasPrefix(text, "/") &&
-				!strings.ContainsAny(text, " \t\n")
-			if verb != "" && bufferIsBareVerb {
-				return a, a.acceptAutocomplete(verb)
+			if a.autocomplete.Kind() == autocomplete.KindFile {
+				// File mentions: Enter accepts whenever a row is
+				// highlighted (the token is mid-buffer, so there is no
+				// "bare verb" restriction — accepting splices the path and
+				// leaves the rest of the line intact).
+				if verb != "" {
+					return a, a.acceptMentionAutocomplete(verb)
+				}
+				// No match → fall through to the normal submit path.
+			} else {
+				text := a.input.Value()
+				bufferIsBareVerb := strings.HasPrefix(text, "/") &&
+					!strings.ContainsAny(text, " \t\n")
+				if verb != "" && bufferIsBareVerb {
+					return a, a.acceptAutocomplete(verb)
+				}
 			}
 			// Fall through to the input's SubmitMsg path (no matches,
 			// or buffer already contains args — let the user send it).
@@ -738,20 +766,48 @@ func (a *App) refreshAutocomplete() {
 		return
 	}
 	text := a.input.Value()
-	if !strings.HasPrefix(text, "/") {
+
+	// Slash completer: the whole buffer is a bare "/verb" with no
+	// whitespace yet. These are the pre-existing conditions — unchanged.
+	if strings.HasPrefix(text, "/") && !strings.ContainsAny(text, " \t\n") {
+		// Restore the slash entry set if we'd swapped in the file index.
+		if a.autocomplete.Kind() == autocomplete.KindFile {
+			a.autocomplete.SetEntries(a.slashEntries)
+		}
+		a.autocomplete.SetKind(autocomplete.KindSlash)
+		filter := strings.TrimPrefix(text, "/")
+		a.autocomplete.SetWidth(a.width)
+		if a.autocomplete.Visible() {
+			a.autocomplete.SetFilter(filter)
+		} else {
+			a.autocomplete.Open(filter)
+		}
+		return
+	}
+
+	// File-mention completer: the token ending at the caret is "@query".
+	start, query, ok := activeMentionToken(text)
+	if !ok {
 		a.autocomplete.Close()
 		return
 	}
-	if strings.ContainsAny(text, " \t\n") {
-		a.autocomplete.Close()
-		return
+	if !a.fileIndexBuilt {
+		a.fileIndex = buildMentionEntries(a.deps.WorkingDir)
+		a.fileIndexBuilt = true
 	}
-	filter := strings.TrimPrefix(text, "/")
+	a.mentionStart = start
+	// Only swap the (potentially large) file list in when entering file
+	// mode; on subsequent keystrokes the entries are already loaded and we
+	// just re-filter.
+	if a.autocomplete.Kind() != autocomplete.KindFile {
+		a.autocomplete.SetEntries(a.fileIndex)
+		a.autocomplete.SetKind(autocomplete.KindFile)
+	}
 	a.autocomplete.SetWidth(a.width)
 	if a.autocomplete.Visible() {
-		a.autocomplete.SetFilter(filter)
+		a.autocomplete.SetFilter(query)
 	} else {
-		a.autocomplete.Open(filter)
+		a.autocomplete.Open(query)
 	}
 }
 
@@ -775,6 +831,18 @@ func (a *App) acceptAutocomplete(verb string) tea.Cmd {
 		return a.openModelPicker()
 	}
 	a.input.SetValue("/" + verb + " ")
+	return nil
+}
+
+// acceptMentionAutocomplete handles the user accepting a highlighted file row
+// (Tab, or Enter). It splices "@<path> " over the active "@query" token in the
+// buffer, closes the popup, and re-refreshes so the popup reflects the new
+// buffer (the trailing space means the mention token is complete, so the
+// popup stays closed until the next "@").
+func (a *App) acceptMentionAutocomplete(path string) tea.Cmd {
+	a.input.ReplaceMention(a.mentionStart, len(a.input.Value()), path)
+	a.autocomplete.Close()
+	a.refreshAutocomplete()
 	return nil
 }
 

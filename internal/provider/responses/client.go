@@ -57,6 +57,11 @@ type Client struct {
 	// codex provider send each model's preferred default effort. A non-empty
 	// return wins over ReasoningEffort; an empty return falls back to it.
 	EffortFor func(model string) string
+
+	// SummaryFor, when set, returns the reasoning.summary value for a model
+	// ("auto", "detailed", …) or "" to omit it. Omitting matters for models
+	// that reject the parameter (a 400). Defaults to "auto" when unset.
+	SummaryFor func(model string) string
 }
 
 // NewClient returns a Client with a streaming-friendly HTTP client (no overall
@@ -187,9 +192,10 @@ func (c *Client) buildRequest(req provider.ChatRequest) requestBody {
 		body.ToolChoice = "auto"
 	}
 	if effort := c.effortForModel(req.Model); effort != "" {
-		// summary:"auto" streams a readable reasoning summary the UI can show
-		// as live "thinking".
-		body.Reasoning = &reasoningParam{Effort: effort, Summary: "auto"}
+		// Request a reasoning summary the UI can show as live "thinking".
+		// summaryForModel returns "" for models that reject the parameter, so
+		// we don't 400 them; models that support it stream summary deltas.
+		body.Reasoning = &reasoningParam{Effort: effort, Summary: c.summaryForModel(req.Model)}
 	}
 	return body
 }
@@ -203,6 +209,16 @@ func (c *Client) effortForModel(model string) string {
 		}
 	}
 	return c.ReasoningEffort
+}
+
+// summaryForModel resolves the reasoning.summary value for a model. The
+// per-model SummaryFor hook decides (returning "" to omit the parameter for
+// models that reject it); without a hook we default to "auto".
+func (c *Client) summaryForModel(model string) string {
+	if c.SummaryFor != nil {
+		return c.SummaryFor(model)
+	}
+	return "auto"
 }
 
 func toFunctionTools(tools []provider.ToolDefinition) []functionTool {

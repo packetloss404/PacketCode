@@ -22,6 +22,39 @@ func TestInput_SetValueReplacesBufferAndMovesCursorToEnd(t *testing.T) {
 	}
 }
 
+// TestInput_ReplaceMention splices the chosen path over the "@query" token
+// and leaves the caret at the end with a trailing space.
+func TestInput_ReplaceMention(t *testing.T) {
+	m := New()
+	m.SetValue("hello @inp")
+	// "@inp" starts at byte 6; end is the buffer length (caret at end).
+	m.ReplaceMention(6, len(m.Value()), "internal/x.go")
+	if got, want := m.Value(), "hello @internal/x.go "; got != want {
+		t.Fatalf("Value() = %q, want %q", got, want)
+	}
+}
+
+// TestInput_ReplaceMention_PreservesTail keeps text after the token intact.
+func TestInput_ReplaceMention_PreservesTail(t *testing.T) {
+	m := New()
+	m.SetValue("a @q z")
+	// Replace only the "@q" at bytes [2,4); the " z" tail must survive.
+	m.ReplaceMention(2, 4, "path.go")
+	if got, want := m.Value(), "a @path.go  z"; got != want {
+		t.Fatalf("Value() = %q, want %q", got, want)
+	}
+}
+
+// TestInput_ReplaceMention_OutOfRangeIsNoop guards defensive bounds.
+func TestInput_ReplaceMention_OutOfRangeIsNoop(t *testing.T) {
+	m := New()
+	m.SetValue("hi")
+	m.ReplaceMention(5, 9, "x.go") // start > len
+	if got := m.Value(); got != "hi" {
+		t.Fatalf("out-of-range ReplaceMention mutated buffer: %q", got)
+	}
+}
+
 func TestInput_ViewCompactByDefault(t *testing.T) {
 	m := New()
 	m.Resize(80, 0)

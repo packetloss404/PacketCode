@@ -24,9 +24,22 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
-// Entry is a single slash-command row. Verb is the completion payload
-// ("spawn", no slash); Usage is the display label ("/spawn <prompt>");
-// Desc is the short description shown to the right.
+// Kind selects the popup's matching semantics. KindSlash drives the
+// "/command" completer (a leading "/" on the filter is stripped before
+// matching); KindFile drives the "@file" fuzzy-find (no strip, plus a
+// basename prefix boost so "@input" ranks .../input.go). The App swaps kind
+// as it swaps the entry list.
+type Kind int
+
+const (
+	KindSlash Kind = iota
+	KindFile
+)
+
+// Entry is a single popup row. For slash commands: Verb is the completion
+// payload ("spawn", no slash), Usage the display label ("/spawn <prompt>"),
+// Desc the short description. For file mentions: Verb and Usage are the
+// relative path and Desc is its directory.
 type Entry struct {
 	Verb  string
 	Usage string
@@ -48,6 +61,7 @@ type Model struct {
 	cursor   int
 	visible  bool
 	width    int
+	kind     Kind
 }
 
 // New returns a hidden Model seeded with the given entries. The entry
@@ -67,6 +81,24 @@ func (m *Model) Open(filter string) {
 
 // Close hides the popup. Safe to call when already hidden.
 func (m *Model) Close() { m.visible = false }
+
+// SetEntries replaces the canonical entry list (used by the App to swap
+// between the slash-command set and the file-mention set) and resets the
+// filtered index and cursor. The stored filter is re-applied so the visible
+// list reflects the new entries immediately.
+func (m *Model) SetEntries(entries []Entry) {
+	cp := make([]Entry, len(entries))
+	copy(cp, entries)
+	m.entries = cp
+	m.rebuild()
+	m.cursor = 0
+}
+
+// SetKind selects the matching semantics (slash vs file). See Kind.
+func (m *Model) SetKind(k Kind) { m.kind = k }
+
+// Kind reports the popup's current matching semantics.
+func (m Model) Kind() Kind { return m.kind }
 
 // Visible reports whether the popup is currently on-screen.
 func (m Model) Visible() bool { return m.visible }
@@ -132,9 +164,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // entries whose verb+desc substring-matches the filter.
 func (m *Model) rebuild() {
 	m.filtered = m.filtered[:0]
-	needle := picker.Normalize(strings.TrimPrefix(m.filter, "/"))
+	raw := m.filter
+	// Only the slash completer carries a leading "/" in its filter; file
+	// paths must keep every character (a "/" is a real path separator).
+	if m.kind == KindSlash {
+		raw = strings.TrimPrefix(raw, "/")
+	}
+	needle := picker.Normalize(raw)
 	if needle == "" {
-		// No filter → every entry in original (keymap) order.
+		// No filter → every entry in original order.
 		for i := range m.entries {
 			m.filtered = append(m.filtered, i)
 		}
@@ -146,6 +184,16 @@ func (m *Model) rebuild() {
 		if strings.HasPrefix(verbNorm, needle) {
 			tier1 = append(tier1, i)
 			continue
+		}
+		// For file mentions, also treat a basename prefix as a tier-1 hit
+		// so "@input" ranks "internal/.../input.go" alongside true prefix
+		// matches instead of burying it in the substring tier.
+		if m.kind == KindFile {
+			baseNorm := picker.Normalize(pathBase(e.Verb))
+			if strings.HasPrefix(baseNorm, needle) {
+				tier1 = append(tier1, i)
+				continue
+			}
 		}
 		hay := picker.Normalize(e.Verb + " " + e.Desc)
 		if strings.Contains(hay, needle) {
@@ -270,6 +318,15 @@ func padOrTrunc(s string, w int) string {
 		return string(r[:w])
 	}
 	return s + strings.Repeat(" ", w-len(r))
+}
+
+// pathBase returns the final slash-separated segment of a path, or the whole
+// string when it has no "/". Used to prefix-match a file mention's basename.
+func pathBase(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // truncate clips s to at most w runes, adding an ellipsis on overflow.

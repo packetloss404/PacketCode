@@ -68,6 +68,22 @@ func (m *Model) SetValue(s string) {
 	m.syncHeight()
 }
 
+// ReplaceMention splices "@<path> " over the byte range [start, end) in the
+// buffer, used by the @-file autocomplete to swap the partially-typed
+// "@query" token for the chosen relative path. The caret lands at the end of
+// the buffer: the popup is only ever open while the active token ends at the
+// caret, so end is the caret and everything after it is preserved. Out-of-
+// range bounds are ignored (defensive; the App always passes a valid span).
+func (m *Model) ReplaceMention(start, end int, path string) {
+	v := m.ta.Value()
+	if start < 0 || end > len(v) || start > end {
+		return
+	}
+	m.ta.SetValue(v[:start] + "@" + path + " " + v[end:])
+	m.ta.CursorEnd()
+	m.syncHeight()
+}
+
 // Update runs the textarea's own logic and intercepts Enter to fire SubmitMsg.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && m.focused {

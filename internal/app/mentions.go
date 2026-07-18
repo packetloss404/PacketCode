@@ -19,9 +19,16 @@ import (
 // mentionMaxBytes caps how much of a single referenced file is inlined.
 const mentionMaxBytes = 256 * 1024
 
+// mentionCharClass is the character class for a path-like @mention token,
+// shared between the submit-time expander (mentionPattern) and the
+// interactive autocomplete popup (activeMentionToken). Keeping it in one
+// place means the popup accepts exactly the tokens the expander will later
+// resolve.
+const mentionCharClass = `A-Za-z0-9_./~-`
+
 // mentionPattern matches @ followed by a path-like token. Trailing sentence
 // punctuation is trimmed afterward so "see @main.go." doesn't swallow the dot.
-var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_./~-]+)`)
+var mentionPattern = regexp.MustCompile(`@([` + mentionCharClass + `]+)`)
 
 // expandFileMentions scans prompt for @<path> tokens, reads each that resolves
 // to a readable text file within root, and returns the prompt augmented with

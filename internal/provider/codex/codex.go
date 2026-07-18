@@ -70,6 +70,7 @@ func New(authPath string) *Provider {
 		catalog:  loadCatalog(authPath),
 	}
 	p.client.EffortFor = p.effortFor
+	p.client.SummaryFor = p.summaryFor
 	return p
 }
 
@@ -78,6 +79,7 @@ func NewWithBaseURL(authPath, baseURL string) *Provider {
 	p := New(authPath)
 	p.client = responses.NewClient(baseURL, authAdapter{store: p.store})
 	p.client.EffortFor = p.effortFor
+	p.client.SummaryFor = p.summaryFor
 	return p
 }
 
@@ -90,6 +92,24 @@ func (p *Provider) effortFor(model string) string {
 		}
 	}
 	return defaultEffort
+}
+
+// summaryFor returns the reasoning.summary value to request for a model:
+// "auto" when the model accepts the parameter, "" to omit it when it doesn't
+// (gpt-5.3-codex-spark rejects it with a 400). Requesting "auto" makes live
+// "thinking" appear on models that stream summaries (gpt-5.4/5.5) and is
+// harmlessly ignored by those that don't (the gpt-5.6 family). Unknown models
+// default to "auto".
+func (p *Provider) summaryFor(model string) string {
+	for _, m := range p.catalog {
+		if m.Slug == model {
+			if m.SummarySupported {
+				return "auto"
+			}
+			return ""
+		}
+	}
+	return "auto"
 }
 
 func (p *Provider) Name() string               { return displayName }

@@ -135,10 +135,14 @@ func TestLiveReasoning(t *testing.T) {
 	if err := p.ValidateKey(context.Background(), ""); err != nil {
 		t.Fatalf("no Codex login: %v", err)
 	}
+	model := DefaultModel
+	if m := os.Getenv("CODEX_MODEL"); m != "" {
+		model = m
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	ch, err := p.ChatCompletion(ctx, provider.ChatRequest{
-		Model: DefaultModel,
+		Model: model,
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "A farmer has 17 sheep, all but 9 run away. Think step by step, then give the number."},
 		},
