@@ -199,7 +199,7 @@ func TestAppendAgentReasoning_RendersDimAboveAnswer(t *testing.T) {
 	m.AppendAgentReasoning("gpt-5.6-sol", "codex", "Considering the options")
 	m.AppendAgentText("gpt-5.6-sol", "codex", "Final answer.")
 	out := stripANSI(m.PendingView())
-	if !strings.Contains(out, "thinking") {
+	if !strings.Contains(out, "Thinking") {
 		t.Fatalf("reasoning label missing:\n%s", out)
 	}
 	if !strings.Contains(out, "Considering the options") {

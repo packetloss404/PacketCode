@@ -417,7 +417,7 @@ func TestApp_SubmitWhileStreamingQueuesAndRunsNext(t *testing.T) {
 	if a.input.Value() != "" {
 		t.Fatalf("input should reset after queued submit, got %q", a.input.Value())
 	}
-	if !strings.Contains(convText(a), "You (queued)") {
+	if !strings.Contains(convText(a), "queued") {
 		t.Fatalf("queued user bubble missing:\n%s", convText(a))
 	}
 	if !strings.Contains(a.topbar.View(), "1 queued") {

@@ -51,6 +51,10 @@ type Message struct {
 	// rendered dim above Content in a KindAgent bubble. Display-only.
 	Reasoning string
 
+	// Queued marks an optimistic user message submitted while a turn is still
+	// running; rendered dim with a "(queued)" marker.
+	Queued bool
+
 	// ToolCall fields populated when Kind == KindToolCall.
 	ToolName   string
 	ToolArgs   string
@@ -150,9 +154,8 @@ func (m *Model) AppendUser(content string) {
 func (m *Model) AppendQueuedUser(content string) {
 	m.emit(renderMessage(Message{
 		Kind:    KindUser,
-		Author:  "You (queued)",
-		Color:   theme.Warning,
 		Content: content,
+		Queued:  true,
 	}, m.contentWidth()))
 }
 
@@ -358,56 +361,90 @@ func (m Model) contentWidth() int {
 func renderMessage(msg Message, width int) string {
 	switch msg.Kind {
 	case KindUser:
-		return renderBubble(msg.Author, msg.Color, msg.Content, theme.StyleUserMessage, width)
+		// Flat "> text" — no bordered box (Claude Code style).
+		if msg.Queued {
+			return flatBlock(">", theme.TextDim, theme.StyleDim.Render(msg.Content+"  (queued)"), width)
+		}
+		return flatBlock(">", theme.AccentPrimary, theme.StylePrimary.Render(msg.Content), width)
 	case KindAgent:
-		body := msg.Content
+		out := ""
 		if strings.TrimSpace(msg.Reasoning) != "" {
-			thinking := theme.StyleDim.Italic(true).Render("✻ thinking\n" + strings.TrimRight(msg.Reasoning, "\n"))
-			if strings.TrimSpace(body) != "" {
-				body = thinking + "\n\n" + body
+			out = flatBlock("✻", theme.TextDim, theme.StyleDim.Italic(true).Render("Thinking… "+strings.TrimRight(msg.Reasoning, "\n")), width)
+		}
+		if strings.TrimSpace(msg.Content) != "" {
+			answer := flatBlock("⏺", msg.Color, msg.Content, width)
+			if out != "" {
+				out += "\n" + answer
 			} else {
-				body = thinking
+				out = answer
 			}
 		}
-		return renderBubble(msg.Author, msg.Color, body, theme.StyleAgentMessage, width)
+		return out
 	case KindSystem:
 		if msg.Content == "" {
 			return ""
 		}
-		w := width - 4
-		if w < 10 {
-			w = 10
-		}
-		return theme.StyleSystemMessage.Width(w).Render(msg.Content)
+		// Dim, prefixed, no box.
+		return flatBlock("·", theme.TextDim, theme.StyleDim.Render(msg.Content), width)
 	case KindToolCall:
 		return renderToolCall(msg, width)
 	}
 	return ""
 }
 
-func renderBubble(author string, color lipgloss.Color, body string, base lipgloss.Style, width int) string {
-	header := lipgloss.NewStyle().Foreground(color).Bold(true).Render(author)
-	content := header + "\n" + body
-	return base.Width(width - 2).Render(content)
+// flatBlock renders body with a colored marker on the first line and any
+// continuation lines indented to align under the text — the flat,
+// bordered-box-free style Claude Code uses. body may already carry styling; it
+// is wrapped to the available width.
+func flatBlock(marker string, markerColor lipgloss.Color, body string, width int) string {
+	m := lipgloss.NewStyle().Foreground(markerColor).Render(marker)
+	mw := lipgloss.Width(marker)
+	indent := strings.Repeat(" ", mw+1)
+	avail := width - mw - 1
+	if avail < 10 {
+		avail = 10
+	}
+	wrapped := lipgloss.NewStyle().Width(avail).Render(body)
+	lines := strings.Split(wrapped, "\n")
+	for i, l := range lines {
+		if i == 0 {
+			lines[i] = m + " " + l
+		} else {
+			lines[i] = indent + l
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderToolCall(msg Message, width int) string {
-	header := theme.LabelBadge(msg.ToolName, theme.AccentPrimary)
-	args := truncate(msg.ToolArgs, 200)
-	parts := []string{header + theme.StyleDim.Render("  "+args)}
+	head := lipgloss.NewStyle().Foreground(theme.AccentSecondary).Render("⏺") + " " +
+		theme.StylePrimary.Render(msg.ToolName) +
+		theme.StyleDim.Render("("+truncate(msg.ToolArgs, 120)+")")
+	parts := []string{head}
 
+	var body string
 	switch {
 	case msg.ToolResult != "":
-		divider := theme.StyleDim.Render(strings.Repeat("─", 24))
-		parts = append(parts, divider, renderToolResultBody(msg, width-4))
+		body = renderToolResultBody(msg, width-6)
 	case msg.LiveOutput != "":
 		// Live streaming preview shown only while the command runs and no
 		// committed result exists yet. Dimmed so it reads as in-progress;
 		// replaced wholesale by the result block on CompleteToolCall.
-		divider := theme.StyleDim.Render(strings.Repeat("─", 24))
-		parts = append(parts, divider, theme.StyleDim.Render(strings.TrimRight(msg.LiveOutput, "\n")))
+		body = theme.StyleDim.Render(strings.TrimRight(msg.LiveOutput, "\n"))
 	}
-	return theme.StyleToolCall.Width(width - 2).Render(strings.Join(parts, "\n"))
+	if body != "" {
+		// "⎿" tree connector on the first result line (Claude Code style),
+		// continuation indented under it.
+		conn := theme.StyleDim.Render("⎿")
+		for i, l := range strings.Split(body, "\n") {
+			if i == 0 {
+				parts = append(parts, "  "+conn+" "+l)
+			} else {
+				parts = append(parts, "     "+l)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func renderToolResultBody(msg Message, width int) string {

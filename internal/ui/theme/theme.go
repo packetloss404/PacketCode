@@ -80,12 +80,11 @@ var (
 	StyleError   = lipgloss.NewStyle().Foreground(Error)
 	StyleInfo    = lipgloss.NewStyle().Foreground(Info)
 
+	// StyleTopBar renders the status line flat (no border) — a dim single line,
+	// matching Claude Code's restrained bottom status rather than a boxed bar.
 	StyleTopBar = lipgloss.NewStyle().
-			Background(BaseSurface).
-			Foreground(TextPrimary).
-			Padding(0, 1).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(BaseBorder)
+			Foreground(TextSecondary).
+			Padding(0, 1)
 
 	StyleUserMessage = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
