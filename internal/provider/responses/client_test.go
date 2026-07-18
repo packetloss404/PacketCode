@@ -242,3 +242,49 @@ func TestChatCompletionAPIError(t *testing.T) {
 		t.Fatalf("expected API error surfaced, got %v", err)
 	}
 }
+
+func TestReasoningSummaryStreamed(t *testing.T) {
+	stream := `data: {"type":"response.reasoning_summary_text.delta","delta":"Let me think. "}
+
+data: {"type":"response.reasoning_summary_text.delta","delta":"First check X."}
+
+data: {"type":"response.output_text.delta","delta":"Answer."}
+
+data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}
+
+`
+	auth := &fakeAuth{access: "t", account: "a"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, auth)
+	ch, err := c.ChatCompletion(context.Background(), provider.ChatRequest{Model: "gpt-5.6-sol"})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+	var reasoning, text strings.Builder
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventReasoningDelta:
+			reasoning.WriteString(ev.TextDelta)
+		case provider.EventTextDelta:
+			text.WriteString(ev.TextDelta)
+		}
+	}
+	if reasoning.String() != "Let me think. First check X." {
+		t.Fatalf("reasoning = %q", reasoning.String())
+	}
+	if text.String() != "Answer." {
+		t.Fatalf("text = %q", text.String())
+	}
+}
+
+func TestBuildRequest_RequestsReasoningSummary(t *testing.T) {
+	c := NewClient("http://x", &fakeAuth{})
+	body := c.buildRequest(provider.ChatRequest{Model: "gpt-5.6-sol"})
+	if body.Reasoning == nil || body.Reasoning.Summary != "auto" {
+		t.Fatalf("reasoning summary not requested: %+v", body.Reasoning)
+	}
+}

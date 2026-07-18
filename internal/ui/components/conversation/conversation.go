@@ -47,6 +47,10 @@ type Message struct {
 	Color   lipgloss.Color
 	Content string
 
+	// Reasoning is the model's streamed reasoning summary (Codex/Responses),
+	// rendered dim above Content in a KindAgent bubble. Display-only.
+	Reasoning string
+
 	// ToolCall fields populated when Kind == KindToolCall.
 	ToolName   string
 	ToolArgs   string
@@ -166,6 +170,24 @@ func (m *Model) AppendAgentText(model, providerSlug, chunk string) {
 		Author:  fmt.Sprintf("packetcode (%s)", model),
 		Color:   theme.ProviderColor(providerSlug),
 		Content: chunk,
+	}
+}
+
+// AppendAgentReasoning appends a streaming chunk of the model's reasoning
+// summary to the pending agent message, creating it if absent. Reasoning
+// arrives before (and possibly interleaved with) the answer text; both live in
+// the same pending block, with reasoning rendered dim above the answer.
+func (m *Model) AppendAgentReasoning(model, providerSlug, chunk string) {
+	if m.pending != nil && m.pending.Kind == KindAgent {
+		m.pending.Reasoning += chunk
+		return
+	}
+	m.flushPending()
+	m.pending = &Message{
+		Kind:      KindAgent,
+		Author:    fmt.Sprintf("packetcode (%s)", model),
+		Color:     theme.ProviderColor(providerSlug),
+		Reasoning: chunk,
 	}
 }
 
@@ -338,7 +360,16 @@ func renderMessage(msg Message, width int) string {
 	case KindUser:
 		return renderBubble(msg.Author, msg.Color, msg.Content, theme.StyleUserMessage, width)
 	case KindAgent:
-		return renderBubble(msg.Author, msg.Color, msg.Content, theme.StyleAgentMessage, width)
+		body := msg.Content
+		if strings.TrimSpace(msg.Reasoning) != "" {
+			thinking := theme.StyleDim.Italic(true).Render("✻ thinking\n" + strings.TrimRight(msg.Reasoning, "\n"))
+			if strings.TrimSpace(body) != "" {
+				body = thinking + "\n\n" + body
+			} else {
+				body = thinking
+			}
+		}
+		return renderBubble(msg.Author, msg.Color, body, theme.StyleAgentMessage, width)
 	case KindSystem:
 		if msg.Content == "" {
 			return ""

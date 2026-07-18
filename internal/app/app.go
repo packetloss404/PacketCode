@@ -1051,6 +1051,14 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		}
 		a.conversation.AppendAgentText(modelID, providerSlug, ev.Text)
 
+	case agent.EventReasoningDelta:
+		// The reasoning summary is the model's live "thinking" — showing it
+		// replaces the generic spinner.
+		if a.spinner.Active() {
+			a.spinner.Stop()
+		}
+		a.conversation.AppendAgentReasoning(modelID, providerSlug, ev.Text)
+
 	case agent.EventToolCallProposed:
 		// Carry the provider call id so streamed output chunks
 		// (EventToolOutputChunk) can be routed to this exact pending block.

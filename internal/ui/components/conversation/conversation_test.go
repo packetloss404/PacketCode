@@ -192,3 +192,20 @@ func TestTryRenderDiff_RowCapTruncates(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	assert.LessOrEqual(t, len(lines), 202, "renders at most ~200 rows + header")
 }
+
+func TestAppendAgentReasoning_RendersDimAboveAnswer(t *testing.T) {
+	m := New()
+	m.Resize(80, 24)
+	m.AppendAgentReasoning("gpt-5.6-sol", "codex", "Considering the options")
+	m.AppendAgentText("gpt-5.6-sol", "codex", "Final answer.")
+	out := stripANSI(m.PendingView())
+	if !strings.Contains(out, "thinking") {
+		t.Fatalf("reasoning label missing:\n%s", out)
+	}
+	if !strings.Contains(out, "Considering the options") {
+		t.Fatalf("reasoning text missing:\n%s", out)
+	}
+	if !strings.Contains(out, "Final answer.") {
+		t.Fatalf("answer text missing:\n%s", out)
+	}
+}

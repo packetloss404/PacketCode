@@ -8,6 +8,8 @@ packetcode has not cut a stable 1.0 release yet. Entries under `Unreleased` desc
 
 ### Added
 
+- **Reasoning/thinking display** — when a provider streams a reasoning summary (Responses API `summary:"auto"`), packetcode renders it live as dim "✻ thinking" text above the answer, in the same bubble. New `EventReasoningDelta` flows provider → agent → UI. (The current Codex ChatGPT backend reports `default_reasoning_summary=none` for the gpt-5.6 family, so it does not stream summaries yet; the display lights up automatically for any model that does.)
+
 - **Ollama overhaul for first-class local use (tuned for Apple Silicon).** Local `localhost:11434` remains the zero-config default; remote hosts and tuning are opt-in.
   - **Fixes silent context truncation:** every request now sets an auto-sized `num_ctx` (Ollama's ~4K default would silently drop earlier turns and file contents), snapped to a bucket to avoid KV-cache churn and capped to the model's real maximum.
   - **Accurate model metadata via `/api/show`:** real context windows and authoritative per-model tool-calling detection (replacing a stale hardcoded allow-list), cached per model.

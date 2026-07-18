@@ -124,3 +124,47 @@ func TestLiveToolCall(t *testing.T) {
 		t.Fatalf("tool args not valid JSON: %q", args)
 	}
 }
+
+// TestLiveReasoning checks that Codex streams reasoning summary deltas that
+// packetcode surfaces as EventReasoningDelta. Gated by CODEX_LIVE.
+func TestLiveReasoning(t *testing.T) {
+	if os.Getenv("CODEX_LIVE") != "1" {
+		t.Skip("set CODEX_LIVE=1 to run the live Codex smoke test")
+	}
+	p := New("")
+	if err := p.ValidateKey(context.Background(), ""); err != nil {
+		t.Fatalf("no Codex login: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	ch, err := p.ChatCompletion(ctx, provider.ChatRequest{
+		Model: DefaultModel,
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "A farmer has 17 sheep, all but 9 run away. Think step by step, then give the number."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+	var reasoning, text strings.Builder
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventReasoningDelta:
+			reasoning.WriteString(ev.TextDelta)
+		case provider.EventTextDelta:
+			text.WriteString(ev.TextDelta)
+		case provider.EventError:
+			t.Fatalf("stream error: %v", ev.Error)
+		}
+	}
+	// Note: the Codex ChatGPT backend reports default_reasoning_summary=none for
+	// the gpt-5.6 family (responses-lite mode), so it does not stream reasoning
+	// summaries today — reasoning.Len() is expected to be 0 for those models.
+	// This is informational: it documents backend behavior and confirms the
+	// answer still streams. packetcode's reasoning display is exercised by the
+	// unit tests; it lights up for any model that does emit summaries.
+	t.Logf("reasoning chars=%d answer=%q", reasoning.Len(), strings.TrimSpace(text.String()))
+	if strings.TrimSpace(text.String()) == "" {
+		t.Fatal("expected an answer")
+	}
+}

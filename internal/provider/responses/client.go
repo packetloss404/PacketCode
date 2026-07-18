@@ -92,7 +92,8 @@ type requestBody struct {
 }
 
 type reasoningParam struct {
-	Effort string `json:"effort,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 // inputItem is one element of the Responses "input" array. The set of fields
@@ -186,7 +187,9 @@ func (c *Client) buildRequest(req provider.ChatRequest) requestBody {
 		body.ToolChoice = "auto"
 	}
 	if effort := c.effortForModel(req.Model); effort != "" {
-		body.Reasoning = &reasoningParam{Effort: effort}
+		// summary:"auto" streams a readable reasoning summary the UI can show
+		// as live "thinking".
+		body.Reasoning = &reasoningParam{Effort: effort, Summary: "auto"}
 	}
 	return body
 }
@@ -424,6 +427,11 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 				ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: ev.Delta}
 			}
 
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			if ev.Delta != "" {
+				ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: ev.Delta}
+			}
+
 		case "response.output_item.added":
 			if ev.Item != nil && ev.Item.Type == "function_call" {
 				calls[ev.OutputIndex] = &callState{started: true}
@@ -517,7 +525,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}
 			return
 		}
-		// All other event types (response.created, reasoning deltas,
+		// All other event types (response.created, reasoning_summary_part.*,
 		// content_part.*, output_text.done, etc.) are intentionally ignored.
 	}
 

@@ -83,6 +83,10 @@ const (
 	EventToolCallEnd
 	EventDone
 	EventError
+	// EventReasoningDelta carries a chunk of the model's reasoning summary
+	// (e.g. Codex/Responses reasoning). Text is in TextDelta. Providers that
+	// don't surface reasoning never emit it.
+	EventReasoningDelta
 )
 
 // String renders an EventType for logs and tests.
@@ -100,6 +104,8 @@ func (e EventType) String() string {
 		return "Done"
 	case EventError:
 		return "Error"
+	case EventReasoningDelta:
+		return "ReasoningDelta"
 	default:
 		return "Unknown"
 	}
