@@ -862,6 +862,16 @@ func (a *App) refreshTopBar() {
 		a.topbar.SetPermissionProfile("")
 	}
 	a.topbar.SetOperation(a.streaming, a.operationLabel, a.operationStarted, len(a.queuedInputs))
+
+	// When no external statusline command is configured, render packetcode's
+	// built-in Claude Code-style statusline natively (no jq/subprocess) and
+	// feed it through the top bar's custom-line slot. Doing this here — on the
+	// same per-second tick as the rest of the top bar — keeps the live
+	// operation timer current. An external [statusline].command, when set,
+	// owns the custom line instead (see renderStatusLine).
+	if a.statusLine == nil || !a.statusLine.Enabled() {
+		a.topbar.SetCustomLine(statusline.RenderDefault(a.statusLineSnapshot()))
+	}
 }
 
 func (a *App) renderStatusLine(manual bool) tea.Cmd {
@@ -1830,7 +1840,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 		return nil
 	}
 	var out []string
-	for _, slug := range []string{"openai", "anthropic", "gemini", "minimax", "openrouter", "ollama"} {
+	for _, slug := range []string{"openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama"} {
 		if _, exists := a.deps.Factories[slug]; exists {
 			out = append(out, slug)
 		}
@@ -1841,7 +1851,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 			continue
 		}
 		switch slug {
-		case "openai", "anthropic", "gemini", "minimax", "openrouter", "ollama":
+		case "openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama":
 			continue
 		default:
 			customSlugs = append(customSlugs, slug)

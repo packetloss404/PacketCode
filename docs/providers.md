@@ -1,16 +1,62 @@
 # Providers And Models
 
-packetcode supports six provider slugs:
+packetcode supports these provider slugs:
 
 | Slug | Needs key | Notes |
 | --- | --- | --- |
 | `openai` | Yes | Uses the OpenAI API. |
+| `codex` | No | Uses an OpenAI Codex ChatGPT subscription via `~/.codex/auth.json`. See [Codex subscription](#codex-subscription). |
 | `anthropic` | Yes | Uses the Anthropic Claude Messages API. |
 | `gemini` | Yes | Uses the Google Gemini API. |
 | `minimax` | Yes | Uses MiniMax's OpenAI-compatible API surface. |
 | `openrouter` | Yes | Lists models and pricing from OpenRouter. |
 | `ollama` | No | Uses a reachable Ollama server. |
 | custom slug | Optional | Uses a user-configured OpenAI-compatible `/v1` endpoint. |
+
+## Codex Subscription
+
+The `codex` provider lets you drive packetcode with an OpenAI Codex **ChatGPT
+subscription** (Plus/Pro/Team/Enterprise) instead of a per-token API key. It
+does not implement its own login — it reuses the OAuth credentials the official
+[Codex CLI](https://github.com/openai/codex) writes when you sign in.
+
+**Setup**
+
+1. Install the Codex CLI and run `codex login`, choosing **Sign in with
+   ChatGPT** (not the API-key option). This writes OAuth tokens to
+   `~/.codex/auth.json`.
+2. In packetcode, switch with `/provider codex`, or launch with
+   `packetcode --provider codex`.
+
+That's it — there is no key to paste. The provider row shows `ChatGPT login`
+in the picker, and `packetcode doctor` reports the credential source as the
+`auth.json` path.
+
+**How it works**
+
+- packetcode reads the access token, refresh token, and account id from
+  `~/.codex/auth.json` on every request, so it stays in sync with the Codex CLI.
+- When the access token expires, packetcode exchanges the refresh token for a
+  new one against the OpenAI OAuth endpoint and writes the result back to
+  `auth.json` (preserving the file's other fields).
+- Requests go to the ChatGPT backend's **Responses API**, not the standard
+  `/chat/completions` endpoint.
+- The model list is read from the Codex CLI's `models_cache.json` (next to
+  `auth.json`), so packetcode's model picker stays in sync with whatever your
+  account can use — e.g. `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.5`.
+  Each model is sent its Codex-default reasoning effort. If the cache is
+  missing, a built-in fallback list is used.
+- Cost is reported as `$0` because a subscription bills a flat rate rather than
+  per token. Your ChatGPT plan's usage limits still apply.
+
+**Notes and limits**
+
+- Requires the Codex CLI login; if `auth.json` is missing or holds only an
+  `OPENAI_API_KEY` (API-key mode), packetcode explains what to do. For per-token
+  API billing, use the `openai` provider instead.
+- Non-standard `CODEX_HOME` layouts are honored (the same env var the Codex CLI
+  uses). You can also point at a specific file with `host` under
+  `[providers.codex]` in `~/.packetcode/config.toml`.
 
 ## Configure Keys
 
@@ -57,15 +103,15 @@ When switching providers, packetcode uses that provider's saved `default_model`.
 ```toml
 [default]
 provider = "openai"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 
 [providers.openai]
 api_key = "sk-..."
-default_model = "gpt-5.5"
+default_model = "gpt-5.6-sol"
 
 [providers.anthropic]
 api_key = "sk-ant-..."
-default_model = "claude-opus-4-7"
+default_model = "claude-opus-4-8"
 
 [providers.gemini]
 api_key = "AI..."
@@ -73,12 +119,19 @@ default_model = "gemini-2.5-pro"
 
 [providers.minimax]
 api_key = "sk-..."
-default_model = "MiniMax-M2.7-highspeed"
+default_model = "MiniMax-M3"
 
 [providers.ollama]
 host = "http://localhost:11434"
 default_model = "qwen2.5-coder:14b"
+# Optional tuning — all default to packetcode's smart values, so a stock
+# local install needs none of these:
+# num_ctx = 65536        # fixed context window; omit to auto-size per request (capped to the model's max)
+# keep_alive = "30m"     # how long the model stays loaded; "-1" pins it, "0" unloads immediately
+# temperature = 0.2      # omit to use the model's own default
 ```
+
+A stock local Ollama needs zero configuration — packetcode auto-sizes the context window to each prompt (capped to the model's real maximum, read from `/api/show`), keeps the model loaded for 30 minutes to avoid reload latency, and detects per-model tool support automatically. The tuning keys above are only for overriding those defaults.
 
 `host` is only used for Ollama. If omitted, packetcode defaults to `http://localhost:11434`. A bare host like `ollama.internal` is normalized to `http://ollama.internal:11434`. You can also set `PACKETCODE_OLLAMA_HOST` to override the saved host for one machine.
 

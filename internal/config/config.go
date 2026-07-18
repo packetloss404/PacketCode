@@ -60,6 +60,13 @@ type ProviderConfig struct {
 	BrandColor     string                `toml:"brand_color,omitempty"`
 	Headers        map[string]string     `toml:"headers,omitempty"`
 	Models         []ProviderModelConfig `toml:"models,omitempty"`
+
+	// Ollama-only tuning. All optional — omitted means packetcode's smart
+	// defaults (auto-sized context, 30m keep-alive, the model's own default
+	// temperature), so a stock local install needs none of these.
+	NumCtx      int      `toml:"num_ctx,omitempty"`     // fixed context window; 0 = auto-size per request
+	KeepAlive   string   `toml:"keep_alive,omitempty"`  // e.g. "30m", "-1" (pin), "0" (unload now)
+	Temperature *float64 `toml:"temperature,omitempty"` // nil = leave to the model
 }
 
 // ProviderModelConfig is an optional static model entry for custom
@@ -81,10 +88,18 @@ func (c ProviderConfig) IsOpenAICompatible() bool {
 	return t == "openai_compatible" || t == "openai-compatible"
 }
 
+// IsKeylessProvider reports whether a built-in provider authenticates without
+// an API key: ollama (a local server) and codex (a ChatGPT subscription whose
+// OAuth tokens live in ~/.codex/auth.json). Central so the many key-prompt,
+// setup, picker, and doctor call sites stay consistent.
+func IsKeylessProvider(slug string) bool {
+	return slug == "ollama" || slug == "codex"
+}
+
 // RequiresAPIKey reports whether packetcode should require a key before
 // registering or validating this provider.
 func (c ProviderConfig) RequiresAPIKey(slug string) bool {
-	if slug == "ollama" {
+	if IsKeylessProvider(slug) {
 		return false
 	}
 	if isReservedHostedProvider(slug) {

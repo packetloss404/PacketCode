@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.openai.com/v1"
-	DefaultModel   = "gpt-5.5"
+	DefaultModel   = "gpt-5.6-sol"
 	slug           = "openai"
 	displayName    = "OpenAI"
 )

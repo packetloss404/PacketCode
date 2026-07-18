@@ -420,7 +420,7 @@ func shouldRunSetup(cfg *config.Config, providerOverride string) bool {
 	if cfg.Default.Provider == "" {
 		return true
 	}
-	if cfg.Default.Provider == "ollama" {
+	if config.IsKeylessProvider(cfg.Default.Provider) {
 		return false
 	}
 	return providerRequiresAPIKey(cfg, cfg.Default.Provider) && cfg.GetProviderKey(cfg.Default.Provider) == ""
@@ -443,7 +443,14 @@ func welcomeVersion() string {
 // so a machine-specific daemon address can stay out of committed files.
 // If unset, the Ollama provider uses its generic localhost default.
 func ollamaHost(cfg *config.Config) string {
+	// Resolution order: packetcode-specific override, then the standard Ollama
+	// env var (so an existing `OLLAMA_HOST` in the user's shell just works),
+	// then saved config, then the built-in localhost default. Local is always
+	// the zero-config default; remote is opt-in via any of these.
 	if host := os.Getenv("PACKETCODE_OLLAMA_HOST"); host != "" {
+		return host
+	}
+	if host := os.Getenv("OLLAMA_HOST"); host != "" {
 		return host
 	}
 	if pc, ok := cfg.Providers["ollama"]; ok && pc.Host != "" {

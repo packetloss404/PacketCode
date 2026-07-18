@@ -6,6 +6,20 @@ packetcode has not cut a stable 1.0 release yet. Entries under `Unreleased` desc
 
 ## [Unreleased]
 
+### Added
+
+- **Ollama overhaul for first-class local use (tuned for Apple Silicon).** Local `localhost:11434` remains the zero-config default; remote hosts and tuning are opt-in.
+  - **Fixes silent context truncation:** every request now sets an auto-sized `num_ctx` (Ollama's ~4K default would silently drop earlier turns and file contents), snapped to a bucket to avoid KV-cache churn and capped to the model's real maximum.
+  - **Accurate model metadata via `/api/show`:** real context windows and authoritative per-model tool-calling detection (replacing a stale hardcoded allow-list), cached per model.
+  - **Protocol correctness:** native `tool_name` on tool results, `keep_alive: 30m` to avoid mid-session reloads, `done_reason: length` surfaced as a truncation error, and the standard `OLLAMA_HOST` env var honored.
+  - **Tuning under `[providers.ollama]`:** optional `num_ctx`, `keep_alive`, `temperature`.
+  - **Model management:** `PullModel` (streaming download progress), `LoadedModels` (`/api/ps` with GPU-vs-CPU-offload detection), `Warmup` (preload to avoid cold starts), and a "start it with `ollama serve`" hint when the daemon is down.
+  - **Apple Silicon awareness:** detects unified memory (`hw.memsize`), recommends coding models that fit the GPU budget (and warns before one would spill to CPU), and exposes tokens/sec + time-to-first-token from Ollama's timing fields.
+- **Refreshed model catalogs** — updated built-in pricing/context tables and default models to the current lineups: OpenAI GPT-5.6 (`gpt-5.6-sol` default, plus `terra`/`luna`), Anthropic Claude Opus 4.8 (default), Sonnet 5, and Fable 5, and MiniMax M3 (default). Dynamic model listing still surfaces anything the account can access; these just fix the defaults and cost estimates.
+- **Statusline on by default** — packetcode now renders a Claude Code-style statusline natively out of the box (no `jq`/subprocess), `[provider·model] 🟢 pct% (used/max) | 📂 project | 🌿 branch | 💲cost | ◷ op`, refreshed live each second. Set `[statusline].command` to override it with your own script.
+- **Claude Code-compatible statusline** — the statusline stdin snapshot is now a superset of Claude Code's, adding `cwd`, `model.display_name`, and `context_window.context_window_size` / `current_usage.*` aliases, so a statusline script written for Claude Code runs against packetcode unchanged (point `[statusline].command` at your existing `~/.claude/statusline/statusline.sh`). A molded variant that keeps the Claude Code look and adds packetcode-native segments (provider, session cost, live operation) ships at `docs/statusline/statusline.sh`.
+- **Codex provider** — drive packetcode with an OpenAI Codex ChatGPT subscription instead of a per-token API key. It reuses the OAuth credentials the official Codex CLI stores in `~/.codex/auth.json` (`codex login` → "Sign in with ChatGPT"), refreshes the access token automatically on expiry, and talks to the ChatGPT backend's Responses API. The provider is keyless like Ollama, reports `$0` cost (the subscription bills a flat rate), and lists the account's Codex models by reading the Codex CLI's live `models_cache.json` (e.g. `gpt-5.6-sol`), each sent its Codex-default reasoning effort. Select it with `/provider codex` or `--provider codex`. See `docs/providers.md`.
+
 ## [0.5.1] - 2026-05-30
 
 ### Added

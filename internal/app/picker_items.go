@@ -21,10 +21,12 @@ func providerItems(regs []provider.Provider, cfg *config.Config, activeSlug stri
 		keyStatus := "(no key)"
 		if slug == "ollama" {
 			keyStatus = "local"
+		} else if slug == "codex" {
+			keyStatus = "ChatGPT login"
 		}
 		if cfg != nil {
 			if pc, ok := cfg.Providers[slug]; ok {
-				if !pc.RequiresAPIKey(slug) && slug != "ollama" {
+				if !pc.RequiresAPIKey(slug) && !config.IsKeylessProvider(slug) {
 					keyStatus = "keyless"
 				}
 				if pc.DefaultModel != "" {
@@ -35,7 +37,7 @@ func providerItems(regs []provider.Provider, cfg *config.Config, activeSlug stri
 				}
 			}
 			// Env-var-only key case when the provider has no config entry.
-			if keyStatus == "(no key)" && slug != "ollama" && cfg.GetProviderKey(slug) != "" {
+			if keyStatus == "(no key)" && !config.IsKeylessProvider(slug) && cfg.GetProviderKey(slug) != "" {
 				keyStatus = "key present"
 			}
 		}
