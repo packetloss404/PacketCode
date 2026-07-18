@@ -26,7 +26,7 @@ type Model struct {
 
 func New() Model {
 	ta := textarea.New()
-	ta.Placeholder = "Ask packetcode anything... (/ for commands)"
+	ta.Placeholder = "Ask packetcode anything... (/ commands · @ files)"
 	ta.CharLimit = 0
 	ta.MaxHeight = 4
 	ta.ShowLineNumbers = false

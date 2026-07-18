@@ -13,6 +13,8 @@ timeout_sec = 2
 
 `enabled` is optional and defaults to true when `command` is set. If the command fails, times out, or prints nothing, packetcode falls back to the built-in status bar.
 
+**A statusline is on by default.** With no `[statusline].command` configured, packetcode renders its own Claude Code-style line natively (no `jq`, no subprocess) — `[provider·model] 🟢 12% (12K/272K) | 📂 project | 🌿 branch | 💲cost | ◷ op` — updated live every second. Configure `command` only to override it with your own script.
+
 Statusline stdin:
 
 ```json
@@ -33,6 +35,24 @@ Statusline stdin:
 ```
 
 Use `/statusline` to show the active output and `/statusline refresh` to force a rerender.
+
+### Claude Code compatibility
+
+The stdin snapshot is a superset of Claude Code's statusline JSON, so a statusline script written for Claude Code works against packetcode unchanged. Alongside the packetcode-native fields above, packetcode also emits the Claude Code aliases:
+
+- `cwd` — mirror of `working_dir`
+- `model.display_name` — falls back to `model.id`
+- `context_window.context_window_size` — mirror of `context_window.max`
+- `context_window.current_usage.{input_tokens,cache_creation_input_tokens,cache_read_input_tokens}` — packetcode reports its whole used total as `input_tokens` (caches zero), so a script summing the three arrives at packetcode's used total
+
+Point `command` at your existing Claude Code statusline to reuse it verbatim:
+
+```toml
+[statusline]
+command = "$HOME/.claude/statusline/statusline.sh"
+```
+
+packetcode ships a molded variant at `docs/statusline/statusline.sh` that keeps the Claude Code look and adds packetcode-native segments (provider, session cost, live operation). packetcode has no `rate_limits` field, so any Claude Code rate-limit segment is simply omitted.
 
 ## Hooks
 

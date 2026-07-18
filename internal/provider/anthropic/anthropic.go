@@ -20,7 +20,7 @@ import (
 const (
 	defaultBaseURL   = "https://api.anthropic.com/v1"
 	anthropicVersion = "2023-06-01"
-	DefaultModel     = "claude-opus-4-7"
+	DefaultModel     = "claude-opus-4-8"
 	defaultMaxTokens = 8192
 	slug             = "anthropic"
 	displayName      = "Anthropic"

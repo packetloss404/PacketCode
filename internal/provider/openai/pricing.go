@@ -17,15 +17,18 @@ type pricingEntry struct {
 //
 // Prices last verified against OpenAI's public price list in May 2026.
 var pricingTable = map[string]pricingEntry{
-	"gpt-5.5":      {Input: 5.00, Output: 30.00, ContextWindow: 1_050_000, SupportsTools: true},
-	"gpt-5.2":      {Input: 1.75, Output: 14.00, ContextWindow: 400_000, SupportsTools: true},
-	"gpt-5.1":      {Input: 1.25, Output: 10.00, ContextWindow: 400_000, SupportsTools: true},
-	"gpt-5":        {Input: 1.25, Output: 10.00, ContextWindow: 400_000, SupportsTools: true},
-	"gpt-4.1":      {Input: 2.00, Output: 8.00, ContextWindow: 1_000_000, SupportsTools: true},
-	"gpt-4.1-mini": {Input: 0.40, Output: 1.60, ContextWindow: 1_000_000, SupportsTools: true},
-	"gpt-4.1-nano": {Input: 0.10, Output: 0.40, ContextWindow: 1_000_000, SupportsTools: true},
-	"o3":           {Input: 10.00, Output: 40.00, ContextWindow: 200_000, SupportsTools: true},
-	"o4-mini":      {Input: 1.10, Output: 4.40, ContextWindow: 200_000, SupportsTools: true},
+	"gpt-5.6-sol":   {Input: 5.00, Output: 30.00, ContextWindow: 1_050_000, SupportsTools: true},
+	"gpt-5.6-terra": {Input: 2.50, Output: 15.00, ContextWindow: 1_050_000, SupportsTools: true},
+	"gpt-5.6-luna":  {Input: 1.00, Output: 6.00, ContextWindow: 1_050_000, SupportsTools: true},
+	"gpt-5.5":       {Input: 5.00, Output: 30.00, ContextWindow: 1_050_000, SupportsTools: true},
+	"gpt-5.2":       {Input: 1.75, Output: 14.00, ContextWindow: 400_000, SupportsTools: true},
+	"gpt-5.1":       {Input: 1.25, Output: 10.00, ContextWindow: 400_000, SupportsTools: true},
+	"gpt-5":         {Input: 1.25, Output: 10.00, ContextWindow: 400_000, SupportsTools: true},
+	"gpt-4.1":       {Input: 2.00, Output: 8.00, ContextWindow: 1_000_000, SupportsTools: true},
+	"gpt-4.1-mini":  {Input: 0.40, Output: 1.60, ContextWindow: 1_000_000, SupportsTools: true},
+	"gpt-4.1-nano":  {Input: 0.10, Output: 0.40, ContextWindow: 1_000_000, SupportsTools: true},
+	"o3":            {Input: 10.00, Output: 40.00, ContextWindow: 200_000, SupportsTools: true},
+	"o4-mini":       {Input: 1.10, Output: 4.40, ContextWindow: 200_000, SupportsTools: true},
 }
 
 // nonChatIndicators are substrings that identify a model as NOT a chat

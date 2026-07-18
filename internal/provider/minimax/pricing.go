@@ -10,6 +10,7 @@ type pricingEntry struct {
 // Prices last verified against MiniMax's public Pay-as-You-Go pricing in
 // May 2026. Context windows come from the MiniMax text model overview.
 var pricingTable = map[string]pricingEntry{
+	"MiniMax-M3":             {Input: 0.30, Output: 1.20, ContextWindow: 1_000_000, SupportsTools: true},
 	"MiniMax-M2.7-highspeed": {Input: 0.60, Output: 2.40, ContextWindow: 204_800, SupportsTools: true},
 	"MiniMax-M2.7":           {Input: 0.30, Output: 1.20, ContextWindow: 204_800, SupportsTools: true},
 	"MiniMax-M2.5-highspeed": {Input: 0.60, Output: 2.40, ContextWindow: 204_800, SupportsTools: true},
@@ -26,6 +27,7 @@ var pricingTable = map[string]pricingEntry{
 // endpoint we can use. Listing keeps the model selector functional even
 // with zero discovery support upstream.
 var fallbackModels = []string{
+	"MiniMax-M3",
 	"MiniMax-M2.7-highspeed",
 	"MiniMax-M2.7",
 	"MiniMax-M2.5-highspeed",

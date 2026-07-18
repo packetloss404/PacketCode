@@ -17,6 +17,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/permissions"
+	"github.com/packetcode/packetcode/internal/provider/codexauth"
 )
 
 type doctorReport struct {
@@ -439,6 +440,16 @@ func providerCredentialSource(cfg *config.Config, slug string) (string, bool) {
 			return "keyless, host " + redactURLUserInfo(host), true
 		}
 		return "", false
+	}
+	if slug == "codex" {
+		path := codexAuthPath(cfg)
+		if path == "" {
+			path, _ = codexauth.DefaultPath()
+		}
+		if err := codexauth.New(path).Available(); err != nil {
+			return "", false
+		}
+		return "ChatGPT subscription login (" + path + ")", true
 	}
 	pc, configured := cfg.Providers[slug]
 	if configured && !pc.RequiresAPIKey(slug) {

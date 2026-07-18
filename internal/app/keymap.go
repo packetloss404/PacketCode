@@ -16,6 +16,7 @@ var (
 	}
 	ApprovalKeys = []KeyHelp{
 		{"Y", "Approve"},
+		{"A", "Approve + don't ask again this session"},
 		{"N / Esc", "Reject"},
 	}
 	InputKeys = []KeyHelp{
@@ -72,6 +73,7 @@ var (
 		{"/undo", "Undo the most recent file change"},
 		{"/compact [--keep N]", "Summarise older messages to reclaim context"},
 		{"/cost", "Show cost breakdown (reset --yes to clear)"},
+		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
 		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},
@@ -81,6 +83,7 @@ var (
 		{"/mcp status <name>", "Show MCP server health details"},
 		{"/mcp tools <name>", "List tools exposed by an MCP server"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
+		{"/ollama [status|models|ps|pull <model>]", "Local Ollama status, models, and management"},
 		{"/transcript", "Open the current session transcript"},
 		{"/exit", "Quit packetcode"},
 		{"/quit", "Quit packetcode"},

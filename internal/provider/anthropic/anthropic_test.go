@@ -56,7 +56,7 @@ func TestProvider_ListModels_MetadataAndDefaultFirst(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"data": [
 				{"id":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","max_input_tokens":1000000,"max_tokens":64000,"capabilities":{"tools":true}},
-				{"id":"claude-opus-4-7","display_name":"Claude Opus 4.7","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"tools":true}}
+				{"id":"claude-opus-4-8","display_name":"Claude Opus 4.8","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"tools":true}}
 			]
 		}`))
 	}))
@@ -67,7 +67,7 @@ func TestProvider_ListModels_MetadataAndDefaultFirst(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, models, 2)
 	assert.Equal(t, DefaultModel, models[0].ID)
-	assert.Equal(t, "Claude Opus 4.7", models[0].DisplayName)
+	assert.Equal(t, "Claude Opus 4.8", models[0].DisplayName)
 	assert.Equal(t, 1_000_000, models[0].ContextWindow)
 	assert.True(t, models[0].SupportsTools)
 	assert.Equal(t, 5.00, models[0].InputPer1M)

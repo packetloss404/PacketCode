@@ -80,6 +80,7 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"data": [
 				{"id": "gpt-4.1"},
+				{"id": "gpt-5.6-sol"},
 				{"id": "gpt-5.5"},
 				{"id": "gpt-4.1-mini"},
 				{"id": "text-embedding-3-small"},
@@ -114,6 +115,7 @@ func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"data": [
+				{"id": "gpt-5.6-sol"},
 				{"id": "gpt-5.5"},
 				{"id": "gpt-5.5-2026-04-23"},
 				{"id": "gpt-5.5-pro"},

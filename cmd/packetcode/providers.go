@@ -7,6 +7,7 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/anthropic"
+	"github.com/packetcode/packetcode/internal/provider/codex"
 	"github.com/packetcode/packetcode/internal/provider/custom"
 	"github.com/packetcode/packetcode/internal/provider/gemini"
 	"github.com/packetcode/packetcode/internal/provider/minimax"
@@ -22,7 +23,8 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		"gemini":     func(key string) provider.Provider { return gemini.New(key) },
 		"minimax":    func(key string) provider.Provider { return minimax.New(key) },
 		"openrouter": func(key string) provider.Provider { return openrouter.New(key) },
-		"ollama":     func(_ string) provider.Provider { return ollama.New(ollamaHost(cfg)) },
+		"ollama":     func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
+		"codex":      func(_ string) provider.Provider { return codex.New(codexAuthPath(cfg)) },
 	}
 	if cfg == nil {
 		return factories
@@ -53,6 +55,24 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 	return factories
 }
 
+// ollamaOptions maps the [providers.ollama] tuning knobs into the provider's
+// Options. All are optional — an absent block yields the zero value, i.e.
+// packetcode's smart defaults.
+func ollamaOptions(cfg *config.Config) ollama.Options {
+	if cfg == nil {
+		return ollama.Options{}
+	}
+	pc, ok := cfg.Providers["ollama"]
+	if !ok {
+		return ollama.Options{}
+	}
+	return ollama.Options{
+		NumCtx:      pc.NumCtx,
+		KeepAlive:   pc.KeepAlive,
+		Temperature: pc.Temperature,
+	}
+}
+
 func customModelConfigs(in []config.ProviderModelConfig) []custom.ModelConfig {
 	if len(in) == 0 {
 		return nil
@@ -73,16 +93,29 @@ func customModelConfigs(in []config.ProviderModelConfig) []custom.ModelConfig {
 
 func providerRequiresAPIKey(cfg *config.Config, slug string) bool {
 	if cfg == nil {
-		return slug != "ollama"
+		return !config.IsKeylessProvider(slug)
 	}
 	if pc, ok := cfg.Providers[slug]; ok {
 		return pc.RequiresAPIKey(slug)
 	}
-	return slug != "ollama"
+	return !config.IsKeylessProvider(slug)
 }
 
 func builtInProviderSlugs() []string {
-	return []string{"openai", "anthropic", "gemini", "minimax", "openrouter", "ollama"}
+	return []string{"openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama"}
+}
+
+// codexAuthPath resolves the Codex auth.json location. An explicit
+// [providers.codex] host override wins (useful for tests and non-standard
+// CODEX_HOME layouts); otherwise the codex provider falls back to the
+// conventional path.
+func codexAuthPath(cfg *config.Config) string {
+	if cfg != nil {
+		if pc, ok := cfg.Providers["codex"]; ok && strings.TrimSpace(pc.Host) != "" {
+			return strings.TrimSpace(pc.Host)
+		}
+	}
+	return ""
 }
 
 func isBuiltInProvider(slug string) bool {

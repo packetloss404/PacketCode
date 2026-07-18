@@ -34,6 +34,7 @@ type EventType int
 
 const (
 	EventTextDelta        EventType = iota
+	EventReasoningDelta             // streaming chunk of the model's reasoning summary
 	EventToolCallProposed           // LLM emitted a complete tool call (pre-approval)
 	EventToolCallApproved           // user approved (or trust mode auto-approved)
 	EventToolCallRejected           // user rejected
@@ -218,6 +219,11 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 		case provider.EventTextDelta:
 			fullText += ev.TextDelta
 			events <- AgentEvent{Type: EventTextDelta, Text: ev.TextDelta}
+
+		case provider.EventReasoningDelta:
+			// Reasoning is display-only: streamed to the UI but not added to
+			// fullText or persisted as part of the assistant message.
+			events <- AgentEvent{Type: EventReasoningDelta, Text: ev.TextDelta}
 
 		case provider.EventToolCallStart:
 			asm.start(ev.ToolCall)

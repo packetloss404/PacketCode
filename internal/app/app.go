@@ -140,6 +140,12 @@ type App struct {
 	permissionBase   *permissions.Policy
 	preTrustPolicy   *permissions.Policy
 
+	// planMode holds the read-only research mode. When on, the policy is
+	// forced to read_only and turns carry a "propose a plan" instruction;
+	// planPrevProfile is the profile to restore when plan mode exits.
+	planMode        bool
+	planPrevProfile permissions.Profile
+
 	// Background-agents manager. Non-nil when deps.Jobs is set. All
 	// job-related UI code paths guard on `a.jobs != nil`.
 	jobs *jobs.Manager
@@ -438,6 +444,9 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case approval.ResultMsg:
 		switch msg.Result {
 		case approval.Approved:
+			if msg.Remember {
+				a.rememberApproval(msg.ToolCall)
+			}
 			a.approver.Resolve(agent.ApprovalDecision{Approved: true})
 		case approval.Rejected:
 			a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "user rejected"})
@@ -534,6 +543,14 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.conversation.AppendSystem("statusline: error: " + msg.err.Error())
 				}
 			}
+		}
+		return a, nil
+
+	case ollamaInfoMsg:
+		if msg.err != nil {
+			a.conversation.AppendSystem("ollama: " + msg.err.Error())
+		} else {
+			a.conversation.AppendSystem(msg.text)
 		}
 		return a, nil
 	}
@@ -856,12 +873,24 @@ func (a *App) refreshTopBar() {
 	} else {
 		a.topbar.SetJobs(0)
 	}
-	if a.permissionPolicy != nil {
+	if a.planMode {
+		a.topbar.SetPermissionProfile("plan")
+	} else if a.permissionPolicy != nil {
 		a.topbar.SetPermissionProfile(permissions.ProfileConfigName(a.permissionPolicy.Profile()))
 	} else {
 		a.topbar.SetPermissionProfile("")
 	}
 	a.topbar.SetOperation(a.streaming, a.operationLabel, a.operationStarted, len(a.queuedInputs))
+
+	// When no external statusline command is configured, render packetcode's
+	// built-in Claude Code-style statusline natively (no jq/subprocess) and
+	// feed it through the top bar's custom-line slot. Doing this here — on the
+	// same per-second tick as the rest of the top bar — keeps the live
+	// operation timer current. An external [statusline].command, when set,
+	// owns the custom line instead (see renderStatusLine).
+	if a.statusLine == nil || !a.statusLine.Enabled() {
+		a.topbar.SetCustomLine(statusline.RenderDefault(a.statusLineSnapshot()))
+	}
 }
 
 func (a *App) renderStatusLine(manual bool) tea.Cmd {
@@ -950,6 +979,19 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	if emitUser {
 		a.conversation.AppendUser(text)
 	}
+
+	// @-file mentions: the displayed user message keeps the literal @path, but
+	// the model receives the referenced files' contents inlined as context.
+	turnText := text
+	if expanded, attached := expandFileMentions(text, a.deps.WorkingDir); len(attached) > 0 {
+		turnText = expanded
+		a.conversation.AppendSystem("attached " + plural(len(attached), "file", "files") + ": " + strings.Join(attached, ", "))
+	}
+	// Plan mode: steer the read-only turn toward proposing a plan.
+	if a.planMode {
+		turnText = planModeInstruction + turnText
+	}
+
 	a.streaming = true
 	a.setOperation("thinking")
 
@@ -959,7 +1001,7 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	// key handler and EventError / agentDoneMsg paths can reach it.
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancelTurn = cancel
-	stream := a.agent.Run(ctx, text)
+	stream := a.agent.Run(ctx, turnText)
 
 	return a, tea.Batch(a.spinner.Start("Thinking..."), readAgentEvent(stream))
 }
@@ -1032,6 +1074,14 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 			a.spinner.Stop()
 		}
 		a.conversation.AppendAgentText(modelID, providerSlug, ev.Text)
+
+	case agent.EventReasoningDelta:
+		// The reasoning summary is the model's live "thinking" — showing it
+		// replaces the generic spinner.
+		if a.spinner.Active() {
+			a.spinner.Stop()
+		}
+		a.conversation.AppendAgentReasoning(modelID, providerSlug, ev.Text)
 
 	case agent.EventToolCallProposed:
 		// Carry the provider call id so streamed output chunks
@@ -1453,6 +1503,10 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleStatusLineCommand(args)
 	case "mcp":
 		return a.handleMCPCommand(args)
+	case "ollama":
+		return a.handleOllamaCommand(args)
+	case "plan":
+		return a.handlePlanCommand(args)
 	case "transcript":
 		return a.handleTranscriptCommand(args)
 	case "exit", "quit":
@@ -1830,7 +1884,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 		return nil
 	}
 	var out []string
-	for _, slug := range []string{"openai", "anthropic", "gemini", "minimax", "openrouter", "ollama"} {
+	for _, slug := range []string{"openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama"} {
 		if _, exists := a.deps.Factories[slug]; exists {
 			out = append(out, slug)
 		}
@@ -1841,7 +1895,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 			continue
 		}
 		switch slug {
-		case "openai", "anthropic", "gemini", "minimax", "openrouter", "ollama":
+		case "openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama":
 			continue
 		default:
 			customSlugs = append(customSlugs, slug)

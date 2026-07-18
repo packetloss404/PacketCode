@@ -4,7 +4,7 @@ A keyboard-first, multi-provider AI coding agent for the terminal.
 
 > Status: pre-release / active development. This README describes the current main branch, not a tagged 1.0 release.
 
-packetcode runs in your terminal, keeps your project in your hands, and can talk to OpenAI, Anthropic, Gemini, MiniMax, OpenRouter, and Ollama models through one interface. It can read, search, edit, patch, and run commands in the current project. File writes, patches, shell commands, background-agent writes, and MCP tool calls go through approval unless trust mode is enabled.
+packetcode runs in your terminal, keeps your project in your hands, and can talk to OpenAI, OpenAI Codex (via a ChatGPT subscription), Anthropic, Gemini, MiniMax, OpenRouter, and Ollama models through one interface. It can read, search, edit, patch, and run commands in the current project. File writes, patches, shell commands, background-agent writes, and MCP tool calls go through approval unless trust mode is enabled.
 
 ## Start Here
 

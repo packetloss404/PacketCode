@@ -181,6 +181,25 @@ func (p *Policy) WithRule(tool string, decision Decision) *Policy {
 	return out
 }
 
+// WithCommandPrefixRule returns a copy with an execute_command rule scoped to a
+// command prefix (e.g. ["go", "test"] allows any `go test …`). Used by the
+// approval prompt's "always allow this command" choice so a single approval
+// doesn't open up every command.
+func (p *Policy) WithCommandPrefixRule(prefix []string, decision Decision) *Policy {
+	out := &Policy{profile: ProfileAsk}
+	if p != nil {
+		out.profile = p.Profile()
+		out.rules = p.Rules()
+	}
+	out.rules = append(out.rules, Rule{
+		Tool:          "execute_command",
+		CommandPrefix: append([]string(nil), prefix...),
+		Decision:      NormalizeDecision(decision),
+		Reason:        "session rule",
+	})
+	return out
+}
+
 func (p *Policy) SummaryLines() []string {
 	profile := p.Profile()
 	lines := []string{
