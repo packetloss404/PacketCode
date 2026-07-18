@@ -6,7 +6,7 @@ var (
 	GlobalKeys = []KeyHelp{
 		{"Ctrl+P", "Open provider picker"},
 		{"Ctrl+M", "Open model picker"},
-		{"Shift+Tab", "Cycle permission mode (normal → accept edits → plan)"},
+		{"Shift+Tab", "Cycle permission mode (normal → accept edits → auto → plan)"},
 		{"Ctrl+C", "Cancel current generation; press twice to exit"},
 		{"Ctrl+L", "Clear screen (keep session)"},
 		{"Esc", "Close jobs modal / approval / picker / autocomplete popup"},
@@ -77,7 +77,7 @@ var (
 		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
 		{"/loop [interval] <prompt|/cmd>", "Repeat a prompt/command (interval or self-paced); /loop list, /loop stop"},
 		{"/workflows [run <name>|list|stop [id|all]|<id>]", "Run and monitor multi-agent workflows"},
-		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
+		{"/trust [on|off]", "Toggle 'bypass permissions' (auto-approve all tools; not in the Shift+Tab cycle)"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},
 		{"/clear", "Clear the transcript pane"},

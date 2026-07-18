@@ -27,6 +27,7 @@ const (
 	ProfileSafe Profile = "safe"
 	ProfileAsk  Profile = "ask"
 	ProfileEdit Profile = "edit"
+	ProfileAuto Profile = "auto"
 	ProfileFull Profile = "full"
 )
 
@@ -326,6 +327,24 @@ func profileDecision(profile Profile, req Request) (Decision, string) {
 			return DecisionAsk, "edit profile prompts for approval-gated tools"
 		}
 		return DecisionAllow, "tool does not require approval"
+	case ProfileAuto:
+		switch req.ToolName {
+		case "write_file", "patch_file", "execute_command":
+			return DecisionAllow, "auto profile allows file edits and shell commands"
+		}
+		if readOnlyTool(req.ToolName) {
+			return DecisionAllow, "read-only tool"
+		}
+		// Auto still prompts for the unusual, higher-risk surface — MCP
+		// tools and anything a tool explicitly flags as approval-gated —
+		// so it is a rung below full "bypass".
+		if isMCPTool(req.ToolName) {
+			return DecisionAsk, "auto profile prompts for MCP tools"
+		}
+		if req.RequiresApproval {
+			return DecisionAsk, "auto profile prompts for approval-gated tools"
+		}
+		return DecisionAllow, "tool does not require approval"
 	case ProfileFull:
 		return DecisionAllow, "full profile allows tools unless a deny rule matches"
 	case ProfileAsk:
@@ -426,6 +445,8 @@ func NormalizeProfile(profile Profile) Profile {
 		return ProfileSafe
 	case "edit", "accept_edits", "accept-edits", "workspace-write", "workspace_write":
 		return ProfileEdit
+	case "auto", "auto_accept", "auto-accept", "automatic":
+		return ProfileAuto
 	case "trusted", "trust", "bypass", "full", "bypass_permissions":
 		return ProfileFull
 	default:
@@ -439,7 +460,7 @@ func NormalizeDecision(decision Decision) Decision {
 
 func validateProfile(profile Profile) error {
 	switch profile {
-	case ProfileSafe, ProfileAsk, ProfileEdit, ProfileFull:
+	case ProfileSafe, ProfileAsk, ProfileEdit, ProfileAuto, ProfileFull:
 		return nil
 	default:
 		return fmt.Errorf("unknown permission profile %q", profile)
@@ -456,7 +477,7 @@ func validDecision(decision Decision) bool {
 }
 
 func Profiles() []Profile {
-	return []Profile{ProfileSafe, ProfileAsk, ProfileEdit, ProfileFull}
+	return []Profile{ProfileSafe, ProfileAsk, ProfileEdit, ProfileAuto, ProfileFull}
 }
 
 func ProfileConfigName(profile Profile) string {
@@ -467,6 +488,8 @@ func ProfileConfigName(profile Profile) string {
 		return "ask"
 	case ProfileEdit:
 		return "accept_edits"
+	case ProfileAuto:
+		return "auto"
 	case ProfileFull:
 		return "bypass"
 	default:
@@ -482,6 +505,8 @@ func ProfileSummary(profile Profile) string {
 		return "read/search/list auto; edits, shell, MCP, and agents prompt"
 	case ProfileEdit:
 		return "file edits auto; shell, MCP, and agents prompt"
+	case ProfileAuto:
+		return "file edits and shell auto; MCP and approval-gated tools prompt"
 	case ProfileFull:
 		return "all tools auto-approve unless an explicit deny rule matches"
 	default:
