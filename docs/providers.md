@@ -9,6 +9,9 @@ packetcode supports these provider slugs:
 | `anthropic` | Yes | Uses the Anthropic Claude Messages API. |
 | `gemini` | Yes | Uses the Google Gemini API. |
 | `minimax` | Yes | Uses MiniMax's OpenAI-compatible API surface. |
+| `deepseek` | Yes | Uses DeepSeek's OpenAI-compatible API (`api.deepseek.com`). |
+| `grok` | Yes | Uses xAI's OpenAI-compatible API (`api.x.ai`). |
+| `mistral` | Yes | Uses Mistral AI's OpenAI-compatible API (`api.mistral.ai`). |
 | `openrouter` | Yes | Lists models and pricing from OpenRouter. |
 | `ollama` | No | Uses a reachable Ollama server. |
 | custom slug | Optional | Uses a user-configured OpenAI-compatible `/v1` endpoint. |
@@ -78,6 +81,9 @@ PACKETCODE_OPENAI_API_KEY
 PACKETCODE_ANTHROPIC_API_KEY
 PACKETCODE_GEMINI_API_KEY
 PACKETCODE_MINIMAX_API_KEY
+PACKETCODE_DEEPSEEK_API_KEY
+PACKETCODE_GROK_API_KEY
+PACKETCODE_MISTRAL_API_KEY
 PACKETCODE_OPENROUTER_API_KEY
 PACKETCODE_MY_PROVIDER_API_KEY
 ```

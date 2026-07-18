@@ -113,7 +113,7 @@ func (c ProviderConfig) RequiresAPIKey(slug string) bool {
 
 func isReservedHostedProvider(slug string) bool {
 	switch slug {
-	case "openai", "anthropic", "gemini", "minimax", "openrouter":
+	case "openai", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter":
 		return true
 	default:
 		return false

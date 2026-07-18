@@ -49,6 +49,9 @@ var providerColors = map[string]lipgloss.Color{
 	"anthropic":  lipgloss.Color("#D97757"),
 	"gemini":     lipgloss.Color("#4285F4"),
 	"minimax":    lipgloss.Color("#FF8C00"),
+	"deepseek":   lipgloss.Color("#4D6BFE"),
+	"grok":       lipgloss.Color("#9CA3AF"),
+	"mistral":    lipgloss.Color("#FA500F"),
 	"openrouter": lipgloss.Color("#EC4899"),
 	"ollama":     lipgloss.Color("#E1E1E8"),
 }

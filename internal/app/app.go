@@ -2044,7 +2044,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 		return nil
 	}
 	var out []string
-	for _, slug := range []string{"openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama"} {
+	for _, slug := range []string{"openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"} {
 		if _, exists := a.deps.Factories[slug]; exists {
 			out = append(out, slug)
 		}
@@ -2055,7 +2055,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 			continue
 		}
 		switch slug {
-		case "openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama":
+		case "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama":
 			continue
 		default:
 			customSlugs = append(customSlugs, slug)

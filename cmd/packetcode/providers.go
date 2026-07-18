@@ -9,8 +9,11 @@ import (
 	"github.com/packetcode/packetcode/internal/provider/anthropic"
 	"github.com/packetcode/packetcode/internal/provider/codex"
 	"github.com/packetcode/packetcode/internal/provider/custom"
+	"github.com/packetcode/packetcode/internal/provider/deepseek"
 	"github.com/packetcode/packetcode/internal/provider/gemini"
+	"github.com/packetcode/packetcode/internal/provider/grok"
 	"github.com/packetcode/packetcode/internal/provider/minimax"
+	"github.com/packetcode/packetcode/internal/provider/mistral"
 	"github.com/packetcode/packetcode/internal/provider/ollama"
 	"github.com/packetcode/packetcode/internal/provider/openai"
 	"github.com/packetcode/packetcode/internal/provider/openrouter"
@@ -22,6 +25,9 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		"anthropic":  func(key string) provider.Provider { return anthropic.New(key) },
 		"gemini":     func(key string) provider.Provider { return gemini.New(key) },
 		"minimax":    func(key string) provider.Provider { return minimax.New(key) },
+		"deepseek":   func(key string) provider.Provider { return deepseek.New(key) },
+		"grok":       func(key string) provider.Provider { return grok.New(key) },
+		"mistral":    func(key string) provider.Provider { return mistral.New(key) },
 		"openrouter": func(key string) provider.Provider { return openrouter.New(key) },
 		"ollama":     func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
 		"codex":      func(_ string) provider.Provider { return codex.New(codexAuthPath(cfg)) },
@@ -102,7 +108,7 @@ func providerRequiresAPIKey(cfg *config.Config, slug string) bool {
 }
 
 func builtInProviderSlugs() []string {
-	return []string{"openai", "codex", "anthropic", "gemini", "minimax", "openrouter", "ollama"}
+	return []string{"openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"}
 }
 
 // codexAuthPath resolves the Codex auth.json location. An explicit
