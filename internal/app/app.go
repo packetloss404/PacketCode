@@ -45,7 +45,9 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/components/prompt"
 	"github.com/packetcode/packetcode/internal/ui/components/spinner"
 	"github.com/packetcode/packetcode/internal/ui/components/topbar"
+	"github.com/packetcode/packetcode/internal/ui/components/workflowview"
 	"github.com/packetcode/packetcode/internal/ui/layout"
+	"github.com/packetcode/packetcode/internal/workflow"
 )
 
 // agentEventMsg wraps a single agent.AgentEvent so we can route it
@@ -92,6 +94,12 @@ type queuedInput struct {
 // terminal transitions, append a system message describing the outcome.
 type jobUpdateMsg struct{ Snap jobs.Snapshot }
 
+// workflowUpdateMsg is dispatched from the workflow.Engine Subscribe callback
+// (which runs on its own goroutine) into the Bubble Tea Update loop via
+// tea.Program.Send. The App uses it to refresh the workflow view and, on
+// terminal run transitions, append a system message describing the outcome.
+type workflowUpdateMsg struct{ Run workflow.RunSnapshot }
+
 // Deps bundles everything App needs from main(). main() owns the lifecycle
 // of these objects; App just borrows them.
 type Deps struct {
@@ -101,6 +109,7 @@ type Deps struct {
 	Sessions         *session.Manager
 	CostTracker      *cost.Tracker
 	Jobs             *jobs.Manager
+	Workflow         *workflow.Engine
 	Backups          *session.BackupManager
 	MCP              *mcp.Manager
 	PermissionPolicy *permissions.Policy
@@ -127,6 +136,7 @@ type App struct {
 	approval      approval.Model
 	jobsPanel     jobs_ui.Model
 	agentView     agentview.Model
+	workflowView  workflowview.Model
 	picker        picker.Model
 	prompt        prompt.Model
 	spinner       spinner.Model
@@ -161,6 +171,11 @@ type App struct {
 	// Background-agents manager. Non-nil when deps.Jobs is set. All
 	// job-related UI code paths guard on `a.jobs != nil`.
 	jobs *jobs.Manager
+
+	// Workflow engine + spec loader. Non-nil when deps.Workflow is set;
+	// every /workflows code path guards on `a.workflow != nil`.
+	workflow       *workflow.Engine
+	workflowLoader *workflow.Loader
 
 	// backups is the session's BackupManager. Non-nil when deps.Backups
 	// is set. /undo guards on it.
@@ -223,6 +238,10 @@ type App struct {
 	jobSeqSeen         map[string]int64
 	jobTerminalSeen    map[string]bool
 	jobWorktreeSeen    map[string]bool
+
+	// workflowTerminalSeen dedupes the one-shot "run finished" system
+	// message per run id (the engine may fan out several terminal snapshots).
+	workflowTerminalSeen map[string]bool
 
 	providerKeyValidationSeq    uint64
 	providerKeyValidationActive bool
@@ -304,32 +323,36 @@ func New(deps Deps) (*App, error) {
 	slashCommands := LoadSlashRegistry(deps.WorkingDir)
 	slashEntries := buildAutocompleteEntries(slashCommands.HelpRows())
 	app := &App{
-		deps:             deps,
-		topbar:           topbar.New(),
-		conversation:     conv,
-		input:            input.New(),
-		approval:         approval.New(),
-		jobsPanel:        jobs_ui.New(),
-		agentView:        agentview.New(),
-		picker:           picker.New("", ""),
-		prompt:           prompt.New(""),
-		spinner:          spinner.New(),
-		autocomplete:     autocomplete.New(slashEntries),
-		slashCommands:    slashCommands,
-		slashEntries:     slashEntries,
-		agent:            a,
-		approver:         approver,
-		permissionPolicy: policy,
-		permissionBase:   basePolicy,
-		jobs:             deps.Jobs,
-		backups:          deps.Backups,
-		mcp:              deps.MCP,
-		contextMgr:       ctxMgr,
-		statusLine:       statusRunner,
-		startedAt:        time.Now(),
-		jobSeqSeen:       map[string]int64{},
-		jobTerminalSeen:  map[string]bool{},
-		jobWorktreeSeen:  map[string]bool{},
+		deps:                 deps,
+		topbar:               topbar.New(),
+		conversation:         conv,
+		input:                input.New(),
+		approval:             approval.New(),
+		jobsPanel:            jobs_ui.New(),
+		agentView:            agentview.New(),
+		workflowView:         workflowview.New(),
+		picker:               picker.New("", ""),
+		prompt:               prompt.New(""),
+		spinner:              spinner.New(),
+		autocomplete:         autocomplete.New(slashEntries),
+		slashCommands:        slashCommands,
+		slashEntries:         slashEntries,
+		agent:                a,
+		approver:             approver,
+		permissionPolicy:     policy,
+		permissionBase:       basePolicy,
+		jobs:                 deps.Jobs,
+		workflow:             deps.Workflow,
+		workflowLoader:       workflow.NewLoader(deps.WorkingDir),
+		backups:              deps.Backups,
+		mcp:                  deps.MCP,
+		contextMgr:           ctxMgr,
+		statusLine:           statusRunner,
+		startedAt:            time.Now(),
+		jobSeqSeen:           map[string]int64{},
+		jobTerminalSeen:      map[string]bool{},
+		jobWorktreeSeen:      map[string]bool{},
+		workflowTerminalSeen: map[string]bool{},
 	}
 
 	if deps.Jobs != nil {
@@ -339,6 +362,16 @@ func New(deps Deps) (*App, error) {
 		deps.Jobs.Subscribe(func(snap jobs.Snapshot) {
 			if app.sendMsg != nil {
 				app.sendMsg(jobUpdateMsg{Snap: snap})
+			}
+		})
+	}
+
+	if deps.Workflow != nil {
+		// Fan every workflow run transition into Update via the same
+		// off-thread sendMsg bridge used for background jobs.
+		deps.Workflow.Subscribe(func(u workflow.RunUpdate) {
+			if app.sendMsg != nil {
+				app.sendMsg(workflowUpdateMsg{Run: u.Run})
 			}
 		})
 	}
@@ -437,7 +470,18 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.agentView.Visible() && a.jobs != nil {
 			a.agentView.SetJobs(a.jobs.List())
 		}
+		if a.workflowView.Visible() && a.workflow != nil {
+			// A workflow's agents are ordinary jobs; refresh the live
+			// view so agent rows track job-state transitions too.
+			a.workflowView.SetRuns(a.workflow.List())
+		}
 		return a.handleJobUpdate(msg.Snap)
+
+	case workflowUpdateMsg:
+		if a.workflowView.Visible() && a.workflow != nil {
+			a.workflowView.SetRuns(a.workflow.List())
+		}
+		return a.handleWorkflowUpdate(msg.Run)
 
 	case agentEventMsg:
 		return a.handleAgentEvent(msg.ev)
@@ -538,6 +582,15 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentview.IgnoreMsg:
 		return a.handleAgentIgnore(msg.JobID)
 
+	case workflowview.CloseMsg:
+		return a, nil
+
+	case workflowview.OpenMsg:
+		return a.openJobTranscript(msg.JobID, "agent")
+
+	case workflowview.CancelMsg:
+		return a.handleWorkflowCancel(msg.RunID)
+
 	case providerKeyValidatedMsg:
 		return a.handleProviderKeyValidated(msg)
 
@@ -612,6 +665,10 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	} else if a.agentView.Visible() {
 		var cmd tea.Cmd
 		a.agentView, cmd = a.agentView.Update(msg)
+		cmds = append(cmds, cmd)
+	} else if a.workflowView.Visible() {
+		var cmd tea.Cmd
+		a.workflowView, cmd = a.workflowView.Update(msg)
 		cmds = append(cmds, cmd)
 	} else {
 		var cmd tea.Cmd
@@ -768,6 +825,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.agentView, cmd = a.agentView.Update(msg)
 		return a, cmd
 	}
+	if a.workflowView.Visible() {
+		var cmd tea.Cmd
+		a.workflowView, cmd = a.workflowView.Update(msg)
+		return a, cmd
+	}
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)
 	// After input has consumed the key, refresh the popup so it opens
@@ -782,7 +844,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // block the input anyway), when the buffer no longer starts with "/",
 // or when whitespace landed after the verb.
 func (a *App) refreshAutocomplete() {
-	if a.approval.Visible() || a.picker.Visible() || a.jobsPanel.Visible() || a.agentView.Visible() {
+	if a.approval.Visible() || a.picker.Visible() || a.jobsPanel.Visible() || a.agentView.Visible() || a.workflowView.Visible() {
 		a.autocomplete.Close()
 		return
 	}
@@ -892,6 +954,8 @@ func (a *App) View() string {
 		overlay = a.jobsPanel.View()
 	} else if a.agentView.Visible() {
 		overlay = a.agentView.View()
+	} else if a.workflowView.Visible() {
+		overlay = a.workflowView.View()
 	} else if a.spinner.Active() {
 		overlay = a.spinner.View()
 	}
@@ -925,6 +989,7 @@ func (a *App) resize(w, h int) {
 	}
 	a.jobsPanel.Resize(w, modalH)
 	a.agentView.Resize(w, modalH)
+	a.workflowView.Resize(w, modalH)
 	a.picker.Resize(w, h)
 	a.prompt.Resize(w, h)
 	a.autocomplete.SetWidth(w)
@@ -1600,6 +1665,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handlePlanCommand(args)
 	case "loop":
 		return a.handleLoopCommand(args)
+	case "workflows", "workflow":
+		return a.handleWorkflowCommand(args)
 	case "transcript":
 		return a.handleTranscriptCommand(args)
 	case "exit", "quit":

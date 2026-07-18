@@ -75,6 +75,7 @@ var (
 		{"/cost", "Show cost breakdown (reset --yes to clear)"},
 		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
 		{"/loop [interval] <prompt|/cmd>", "Repeat a prompt/command (interval or self-paced); /loop list, /loop stop"},
+		{"/workflows [run <name>|list|stop [id|all]|<id>]", "Run and monitor multi-agent workflows"},
 		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},

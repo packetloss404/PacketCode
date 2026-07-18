@@ -35,6 +35,7 @@ import (
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/theme"
+	"github.com/packetcode/packetcode/internal/workflow"
 )
 
 // version/commit are populated at build time via -ldflags. Defaults are
@@ -374,6 +375,11 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		}
 	}
 
+	// Workflow engine orchestrates multi-agent workflows over the jobs
+	// manager. It spawns ordinary background jobs, so it needs nothing
+	// beyond jobsMgr.
+	workflowEngine := workflow.NewEngine(jobsMgr)
+
 	a, err := app.New(app.Deps{
 		Config:           cfg,
 		Registry:         reg,
@@ -381,6 +387,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		Sessions:         sessions,
 		CostTracker:      tracker,
 		Jobs:             jobsMgr,
+		Workflow:         workflowEngine,
 		Backups:          bk,
 		MCP:              mcpMgr,
 		PermissionPolicy: permissionPolicy,
