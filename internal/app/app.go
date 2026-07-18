@@ -140,6 +140,12 @@ type App struct {
 	permissionBase   *permissions.Policy
 	preTrustPolicy   *permissions.Policy
 
+	// planMode holds the read-only research mode. When on, the policy is
+	// forced to read_only and turns carry a "propose a plan" instruction;
+	// planPrevProfile is the profile to restore when plan mode exits.
+	planMode        bool
+	planPrevProfile permissions.Profile
+
 	// Background-agents manager. Non-nil when deps.Jobs is set. All
 	// job-related UI code paths guard on `a.jobs != nil`.
 	jobs *jobs.Manager
@@ -864,7 +870,9 @@ func (a *App) refreshTopBar() {
 	} else {
 		a.topbar.SetJobs(0)
 	}
-	if a.permissionPolicy != nil {
+	if a.planMode {
+		a.topbar.SetPermissionProfile("plan")
+	} else if a.permissionPolicy != nil {
 		a.topbar.SetPermissionProfile(permissions.ProfileConfigName(a.permissionPolicy.Profile()))
 	} else {
 		a.topbar.SetPermissionProfile("")
@@ -975,6 +983,10 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	if expanded, attached := expandFileMentions(text, a.deps.WorkingDir); len(attached) > 0 {
 		turnText = expanded
 		a.conversation.AppendSystem("attached " + plural(len(attached), "file", "files") + ": " + strings.Join(attached, ", "))
+	}
+	// Plan mode: steer the read-only turn toward proposing a plan.
+	if a.planMode {
+		turnText = planModeInstruction + turnText
 	}
 
 	a.streaming = true
@@ -1490,6 +1502,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleMCPCommand(args)
 	case "ollama":
 		return a.handleOllamaCommand(args)
+	case "plan":
+		return a.handlePlanCommand(args)
 	case "transcript":
 		return a.handleTranscriptCommand(args)
 	case "exit", "quit":
