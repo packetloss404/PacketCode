@@ -74,6 +74,7 @@ var (
 		{"/compact [--keep N]", "Summarise older messages to reclaim context"},
 		{"/cost", "Show cost breakdown (reset --yes to clear)"},
 		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
+		{"/loop [interval] <prompt|/cmd>", "Repeat a prompt/command (interval or self-paced); /loop list, /loop stop"},
 		{"/trust [on|off]", "Toggle auto-approval of destructive tools"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},

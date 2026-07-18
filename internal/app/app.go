@@ -203,11 +203,19 @@ type App struct {
 	// means "turn is live"; cancelTurn==nil plus streaming==true means
 	// "cancel requested, waiting for goroutine drain" — in that window a
 	// second Ctrl+C is a no-op (not a quit). Single-writer from Update.
-	cancelTurn         context.CancelFunc
-	startedAt          time.Time
-	operationLabel     string
-	operationStarted   time.Time
-	queuedInputs       []queuedInput
+	cancelTurn       context.CancelFunc
+	startedAt        time.Time
+	operationLabel   string
+	operationStarted time.Time
+	queuedInputs     []queuedInput
+
+	// /loop state. loops holds active loops by id; activeLoopID names the loop
+	// that owns the currently-running self-paced turn (so agentDoneMsg can
+	// decide whether to re-run the body).
+	loops              map[string]*loopState
+	loopSeq            int
+	activeLoopID       string
+	lastAgentText      string // accumulated assistant text for the current turn (loop sentinel check)
 	statusSeq          int
 	statusLineInFlight int
 	statusLineLastRun  time.Time
@@ -450,7 +458,20 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.cancelTurn()
 			a.cancelTurn = nil
 		}
+		// A self-paced loop that owns this turn decides whether to run again.
+		if a.activeLoopID != "" {
+			if cmd := a.onLoopTurnDone(); cmd != nil {
+				return a, cmd
+			}
+		}
 		return a.startNextQueuedInput()
+
+	case loopTickMsg:
+		ls, ok := a.loops[msg.id]
+		if !ok || ls.stopped || ls.mode != loopInterval {
+			return a, nil // loop stopped or gone → stop ticking
+		}
+		return a, tea.Batch(a.runLoopBody(ls), loopTick(ls.id, ls.interval))
 
 	case compactDoneMsg:
 		return a.handleCompactDone(msg)
@@ -1061,6 +1082,7 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	}
 
 	a.streaming = true
+	a.lastAgentText = ""
 	a.setOperation("thinking")
 
 	// The ctx is cancellable so Ctrl+C can tear down the in-flight
@@ -1141,6 +1163,7 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 			// First token arrived → silence the spinner.
 			a.spinner.Stop()
 		}
+		a.lastAgentText += ev.Text
 		a.conversation.AppendAgentText(modelID, providerSlug, ev.Text)
 
 	case agent.EventReasoningDelta:
@@ -1575,6 +1598,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleOllamaCommand(args)
 	case "plan":
 		return a.handlePlanCommand(args)
+	case "loop":
+		return a.handleLoopCommand(args)
 	case "transcript":
 		return a.handleTranscriptCommand(args)
 	case "exit", "quit":
