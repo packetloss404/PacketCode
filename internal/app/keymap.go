@@ -16,6 +16,7 @@ var (
 	}
 	ApprovalKeys = []KeyHelp{
 		{"Y", "Approve"},
+		{"A", "Approve + don't ask again this session"},
 		{"N / Esc", "Reject"},
 	}
 	InputKeys = []KeyHelp{

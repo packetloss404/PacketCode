@@ -444,6 +444,9 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case approval.ResultMsg:
 		switch msg.Result {
 		case approval.Approved:
+			if msg.Remember {
+				a.rememberApproval(msg.ToolCall)
+			}
 			a.approver.Resolve(agent.ApprovalDecision{Approved: true})
 		case approval.Rejected:
 			a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "user rejected"})

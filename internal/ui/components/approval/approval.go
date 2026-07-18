@@ -33,6 +33,9 @@ const (
 type ResultMsg struct {
 	Result   Result
 	ToolCall provider.ToolCall
+	// Remember is set when the user chose "always allow" — the App adds a
+	// session permission rule so this tool (or command) isn't asked again.
+	Remember bool
 }
 
 type Model struct {
@@ -79,6 +82,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.result = Approved
 			m.visible = false
 			return m, emit(ResultMsg{Result: Approved, ToolCall: m.toolCall})
+		case "a", "A":
+			m.result = Approved
+			m.visible = false
+			return m, emit(ResultMsg{Result: Approved, ToolCall: m.toolCall, Remember: true})
 		case "n", "N", "esc":
 			m.result = Rejected
 			m.visible = false
@@ -125,6 +132,7 @@ func (m Model) View() string {
 	}
 	actions := strings.Join([]string{
 		theme.StyleAccent.Render("[Y]") + theme.StylePrimary.Render(" Approve"),
+		theme.StyleAccent.Render("[A]") + theme.StylePrimary.Render(" Always"),
 		theme.StyleAccent.Render("[N]") + theme.StylePrimary.Render(" Reject"),
 		theme.StyleDim.Render("[Esc] Cancel"),
 	}, "   ")
