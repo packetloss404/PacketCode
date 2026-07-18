@@ -6,6 +6,7 @@ var (
 	GlobalKeys = []KeyHelp{
 		{"Ctrl+P", "Open provider picker"},
 		{"Ctrl+M", "Open model picker"},
+		{"Shift+Tab", "Cycle permission mode (normal → accept edits → plan)"},
 		{"Ctrl+C", "Cancel current generation; press twice to exit"},
 		{"Ctrl+L", "Clear screen (keep session)"},
 		{"Esc", "Close jobs modal / approval / picker / autocomplete popup"},

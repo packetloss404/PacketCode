@@ -830,6 +830,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.workflowView, cmd = a.workflowView.Update(msg)
 		return a, cmd
 	}
+	// Shift+Tab cycles the permission mode (normal → accept edits → plan),
+	// Claude Code-style. Reached here only when no modal is up (each modal
+	// above returns early while visible), so it never fights an overlay.
+	if msg.String() == "shift+tab" {
+		a.cyclePermissionMode()
+		return a, nil
+	}
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)
 	// After input has consumed the key, refresh the popup so it opens
@@ -963,6 +970,14 @@ func (a *App) View() string {
 	aboveInput := ""
 	if overlay == "" && a.autocomplete.Visible() {
 		aboveInput = a.autocomplete.View()
+	}
+
+	// Claude Code-style permission-mode footer, directly beneath the input.
+	// Suppressed while a modal overlay owns the screen to avoid clutter.
+	if overlay == "" {
+		if hint := a.permModeHint(); hint != "" {
+			in = in + "\n" + hint
+		}
 	}
 
 	return layout.Frame(pending, overlay, aboveInput, in, status)
