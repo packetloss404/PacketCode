@@ -323,11 +323,14 @@ func (m Model) View() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) { return m, nil }
 
 // emit pushes a rendered string onto the FIFO queue. No-op for empty
-// strings (e.g. system message with empty content).
+// strings (e.g. system message with empty content). A trailing blank line is
+// appended so committed messages are separated by a gap (Claude Code style)
+// rather than stacked flush against each other.
 func (m *Model) emit(rendered string) {
 	if rendered == "" {
 		return
 	}
+	rendered += "\n"
 	m.emits = append(m.emits, rendered)
 	m.seen = append(m.seen, rendered)
 }

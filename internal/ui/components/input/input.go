@@ -30,7 +30,7 @@ func New() Model {
 	ta.CharLimit = 0
 	ta.MaxHeight = 4
 	ta.ShowLineNumbers = false
-	ta.Prompt = ""
+	ta.Prompt = "> " // Claude Code-style prompt inside the input box
 	ta.SetHeight(1)
 
 	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(theme.TextPrimary)

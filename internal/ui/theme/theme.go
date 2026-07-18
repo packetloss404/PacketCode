@@ -117,9 +117,11 @@ var (
 			BorderForeground(BaseBorder).
 			Padding(0, 1)
 
+	// Focused input uses a subtly brighter grey border (not the cyan accent),
+	// matching Claude Code's understated input box.
 	StyleInputFocused = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(AccentPrimary).
+				BorderForeground(BaseBorderBright).
 				Padding(0, 1)
 
 	StyleDiffAdded   = lipgloss.NewStyle().Foreground(Success)
