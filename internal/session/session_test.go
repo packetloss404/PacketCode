@@ -53,6 +53,19 @@ func TestManager_UpdateUsageComputesCost(t *testing.T) {
 	assert.InDelta(t, 6.00, got.Cost.TotalUSD, 1e-9, "cost = 1M*$2/M + 0.5M*$8/M")
 }
 
+func TestManager_SetContextTokensDoesNotChangeTotals(t *testing.T) {
+	m := NewManager(t.TempDir())
+	_, err := m.New("fake", "model")
+	require.NoError(t, err)
+	if err := m.SetContextTokens(1234); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Current().TokenUsage
+	assert.Equal(t, 1234, got.ContextTokens)
+	assert.Zero(t, got.TotalInput)
+	assert.Zero(t, got.TotalOutput)
+}
+
 func TestManager_ContextTokensTracksCurrentNotCumulative(t *testing.T) {
 	m := NewManager(t.TempDir())
 	_, err := m.New("openai", "gpt-4.1")

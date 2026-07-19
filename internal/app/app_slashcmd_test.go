@@ -879,6 +879,27 @@ func TestApp_Compact_KeepInvalid(t *testing.T) {
 	convContains(t, r.app, "compact: --keep must be a positive integer")
 }
 
+func TestApp_AutoCompactRequiresCompactableHistory(t *testing.T) {
+	r := newTestApp(t)
+	if err := r.sessions.SetContextTokens(90_000); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < defaultCompactKeep; i++ {
+		if err := r.sessions.AddMessage(provider.Message{Role: provider.RoleUser, Content: "large history"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r.app.shouldAutoCompact("next prompt") {
+		t.Fatal("automatic compaction would be a no-op with only the preserved tail")
+	}
+	if err := r.sessions.AddMessage(provider.Message{Role: provider.RoleAssistant, Content: "older reply"}); err != nil {
+		t.Fatal(err)
+	}
+	if !r.app.shouldAutoCompact("next prompt") {
+		t.Fatal("automatic compaction should trigger once older history is available")
+	}
+}
+
 func TestApp_Compact_NoSession(t *testing.T) {
 	r := newTestApp(t)
 	// Force "no session" by deleting the current session from the manager.
@@ -927,6 +948,9 @@ func TestApp_Compact_Succeeds(t *testing.T) {
 	cur := r.sessions.Current()
 	if len(cur.Messages) >= 20 {
 		t.Fatalf("messages not compacted: len = %d", len(cur.Messages))
+	}
+	if cur.TokenUsage.TotalInput != 5 || cur.TokenUsage.TotalOutput != 2 {
+		t.Fatalf("compact usage not recorded: %+v", cur.TokenUsage)
 	}
 
 	// Save() should have persisted the new messages.

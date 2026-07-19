@@ -64,11 +64,12 @@ func TestAgentView_RendersGroupedJobRows(t *testing.T) {
 	})
 
 	out := m.View()
-	assert.Contains(t, out, "Agent View")
-	assert.Contains(t, out, "ACTIVE")
-	assert.Contains(t, out, "COMPLETED")
-	assert.Contains(t, out, "FAILED")
-	assert.Contains(t, out, "CANCELLED")
+	assert.Contains(t, out, "packetcode agents")
+	assert.Contains(t, out, "Needs input")
+	assert.Contains(t, out, "Working")
+	assert.Contains(t, out, "Completed")
+	assert.Contains(t, out, "Failed")
+	assert.Contains(t, out, "Cancelled")
 	assert.Contains(t, out, "run11111")
 	assert.Contains(t, out, "done1111")
 	assert.Contains(t, out, "gemini/gemini")
@@ -76,6 +77,7 @@ func TestAgentView_RendersGroupedJobRows(t *testing.T) {
 	assert.Contains(t, out, "120/45")
 	assert.Contains(t, out, "find call sites")
 	assert.Contains(t, out, "p peek")
+	assert.NotContains(t, out, "╭")
 }
 
 func TestAgentView_RendersStatusBadges(t *testing.T) {
@@ -90,7 +92,7 @@ func TestAgentView_RendersStatusBadges(t *testing.T) {
 	consumed.ResultStatus = "consumed"
 
 	m := New()
-	m.Resize(120, 20)
+	m.Resize(120, 30)
 	m.Show([]Job{waiting, done, consumed})
 
 	out := m.View()
@@ -202,7 +204,7 @@ func TestAgentView_EmptyShowsPlaceholderAndNoAction(t *testing.T) {
 	m.Show(nil)
 
 	assert.Equal(t, "", m.SelectedID())
-	assert.True(t, strings.Contains(m.View(), "no background agents"))
+	assert.True(t, strings.Contains(m.View(), "Agents actively working in the background"))
 
 	next, cmd := m.Update(key("enter"))
 	assert.Equal(t, "", next.SelectedID())

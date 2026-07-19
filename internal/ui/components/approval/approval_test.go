@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -194,7 +195,7 @@ func TestApprovalHeaderShowsJobSourceAndQueueDepth(t *testing.T) {
 	})
 	m.SetQueueDepth(3)
 	out := stripANSI(m.View())
-	assert.Contains(t, out, "[job:abcd1234] · write_file")
+	assert.Contains(t, out, "[job:abcd1234] · Write file")
 	assert.Contains(t, out, "1 of 3 pending approvals")
 }
 
@@ -210,9 +211,28 @@ func TestView_HeaderAndActionsPresent(t *testing.T) {
 	root := t.TempDir()
 	tool := tools.NewWriteFileTool(root, nil)
 	out := showFor(t, tool, `{"path":"x.txt","content":"y"}`)
-	assert.Contains(t, out, "write_file")
-	assert.Contains(t, out, "[Y]")
-	assert.Contains(t, out, "[N]")
+	assert.Contains(t, out, "Write file")
+	assert.Contains(t, out, "❯ 1. Yes")
+	assert.Contains(t, out, "3. No")
+	assert.Contains(t, out, "Do you want to proceed?")
+}
+
+func TestApprovalArrowSelectionAndEnter(t *testing.T) {
+	m := New()
+	m.Show(fakeTool{name: "execute_command"}, provider.ToolCall{Name: "execute_command", Arguments: `{}`})
+	var cmd tea.Cmd
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil || m.cursor != 1 {
+		t.Fatalf("down should select remember option: cursor=%d cmd=%v", m.cursor, cmd)
+	}
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.Visible() {
+		t.Fatal("enter should resolve and close approval")
+	}
+	msg, ok := cmd().(ResultMsg)
+	if !ok || msg.Result != Approved || !msg.Remember {
+		t.Fatalf("enter result = %#v", msg)
+	}
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -24,8 +24,8 @@ Statusline stdin:
   "project": "packetcode",
   "git_branch": "main",
   "provider": { "slug": "openai", "display_name": "OpenAI" },
-  "model": { "id": "gpt-5.5" },
-  "context_window": { "used": 12000, "max": 400000, "used_percentage": 3 },
+  "model": { "id": "gpt-5.6-sol" },
+  "context_window": { "used": 33000, "max": 272000, "used_percentage": 12 },
   "cost": { "total_cost_usd": 0.42 },
   "jobs": { "active": 1 },
   "operation": { "active": true, "label": "thinking", "elapsed_seconds": 12, "queued_inputs": 1 },
@@ -36,6 +36,8 @@ Statusline stdin:
 
 Use `/statusline` to show the active output and `/statusline refresh` to force a rerender.
 
+`context_window.used` is current model-request occupancy, not cumulative input tokens. It can drop after `/compact`. `cost.total_cost_usd` and persisted usage remain cumulative. The native and custom statuslines consume the same occupancy field so their gauges agree.
+
 ### Claude Code compatibility
 
 The stdin snapshot is a superset of Claude Code's statusline JSON, so a statusline script written for Claude Code works against packetcode unchanged. Alongside the packetcode-native fields above, packetcode also emits the Claude Code aliases:
@@ -43,7 +45,7 @@ The stdin snapshot is a superset of Claude Code's statusline JSON, so a statusli
 - `cwd` — mirror of `working_dir`
 - `model.display_name` — falls back to `model.id`
 - `context_window.context_window_size` — mirror of `context_window.max`
-- `context_window.current_usage.{input_tokens,cache_creation_input_tokens,cache_read_input_tokens}` — packetcode reports its whole used total as `input_tokens` (caches zero), so a script summing the three arrives at packetcode's used total
+- `context_window.current_usage.{input_tokens,cache_creation_input_tokens,cache_read_input_tokens}` — aliases for compatibility. packetcode reports current occupancy as `input_tokens` and the two cache fields as zero, so scripts that sum all three receive the same occupancy total.
 
 Point `command` at your existing Claude Code statusline to reuse it verbatim:
 

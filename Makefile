@@ -1,4 +1,4 @@
-.PHONY: build test lint verify vulncheck goreleaser-check smoke run clean ci
+.PHONY: build test lint verify vulncheck goreleaser-check smoke run clean ci tui-snapshots tui-snapshots-claude
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -27,6 +27,12 @@ goreleaser-check:
 
 smoke: build
 	./$(BINARY) --version
+
+tui-snapshots: build
+	sh scripts/tui_snapshot_suite.sh packetcode
+
+tui-snapshots-claude:
+	sh scripts/tui_snapshot_suite.sh claude
 
 run: build
 	./$(BINARY)

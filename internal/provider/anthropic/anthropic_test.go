@@ -92,9 +92,14 @@ func TestToWireRequest_RoleAndToolMapping(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, DefaultModel, wr.Model)
-	assert.Equal(t, "you are helpful", wr.System)
+	require.Len(t, wr.System, 1)
+	assert.Equal(t, "you are helpful", wr.System[0].Text)
+	require.NotNil(t, wr.System[0].CacheControl)
+	assert.Equal(t, "ephemeral", wr.System[0].CacheControl.Type)
 	assert.True(t, wr.Stream)
 	assert.Equal(t, defaultMaxTokens, wr.MaxTokens)
+	require.NotNil(t, wr.CacheControl)
+	assert.Equal(t, "ephemeral", wr.CacheControl.Type)
 	require.Len(t, wr.Messages, 3)
 	assert.Equal(t, "user", wr.Messages[0].Role)
 	assert.JSONEq(t, `[{"type":"text","text":"read main.go"}]`, string(wr.Messages[0].Content))
@@ -105,12 +110,27 @@ func TestToWireRequest_RoleAndToolMapping(t *testing.T) {
 	require.Len(t, wr.Tools, 1)
 	assert.Equal(t, "read_file", wr.Tools[0].Name)
 	assert.JSONEq(t, `{"type":"object"}`, string(wr.Tools[0].InputSchema))
+	require.NotNil(t, wr.Tools[0].CacheControl)
+	assert.Equal(t, "ephemeral", wr.Tools[0].CacheControl.Type)
+}
+
+func TestToProviderUsageIncludesCachedInputInTotal(t *testing.T) {
+	got := toProviderUsage(&anthropicUsage{
+		InputTokens:              25,
+		OutputTokens:             4,
+		CacheCreationInputTokens: 100,
+		CacheReadInputTokens:     900,
+	})
+	require.NotNil(t, got)
+	assert.Equal(t, 1025, got.InputTokens)
+	assert.Equal(t, 100, got.CacheCreationInputTokens)
+	assert.Equal(t, 900, got.CacheReadInputTokens)
 }
 
 func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: message_start`,
-		`data: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1}}}`,
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1,"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}}`,
 		``,
 		`event: content_block_start`,
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
@@ -165,8 +185,10 @@ func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 	assert.Equal(t, "Hello world", text.String())
 	assert.True(t, done)
 	require.NotNil(t, usage)
-	assert.Equal(t, 25, usage.InputTokens)
+	assert.Equal(t, 1025, usage.InputTokens)
 	assert.Equal(t, 4, usage.OutputTokens)
+	assert.Equal(t, 100, usage.CacheCreationInputTokens)
+	assert.Equal(t, 900, usage.CacheReadInputTokens)
 	assert.Equal(t, DefaultModel, captured.Model)
 }
 

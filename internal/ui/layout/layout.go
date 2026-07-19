@@ -27,7 +27,10 @@ import "strings"
 // the overlay slot so a visible modal always covers it, and above input
 // so it reads as "part of" the input chrome.
 func Frame(body, overlay, aboveInput, input, status string) string {
-	parts := []string{body}
+	parts := make([]string, 0, 5)
+	if body != "" {
+		parts = append(parts, body)
+	}
 	if overlay != "" {
 		parts = append(parts, overlay)
 	}

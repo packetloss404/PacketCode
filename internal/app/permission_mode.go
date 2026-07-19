@@ -67,20 +67,21 @@ func nextPermMode(m permMode) permMode {
 	}
 }
 
-// cyclePermissionMode advances to the next mode on Shift+Tab. It is a no-op
-// while a turn is streaming — mirroring the /plan guard, since flipping the
-// profile (or the plan instruction) mid-turn would disrupt in-flight tool
-// approvals. From bypass, Shift+Tab steps back to normal (bypass is entered
-// deliberately via /trust on, not by cycling).
+// cyclePermissionMode advances to the next mode on Shift+Tab, including while
+// a turn is active. The foreground agent reads the current policy at each tool
+// action, so a mid-turn change governs subsequent actions. If an approval is
+// already visible, re-evaluate it immediately against the new profile. From
+// bypass, Shift+Tab steps back to normal (bypass is entered deliberately via
+// /trust on, not by cycling).
 func (a *App) cyclePermissionMode() {
-	if a.streaming {
-		return
-	}
 	if a.currentPermMode() == modeBypass {
 		a.applyPermMode(modeNormal)
-		return
+	} else {
+		a.applyPermMode(nextPermMode(a.currentPermMode()))
 	}
-	a.applyPermMode(nextPermMode(a.currentPermMode()))
+	if a.approver != nil && a.approver.ResolveActiveByPolicy() {
+		a.approval.Hide()
+	}
 }
 
 // applyPermMode transitions to target, reusing the same primitives as the
@@ -124,17 +125,21 @@ func (a *App) applyPermMode(target permMode) {
 // dim affordance so the Shift+Tab shortcut is discoverable. Bypass is red and
 // names its own exit, since it is not part of the Shift+Tab cycle.
 func (a *App) permModeHint() string {
+	return renderPermModeHint(a.currentPermMode())
+}
+
+func renderPermModeHint(mode permMode) string {
 	dim := theme.StyleDim
-	switch a.currentPermMode() {
+	switch mode {
 	case modeAcceptEdits:
-		return theme.StyleSuccess.Render("⏵⏵ accept edits on") + dim.Render("  ·  shift+tab to cycle")
+		return theme.StyleSuccess.Render("⏵⏵ accept edits on") + dim.Render(" (shift+tab to cycle) · ← for agents")
 	case modeAuto:
-		return theme.StyleWarning.Render("⏵⏵ auto-accept on") + dim.Render("  ·  edits + shell  ·  shift+tab to cycle")
+		return theme.StyleWarning.Render("⏵⏵ auto mode on") + dim.Render(" (shift+tab to cycle) · ← for agents")
 	case modePlan:
-		return theme.StyleAccent.Render("⏸ plan mode on") + dim.Render("  ·  shift+tab to cycle")
+		return theme.StyleAccent.Render("⏸ plan mode on") + dim.Render(" (shift+tab to cycle) · ← for agents")
 	case modeBypass:
-		return theme.StyleError.Render("⏵⏵ bypass permissions on") + dim.Render("  ·  all tools auto  ·  /trust off or shift+tab to exit")
+		return theme.StyleError.Render("⏵⏵ bypass permissions on") + dim.Render(" (shift+tab to cycle) · ← for agents")
 	default:
-		return dim.Render("shift+tab to cycle mode  ·  normal → accept edits → auto → plan")
+		return theme.StyleSecondary.Render("⏸ manual mode on") + dim.Render(" · ← for agents")
 	}
 }

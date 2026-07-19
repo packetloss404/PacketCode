@@ -1,74 +1,74 @@
-# Security And Permissions
+# Security and Permissions
 
-packetcode runs local tools as your user. The permission policy controls tool calls that can mutate files, run commands, start background agents, or call MCP tools.
+packetcode runs provider requests and local tools as your user. The permission policy is a decision layer, not an OS sandbox. Review projects, hooks, MCP servers, commands, and custom provider endpoints before trusting them.
 
-## Profiles
+## Modes and Profiles
 
-Set a profile for one run:
+| TUI mode | Config profile | Behavior |
+| --- | --- | --- |
+| Manual | `ask` | Read/search/list auto; edits, shell, MCP, and agents ask. |
+| Accept Edits | `accept_edits` | File edits auto; shell, MCP, and agents ask. |
+| Auto | `auto` | File edits and shell auto; MCP and other approval-gated tools ask. |
+| Plan | `read_only` plus plan instruction | Read/search/list auto; mutations denied. |
+| Bypass Permissions | `bypass` | Tools auto unless a deny rule matches. |
 
-```bash
-packetcode --permission-mode accept-edits
-```
+Shift+Tab cycles the first four, including during an active foreground turn. The new profile applies to subsequent tool actions and re-evaluates a visible approval. An already-running command is not interrupted. Plan's safety profile applies immediately; its model-facing planning instruction is naturally strongest on turns started in Plan mode.
 
-Persist a profile in `~/.packetcode/config.toml`:
+Bypass is deliberately outside the forward cycle and shown distinctly. Enter with `--trust`, `trust_mode = true`, or `/trust on`; Shift+Tab exits it to Manual. Explicit deny rules remain a floor.
+
+## Approval Menu
+
+1. Yes
+2. Yes, and do not ask again
+3. No
+
+Option 2 installs a session rule. For `execute_command`, packetcode remembers the exact command string rather than inferring a broad command family. Other tools are remembered by tool name. Inspect session policy with `/permissions`.
+
+## Rules
 
 ```toml
 [permissions]
 profile = "ask"
-default = "ask"
-```
-
-Profiles:
-
-- `ask`: prompt before every approval-gated tool.
-- `accept_edits`: auto-approve `write_file` and `patch_file`; ask for `execute_command`, `spawn_agent`, and MCP tools.
-- `read_only`: deny approval-gated tools.
-- `bypass`: auto-approve approval-gated tools.
-
-Read-only native tools include file reads, search/list operations, and code-intelligence lookups (`list_symbols`, `find_definition`, `find_references`, `get_diagnostics`). They remain root-scoped and do not require approval.
-
-`--trust` and `trust_mode = true` auto-approve actions that the policy would otherwise ask for. Explicit `deny` rules still deny.
-
-## Rules
-
-Tool rules override the profile:
-
-```toml
-[permissions.tools]
-write_file = "allow"
-patch_file = "allow"
-execute_command = "ask"
-spawn_agent = "ask"
-"mcp:*" = "ask"
 
 [[permissions.rules]]
 tool = "execute_command"
 action = "deny"
 command_prefix = ["rm", "-rf"]
 reason = "refuse broad recursive deletes"
+
+[[permissions.rules]]
+tool = "filesystem__*"
+action = "ask"
 ```
 
-Valid actions are `ask`, `allow`, and `deny`. `[permissions.tools]` keys can be exact tool names, prefix patterns like `filesystem__*`, `"mcp:*"` for all MCP tools, or `"*"`. `[[permissions.rules]]` entries can also match an exact shell `command` or a tokenized `command_prefix`.
+Actions are `allow`, `ask`, and `deny`. Rules can match exact tool names, suffix wildcards, `mcp:*`, all tools (`*`), exact shell commands, or tokenized command prefixes. Later matching rules win according to policy specificity/order.
 
-Use `/permissions` inside the TUI to inspect the active session policy. Use `/permissions profile <mode>` or `/permissions rule <tool-or-pattern> <action>` to change the current session without editing config.
+`[permissions.tools]` remains accepted for backward compatibility; prefer named profiles and `[[permissions.rules]]`.
 
-## Background Write Jobs
+## Project Boundaries
 
-Read-only background agents can inspect the project without a worktree. Write-capable jobs (`/spawn --write` or `spawn_agent` with `allow_write=true`) require git worktree isolation and fail closed if packetcode cannot create one. Worktrees live under `~/.packetcode/worktrees/<repo-key>/<job-id>` on branch `packetcode-job-<job-id>` and are based on the current `HEAD`, not uncommitted foreground edits.
+- Native file tools resolve paths inside the project and reject symlink escapes.
+- Reads are bounded and skip binary content where appropriate.
+- Write-capable background agents require isolated git worktrees based on current `HEAD`; uncommitted foreground changes are not copied.
+- packetcode does not merge or delete completed worktrees automatically.
+- Bounded model-facing outputs do not replace complete persisted transcripts/worktrees.
 
-Packetcode does not automatically merge or delete completed worktrees. Inspect them with `git -C <path> status` and `git -C <path> diff` before deciding what to keep. Remove a completed worktree with `git worktree remove <path>` from the source repository, then delete the `packetcode-job-<job-id>` branch when it is no longer needed.
+## MCP, Hooks, and Custom Providers
 
-## MCP
+- MCP processes start as local child processes. Calls are policy-gated, but server startup itself is not sandboxed.
+- MCP inherits a small environment allowlist plus explicit `env`/`env_from`; configure only trusted binaries.
+- Hooks and statusline commands execute configured shell text as your user.
+- Custom providers receive the system prompt, conversation, tool schemas, and tool results. Use HTTPS for hosted endpoints and plain HTTP only on controlled local/private networks.
 
-MCP server processes start as local child processes when packetcode launches. Approval prompts gate MCP tool calls, not server startup. Configure MCP servers only from sources you trust, keep secrets in per-server `env` entries or named `env_from` variables, and use `/mcp logs <name>` for a bounded redacted log tail.
+## Background and Workflow Trust
 
-## Custom Providers
+Running background jobs snapshot policy at startup. Foreground mode changes do not retroactively broaden an already-running background agent. Workflow children obey job caps, per-run caps, worktree requirements, cancellation, and optional token boundaries.
 
-Custom OpenAI-compatible providers receive the same conversation history,
-system prompt, tool schemas, and tool outputs as built-in hosted providers.
-Use HTTPS for hosted gateways. Plain `http://` custom endpoints should be
-limited to local or private networks you control.
+## Diagnostics
 
-## Checks
+```bash
+packetcode doctor --check permissions
+packetcode doctor --json
+```
 
-Run `packetcode doctor --check permissions` to validate the configured profile and rules without starting the TUI.
+Never paste secrets into bug reports or commit generated PTY captures without inspection; terminal welcome/status output may contain local paths or account information.

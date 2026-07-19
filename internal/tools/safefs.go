@@ -54,6 +54,14 @@ func resolveWritePath(root, suppliedPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	parent := filepath.Dir(abs)
+	// Check the exact parent before probing the target: on some platforms,
+	// Lstat(target) returns a raw ENOTDIR when a parent component is a file.
+	if info, statErr := os.Stat(parent); statErr == nil && !info.IsDir() {
+		return "", fmt.Errorf("parent is not a directory: %s", parent)
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", statErr
+	}
 	if _, err := os.Lstat(abs); err == nil {
 		rootAbs, err := filepath.Abs(root)
 		if err != nil {
@@ -73,13 +81,7 @@ func resolveWritePath(root, suppliedPath string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	parent := filepath.Dir(abs)
 	if err := validateExistingPrefixInRoot(root, parent); err != nil {
-		return "", err
-	}
-	if info, err := os.Stat(parent); err == nil && !info.IsDir() {
-		return "", fmt.Errorf("parent is not a directory: %s", parent)
-	} else if err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
 	return abs, nil

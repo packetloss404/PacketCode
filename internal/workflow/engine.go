@@ -22,6 +22,11 @@ const DefaultWorkflowMaxAgents = 16
 // wait well before this fires; the ceiling only bounds a genuinely stuck job.
 const defaultJobWaitTimeout = 30 * time.Minute
 
+// terminalDrainTimeout bounds the second wait after a timed-out child has
+// been cancelled. Well-behaved workers transition immediately; the bound
+// prevents a provider that ignores context cancellation from hanging a run.
+const terminalDrainTimeout = 5 * time.Second
+
 // Engine orchestrates workflow runs over a jobs.Manager. It owns no
 // agent-execution machinery: every agent is spawned as an ordinary background
 // job and joined via WaitForJob.
@@ -34,6 +39,7 @@ type Engine struct {
 	subs  []func(RunUpdate)
 
 	maxAgents   int
+	tokenBudget int
 	waitTimeout time.Duration
 }
 
@@ -48,6 +54,19 @@ func NewEngine(m *jobs.Manager) *Engine {
 }
 
 // SetMaxAgents overrides the per-run agent cap. Values <= 0 are ignored.
+// SetTokenBudget sets an aggregate input+output boundary budget per workflow
+// run. Zero disables the budget. A concurrently running fan-out step may
+// finish above the boundary; no later step is spawned after the boundary is
+// observed.
+func (e *Engine) SetTokenBudget(n int) {
+	if n < 0 {
+		n = 0
+	}
+	e.mu.Lock()
+	e.tokenBudget = n
+	e.mu.Unlock()
+}
+
 func (e *Engine) SetMaxAgents(n int) {
 	if n <= 0 {
 		return
@@ -82,6 +101,7 @@ type Run struct {
 	phases    []PhaseResult
 	cancel    context.CancelFunc
 	cancelled bool
+	children  map[string]struct{}
 }
 
 // Start validates wf, registers a new run, and launches its driver goroutine.
@@ -105,6 +125,7 @@ func (e *Engine) Start(ctx context.Context, wf Workflow) (*Run, error) {
 		StartedAt: time.Now().UTC(),
 		state:     RunPending,
 		cancel:    cancel,
+		children:  make(map[string]struct{}),
 	}
 	// Pre-build the phase/step skeleton so snapshots have structure before
 	// any agent has been spawned.
@@ -135,6 +156,7 @@ func (e *Engine) drive(ctx context.Context, run *Run, wf Workflow) {
 
 	e.mu.Lock()
 	maxAgents := e.maxAgents
+	tokenBudget := e.tokenBudget
 	e.mu.Unlock()
 
 	steps := map[string]string{} // bound step summaries for templating
@@ -144,6 +166,11 @@ func (e *Engine) drive(ctx context.Context, run *Run, wf Workflow) {
 outer:
 	for pi, ph := range wf.Phases {
 		for si, st := range ph.Steps {
+			used := workflowTokens(run)
+			if tokenBudget > 0 && used >= tokenBudget {
+				firstErr = fmt.Errorf("workflow token budget exhausted: used %d tokens (budget %d)", used, tokenBudget)
+				break outer
+			}
 			if err := ctx.Err(); err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -186,6 +213,20 @@ outer:
 
 // runStep executes a single step and records its result into the run at
 // [pi][si], emitting a snapshot as spawns land and after the join.
+func workflowTokens(run *Run) int {
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	total := 0
+	for _, phase := range run.phases {
+		for _, step := range phase.Steps {
+			for _, result := range step.Agents {
+				total += result.InputTokens + result.OutputTokens
+			}
+		}
+	}
+	return total
+}
+
 func (e *Engine) runStep(ctx context.Context, run *Run, pi, si int, st Step, inputs, steps map[string]string, spawned *int, maxAgents int) StepResult {
 	mode := normalizeMode(st.Mode)
 
@@ -219,14 +260,16 @@ func (e *Engine) runStep(ctx context.Context, run *Run, pi, si int, st Step, inp
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if err := ctx.Err(); err != nil {
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Err: err}
+			results := e.cancelAndDrain(ids)
+			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: err}
 			run.setStep(pi, si, sr)
 			e.emit(run)
 			return sr
 		}
 		prompt, err := renderPrompt(st.Agent.Prompt, inputs, steps, item)
 		if err != nil {
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Err: fmt.Errorf("step %q: render prompt: %w", st.Name, err)}
+			results := e.cancelAndDrain(ids)
+			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: fmt.Errorf("step %q: render prompt: %w", st.Name, err)}
 			run.setStep(pi, si, sr)
 			e.emit(run)
 			return sr
@@ -239,19 +282,29 @@ func (e *Engine) runStep(ctx context.Context, run *Run, pi, si int, st Step, inp
 			AllowWrite:   st.Agent.AllowWrite,
 		})
 		if serr != nil {
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Err: fmt.Errorf("step %q: spawn failed: %s", st.Name, serr.Error())}
+			results := e.cancelAndDrain(ids)
+			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: fmt.Errorf("step %q: spawn failed: %s", st.Name, serr.Error())}
 			run.setStep(pi, si, sr)
 			e.emit(run)
 			return sr
 		}
 		ids = append(ids, snap.ID)
 		*spawned++
+		// Registration and Cancel use the same lock. If cancellation won the
+		// Spawn-to-registration race, cancel the newly created child now.
+		if run.registerChild(snap.ID) {
+			results := e.cancelAndDrain(ids)
+			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: context.Canceled}
+			run.setStep(pi, si, sr)
+			e.emit(run)
+			return sr
+		}
 		run.setStep(pi, si, StepResult{Step: st.Name, Mode: mode, JobIDs: append([]string(nil), ids...)})
 		e.emit(run)
 	}
 
 	// Join all agents concurrently (mirrors jobs spawner_adapter.CollectResults).
-	results := e.waitAll(ids)
+	results := e.waitAll(ctx, ids)
 
 	sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results}
 	// A failed or cancelled agent fails the step.
@@ -275,29 +328,61 @@ func (e *Engine) runStep(ctx context.Context, run *Run, pi, si int, st Step, inp
 
 // waitAll waits for every job id concurrently and returns their results in
 // the original id order, skipping any that never reported (timeout).
-func (e *Engine) waitAll(ids []string) []jobs.Result {
+func (e *Engine) waitAll(ctx context.Context, ids []string) []jobs.Result {
 	e.mu.Lock()
 	timeout := e.waitTimeout
 	e.mu.Unlock()
 
 	var mu sync.Mutex
 	got := make(map[string]jobs.Result, len(ids))
+	failed := make(chan struct{}, 1)
 	var wg sync.WaitGroup
 	wg.Add(len(ids))
 	for _, id := range ids {
 		id := id
 		go func() {
 			defer wg.Done()
-			res, ok := e.jobs.WaitForJob(id, timeout)
+			// Keep waiting for the job's terminal transition after the workflow
+			// context is cancelled. The coordinator below cancels every child;
+			// this independent timeout makes the join a bounded terminal drain.
+			waitCtx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			res, ok := e.jobs.WaitForJobContext(waitCtx, id)
 			if !ok {
-				return
+				select {
+				case failed <- struct{}{}:
+				default:
+				}
+				e.jobs.Cancel(id)
+				drainCtx, drainCancel := context.WithTimeout(context.Background(), terminalDrainTimeout)
+				res, ok = e.jobs.WaitForJobContext(drainCtx, id)
+				drainCancel()
+				if !ok {
+					return
+				}
 			}
 			mu.Lock()
 			got[id] = res
 			mu.Unlock()
+			if res.State == jobs.StateFailed || res.State == jobs.StateCancelled {
+				select {
+				case failed <- struct{}{}:
+				default:
+				}
+			}
 		}()
 	}
-	wg.Wait()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-failed:
+		e.cancelJobs(ids)
+		<-done
+	case <-ctx.Done():
+		e.cancelJobs(ids)
+		<-done
+	case <-done:
+	}
 
 	out := make([]jobs.Result, 0, len(ids))
 	for _, id := range ids {
@@ -326,14 +411,14 @@ func (e *Engine) Cancel(id string) bool {
 	}
 	run.cancelled = true
 	cancel := run.cancel
-	ids := run.liveJobIDsLocked()
+	ids := run.childIDsLocked()
 	run.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
-	}
 	for _, jid := range ids {
 		e.jobs.Cancel(jid)
+	}
+	if cancel != nil {
+		cancel()
 	}
 	e.emit(run)
 	return true
@@ -467,15 +552,61 @@ func (r *Run) setStep(pi, si int, sr StepResult) {
 	r.mu.Unlock()
 }
 
-// liveJobIDsLocked returns every job id recorded so far. Caller holds r.mu.
-func (r *Run) liveJobIDsLocked() []string {
-	var ids []string
-	for _, ph := range r.phases {
-		for _, st := range ph.Steps {
-			ids = append(ids, st.JobIDs...)
-		}
+// childIDsLocked returns every registered child. Caller holds r.mu.
+func (r *Run) childIDsLocked() []string {
+	ids := make([]string, 0, len(r.children))
+	for id := range r.children {
+		ids = append(ids, id)
 	}
 	return ids
+}
+
+// registerChild returns true when the run was already cancelled. Holding the
+// run lock closes the race with Cancel taking its child snapshot.
+func (r *Run) registerChild(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.children[id] = struct{}{}
+	return r.cancelled
+}
+
+func (e *Engine) cancelJobs(ids []string) {
+	for _, id := range ids {
+		e.jobs.Cancel(id)
+	}
+}
+
+func (e *Engine) cancelAndDrain(ids []string) []jobs.Result {
+	if len(ids) == 0 {
+		return nil
+	}
+	e.cancelJobs(ids)
+	ctx, cancel := context.WithTimeout(context.Background(), terminalDrainTimeout)
+	defer cancel()
+
+	results := make([]jobs.Result, len(ids))
+	present := make([]bool, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		i, id := i, id
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if result, ok := e.jobs.WaitForJobContext(ctx, id); ok {
+				results[i] = result
+				present[i] = true
+			}
+		}()
+	}
+	wg.Wait()
+
+	out := make([]jobs.Result, 0, len(ids))
+	for i := range results {
+		if present[i] {
+			out = append(out, results[i])
+		}
+	}
+	return out
 }
 
 func normalizeMode(m StepMode) StepMode {

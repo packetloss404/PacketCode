@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -311,6 +312,23 @@ func TestApply_RebuildsStyleAccent(t *testing.T) {
 	// returns the stored Color via GetForeground.
 	fg := StyleAccent.GetForeground()
 	assert.Equal(t, lipgloss.Color("#FF00AA"), fg)
+}
+
+func TestApply_PreservesFlatClaudeStyleChrome(t *testing.T) {
+	snapshotTheme(t)
+
+	Apply(&Theme{Accent: AccentSection{Primary: "#FF00AA"}})
+	topbar := StyleTopBar.Width(30).Render("status")
+	if strings.ContainsAny(topbar, "╭╮╰╯│") || strings.Count(topbar, "\n") != 0 {
+		t.Fatalf("theme reload restored boxed topbar chrome:\n%s", topbar)
+	}
+	if !strings.HasPrefix(topbar, "  ") {
+		t.Fatalf("topbar should retain the two-column Claude-style indent: %q", topbar)
+	}
+	input := StyleInputFocused.Width(30).Render("❯ prompt")
+	if strings.Contains(input, "│") || !strings.Contains(input, "─") {
+		t.Fatalf("theme reload should preserve horizontal-only input rules:\n%s", input)
+	}
 }
 
 func TestApply_RebuildsAllTwentyStyles(t *testing.T) {

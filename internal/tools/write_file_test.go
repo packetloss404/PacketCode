@@ -92,6 +92,8 @@ func TestWriteFile_RejectsFileAsParent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 	assert.Contains(t, res.Content, "parent is not a directory")
+	_, statErr := os.Stat(filepath.Join(root, "not-dir", "child.txt"))
+	assert.Error(t, statErr, "write beneath a file must not create a child")
 }
 
 func TestWriteFile_PreviewDiff_NewFile(t *testing.T) {

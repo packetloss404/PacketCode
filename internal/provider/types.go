@@ -120,8 +120,10 @@ type ToolCallDelta struct {
 	ArgumentsDelta string
 }
 
-// Usage is the per-completion token accounting. Cache fields are populated
-// only by providers that support prompt caching (Anthropic via OpenRouter).
+// Usage is the per-completion token accounting. InputTokens is the total
+// prompt occupancy, including cached input. Cache fields are optional subsets
+// used for provider-specific billing and diagnostics; consumers must not add
+// them to InputTokens again.
 type Usage struct {
 	InputTokens              int
 	OutputTokens             int

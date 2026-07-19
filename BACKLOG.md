@@ -1,82 +1,84 @@
 # Backlog
 
-packetcode is pre-1.0. This backlog tracks high-value work that is not yet shipped, with an emphasis on getting the terminal agent to a stable v1 and then growing PacketADE-style workflows.
+packetcode is pre-1.0. This file contains only work that has not shipped; completed work belongs in [CHANGELOG.md](CHANGELOG.md).
 
-## v1 Stabilization
+## v1 Release Readiness
 
-- Finish a consistent docs pass across README, `docs/`, changelog, and examples.
-- Keep provider/model catalogs current for OpenAI, Anthropic, Gemini, MiniMax, OpenRouter, OpenCode-compatible endpoints, and Ollama.
-- Add release checklist automation for Windows, Linux, and macOS artifacts.
-- Keep full-suite tests reliable on Windows, including process-cancellation and shell-startup timing tests.
-- Add more end-to-end smoke tests for slash commands, provider/model switching, background agents, MCP tools, and session resume.
-- Clarify compatibility policy for config fields, session files, job files, and MCP server config.
+- Automate signed/notarized macOS, Linux, and Windows release artifacts and checksum verification.
+- Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions.
+- Add end-to-end smoke coverage for first-run setup, provider switching, session resume, approvals, background jobs, workflows, and MCP.
+- Promote reviewed credential-free PTY fixtures into CI golden tests without committing machine/account data.
+- Keep provider catalogs, pricing, context windows, and tool-capability metadata current; prefer live discovery when authoritative.
+- Add opt-in live-provider contract tests that never run in ordinary CI.
+- Document supported terminal emulators and minimum practical geometry.
 
-## Agent and TUI Quality
+## TUI and Interaction Parity
 
-- Continue tightening Agent View around grouped jobs, result injection, approval waits, and per-agent telemetry.
-- Add richer transcript search/filtering for current sessions and background agents.
-- Improve queued foreground prompt controls: list, reorder, remove, and edit queued prompts.
-- Add better cancellation visibility for active provider requests, shell commands, and MCP tool calls.
-- Audit all user-facing copy for terse, terminal-friendly wording.
+- Add caret-accurate `@` completion and insertion for tokens edited in the middle of multiline input.
+- Add transcript search/filter and a compact jump-to-latest affordance.
+- Add queue reorder/edit controls; list, drop, and clear already ship.
+- Improve visibility when cancellation is draining a provider or child process that has not exited yet.
+- Add terminal-width golden coverage below 80 columns and for very tall approval/tool blocks.
+- Continue comparing lifecycle states against Claude Code while preserving packetcode provider colors and multi-provider controls.
 
-## MCP and Tooling
+## Context and Cost Efficiency
 
-- Add restart support for individual MCP servers.
-- Add MCP server health checks and optional reconnect.
-- Surface tool-call timeouts and server death reasons consistently in Agent View and transcripts.
-- Expand runtime-aware shell guidance for PowerShell, CMD, WSL, Git Bash, POSIX sh, and bash.
-- Add per-tool policy hooks for future Packet Computers and Packet Control work.
+- Add provider-native token counting where a stable tokenizer/API exists; retain the conservative fallback estimator.
+- Persist request-level occupancy samples for diagnostics without conflating them with billable totals.
+- Add configurable model-facing caps for search, command, MCP, and artifact output.
+- Preserve/replay encrypted Codex reasoning items for multi-turn continuity if the subscription backend requires them; never attempt to display opaque reasoning.
+- Add explicit cache-hit/cached-input telemetry to `/cost` and statusline snapshots.
+
+## Agents, Loops, and Workflows
+
+- Add workflow pipeline stages and adversarial verification/retry policies.
+- Add a workflow schema/version field, validation command, and example library.
+- Replace self-paced `/loop`'s `LOOP_DONE` convention with an optional structured stop decision while retaining a hard iteration cap.
+- Resume or reconcile active background jobs after process restart; current persistence records state and recovers abandoned jobs as cancelled.
+- Let background agents request user clarification through Agent View.
+- Add optional live sub-agent transcript streaming without injecting it into foreground model context.
+- Add safe worktree merge/apply assistance and explicit cleanup commands.
+
+## MCP and Extensions
+
+- Restart/reconnect individual MCP servers without restarting packetcode.
+- Support Streamable HTTP MCP transport with explicit network and credential policy.
+- Add MCP resources/prompts only after their context and trust model is defined.
+- Add a declarative pack manifest and install/list/enable workflow for prompt commands, MCP, hooks, themes, and workflows.
+- Surface MCP timeout, crash, and reconnect details consistently in transcripts and Agent View.
+
+## Providers and Local Models
+
+- Add sanctioned subscription-backed providers only when the provider publishes and supports a third-party integration path; otherwise use API-key providers.
+- Expand Ollama pull progress, cancellation, and model-removal management.
+- Add optional MLX/local-runtime backends only if they can match the native tool and streaming contracts without weakening Ollama's zero-config path.
+- Add provider-specific output/reasoning controls to the model picker when the upstream catalog exposes them.
 
 ## Packet Computers
 
-See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md) for the research and architecture plan.
+See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md).
 
-Near-term backlog:
-
-- Add `internal/computers` registry types and load/save tests.
-- Add `/computers` list/status command backed by local config.
-- Design `packetcode daemon` loopback RPC.
-- Add local computer heartbeat/status.
-- Introduce a runtime/backend abstraction so tools can run locally or on a registered computer.
-- Extend jobs with `ComputerID`.
-- Add `/spawn --computer <name>`.
-- Group Agent View rows by computer.
-
-Deferred:
-
-- SSH-forwarded daemon transport.
-- Persistent job reconnect/reconcile.
-- Per-job worktrees on remote computers (local per-job worktree isolation already shipped).
-- Named terminals and dev-server process supervision.
-- Snapshots/checkpoints.
-- Managed cloud computers.
+- Add a versioned computer registry and read-only `/computers` status surface.
+- Design a loopback-only daemon RPC and heartbeat before adding SSH forwarding.
+- Introduce a runtime backend abstraction for local/remote filesystem and shell operations.
+- Add `ComputerID` to jobs and `/spawn --computer <name>`.
+- Reconcile persistent remote jobs and group Agent View by computer.
+- Defer managed cloud machines, snapshots, and process supervision until local/SSH contracts are stable.
 
 ## Packet Control
 
-See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md) for the research and architecture plan.
+See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md).
 
-Near-term backlog:
-
-- Add `internal/control` manifest, artifact, verdict, and report types.
-- Define `~/.packetcode/control/<run-id>/` artifact layout.
-- Add `/control runs` and `/control open <id>`.
-- Add terminal-first `/verify <claim>` with command output artifacts.
-- Add terminal-first `/qa <command> -- <expected behavior>`.
-- Integrate control runs into jobs/Agent View or a sibling Control View.
-
-Deferred:
-
-- Playwright or agent-browser-backed browser QA.
-- Trace and screenshot previews.
-- Demo composition.
-- Desktop/computer-use automation.
-- Target-level browser/desktop permission policies.
+- Define versioned control-run, artifact, verdict, and report formats.
+- Add terminal-first `/verify` and `/qa` with command, exit-code, and output evidence.
+- Integrate control runs into jobs or a dedicated Control View.
+- Add browser screenshots/traces only after target allowlists and prompt-injection boundaries are explicit.
+- Defer desktop control and polished demo composition.
 
 ## Security and Trust
 
-- Define a shared policy vocabulary for filesystem, shell, network, browser, desktop, secrets, and approvals.
-- Make remote/machine trust boundaries explicit before Packet Computers ships.
-- Treat browser and desktop content as untrusted evidence, not instructions.
-- Add redaction tests for logs, MCP output, statusline/hooks, and future control artifacts.
-- Document safe defaults for `--trust`, MCP servers, Packet Computers, and Packet Control.
-
+- Define shared policy axes for filesystem, shell, network, MCP, browser, desktop, secrets, and remote computers.
+- Add redaction tests for provider errors, MCP logs/output, hooks, statuslines, job artifacts, and future control evidence.
+- Add audit events for live permission-mode changes and remembered approvals.
+- Keep Bypass Permissions explicit, visible, outside the normal Shift+Tab cycle, and subordinate to deny rules.
+- Treat remote/browser/desktop content as untrusted evidence rather than instructions.

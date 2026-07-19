@@ -1,6 +1,8 @@
 # Packet Computers and Packet Control
 
-Last reviewed: 2026-05-13
+Status: product/research proposal; not implemented unless explicitly identified below.
+
+Last reviewed: 2026-07-19
 
 This document captures the Packet Computers and Packet Control product ideas for PacketADE/packetcode, the external research behind them, and a staged implementation plan that fits the current codebase.
 
@@ -125,6 +127,9 @@ Packetcode already has much of the spine needed for both ideas:
 - Provider-neutral agent loop.
 - Tool registry with approval-aware tools.
 - Background jobs and Agent View.
+- Isolated git worktrees for write-capable jobs.
+- Compact job artifact manifests and explicit result fan-in.
+- Sequential/parallel multi-agent workflows and repeatable loops.
 - Session persistence and transcript viewing.
 - MCP integration.
 - Statusline and hooks.
@@ -137,8 +142,9 @@ Important gaps:
 - No durable machine registry.
 - No daemon or remote execution transport.
 - No persistent job reconnect/reconcile flow after PacketADE restarts.
-- No per-job worktree model for serious parallel editing.
-- No native evidence manifest/artifact system.
+- No remote runtime/backend abstraction or computer identity on jobs.
+- No resumable remote/local execution after process restart.
+- No general control-run evidence format (job artifact manifests are bounded handoffs, not QA evidence bundles).
 - No browser/terminal capture abstraction.
 - No target-level policy for computer control.
 
@@ -329,9 +335,9 @@ Scope:
 - Transcripts stream after reconnect.
 - Cancellation works across reconnect.
 
-#### Phase 3: Project Workspaces
+#### Phase 3: Project Workspaces — Local Foundation Shipped
 
-Goal: Parallel agents stop fighting over the same root.
+Goal: Parallel agents stop fighting over the same root. packetcode already creates per-job local git worktrees for write-capable jobs; remote-computer workspaces, conflict summaries, and merge/apply assistance remain.
 
 Scope:
 
@@ -624,6 +630,8 @@ Deliver:
 - Config support for local/SSH records.
 - No daemon yet.
 
+This remains open; the existing jobs/workflow packages are execution foundations, not a computer registry.
+
 ### Milestone B: Local Computer Daemon
 
 Deliver:
@@ -642,6 +650,8 @@ Deliver:
 - Backend abstraction for tools.
 - `/spawn --computer <name>`.
 - Agent View grouped by computer.
+
+Local write-worktree isolation and Agent View already ship. `ComputerID`, remote backends, and grouping do not.
 
 ### Milestone D: Packet Control Manifest
 
@@ -732,4 +742,3 @@ The strategic connection is strong:
 - Packet Control proves the work is real.
 - Agent View shows who is doing what.
 - Sessions and transcripts preserve why it happened.
-

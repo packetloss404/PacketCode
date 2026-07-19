@@ -139,6 +139,8 @@ type BehaviorConfig struct {
 	BackgroundMaxTotal        int    `toml:"background_max_total"`
 	BackgroundDefaultProvider string `toml:"background_default_provider"`
 	BackgroundDefaultModel    string `toml:"background_default_model"`
+	BackgroundTokenBudget     int    `toml:"background_token_budget"`
+	WorkflowTokenBudget       int    `toml:"workflow_token_budget"`
 }
 
 // PermissionConfig controls the approval policy applied to tool calls.

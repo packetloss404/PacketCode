@@ -149,12 +149,77 @@ func (u *uiApprover) Pending() (agent.ApprovalRequest, bool) {
 				continue
 			}
 			u.mu.Lock()
+			if decision, resolved := policyApprovalDecision(u.policy, env.req); resolved {
+				u.mu.Unlock()
+				deliverApprovalDecision(env, decision)
+				continue
+			}
 			u.active = &env
 			u.mu.Unlock()
 			return env.req, true
 		default:
 			return agent.ApprovalRequest{}, false
 		}
+	}
+}
+
+// ResolveActiveByPolicy re-evaluates the visible approval after a live
+// permission-mode change. It returns true when the new policy made a terminal
+// allow/deny decision and the approval was resolved. Ask decisions remain
+// visible for explicit user input.
+func (u *uiApprover) ResolveActiveByPolicy() bool {
+	u.mu.Lock()
+	if u.active == nil || u.active.ctx.Err() != nil {
+		u.mu.Unlock()
+		return false
+	}
+	env := *u.active
+	decision, resolved := policyApprovalDecision(u.policy, env.req)
+	if !resolved {
+		u.mu.Unlock()
+		return false
+	}
+	u.active = nil
+	u.mu.Unlock()
+	deliverApprovalDecision(env, decision)
+	return true
+}
+
+func policyApprovalDecision(policy *permissions.Policy, req agent.ApprovalRequest) (agent.ApprovalDecision, bool) {
+	if policy == nil {
+		policy = permissions.DefaultPolicy()
+	}
+	toolName := ""
+	requiresApproval := true
+	if req.Tool != nil {
+		toolName = req.Tool.Name()
+		requiresApproval = req.Tool.RequiresApproval()
+	}
+	if toolName == "" {
+		toolName = stripJobApprovalPrefix(req.ToolCall.Name)
+	}
+	result := policy.Decide(permissions.Request{
+		ToolName:         toolName,
+		RequiresApproval: requiresApproval,
+		Params:           req.Params,
+	})
+	switch result.Decision {
+	case permissions.DecisionAllow:
+		return agent.ApprovalDecision{Approved: true, EditedParams: req.Params}, true
+	case permissions.DecisionDeny:
+		return agent.ApprovalDecision{
+			Approved: false,
+			Reason:   "permission policy denied " + req.ToolCall.Name + " (" + result.Reason + ")",
+		}, true
+	default:
+		return agent.ApprovalDecision{}, false
+	}
+}
+
+func deliverApprovalDecision(env approvalEnvelope, decision agent.ApprovalDecision) {
+	select {
+	case env.result <- decision:
+	default:
 	}
 }
 
@@ -180,10 +245,7 @@ func (u *uiApprover) Resolve(decision agent.ApprovalDecision) {
 	if env == nil {
 		return
 	}
-	select {
-	case env.result <- decision:
-	default:
-	}
+	deliverApprovalDecision(*env, decision)
 }
 
 func (u *uiApprover) clearActive(id uint64) {

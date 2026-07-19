@@ -67,6 +67,7 @@ type Config struct {
 	MaxConcurrent int // default 4
 	MaxDepth      int // default 2
 	MaxTotal      int // default 32
+	TokenBudget   int // input+output tokens per job; zero disables
 
 	// DefaultProvider/Model override the main registry's Active() when
 	// the SpawnRequest doesn't specify its own. Either-or-both may be
@@ -176,18 +177,21 @@ type Result struct {
 type Manager struct {
 	cfg Config
 
-	mu           sync.RWMutex
-	jobs         map[string]*Job
-	cancel       map[string]context.CancelFunc
-	results      []Result
-	subscribers  []func(Snapshot)
-	liveSessions map[string]*session.Manager
-	pathLocks    pathLockMap
-	persistMu    sync.Mutex
-	persistSeq   map[string]int64
-	closed       bool
-	totalSpawned int
-	seq          int64
+	mu             sync.RWMutex
+	jobs           map[string]*Job
+	cancel         map[string]context.CancelFunc
+	results        []Result
+	subscribers    []func(Snapshot)
+	liveSessions   map[string]*session.Manager
+	pathLocks      pathLockMap
+	persistMu      sync.Mutex
+	persistSeq     map[string]int64
+	persistPending map[string]persistedJob
+	persistTimers  map[string]*time.Timer
+	persistDelay   time.Duration
+	closed         bool
+	totalSpawned   int
+	seq            int64
 
 	// sem bounds concurrent runJob workers to MaxConcurrent.
 	sem chan struct{}
@@ -223,16 +227,19 @@ func NewManager(cfg Config) (*Manager, int, error) {
 	}
 	baseCtx, cancelBase := context.WithCancel(context.Background())
 	m := &Manager{
-		cfg:          cfg,
-		jobs:         map[string]*Job{},
-		cancel:       map[string]context.CancelFunc{},
-		liveSessions: map[string]*session.Manager{},
-		pathLocks:    pathLockMap{},
-		persistSeq:   map[string]int64{},
-		sem:          make(chan struct{}, cfg.MaxConcurrent),
-		baseCtx:      baseCtx,
-		cancelBase:   cancelBase,
-		terminalCh:   map[string]chan struct{}{},
+		cfg:            cfg,
+		jobs:           map[string]*Job{},
+		cancel:         map[string]context.CancelFunc{},
+		liveSessions:   map[string]*session.Manager{},
+		pathLocks:      pathLockMap{},
+		persistSeq:     map[string]int64{},
+		persistPending: map[string]persistedJob{},
+		persistTimers:  map[string]*time.Timer{},
+		persistDelay:   100 * time.Millisecond,
+		sem:            make(chan struct{}, cfg.MaxConcurrent),
+		baseCtx:        baseCtx,
+		cancelBase:     cancelBase,
+		terminalCh:     map[string]chan struct{}{},
 	}
 	if cfg.OnUpdate != nil {
 		m.subscribers = append(m.subscribers, cfg.OnUpdate)
@@ -487,7 +494,7 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		return nil
+		return m.flushAllPendingSnapshots()
 	}
 	m.closed = true
 	m.mu.Unlock()
@@ -502,9 +509,13 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return m.flushAllPendingSnapshots()
 	case <-time.After(timeout):
-		return fmt.Errorf("jobs.Shutdown: %d workers still running after %s", m.activeWorkerCount(), timeout)
+		shutdownErr := fmt.Errorf("jobs.Shutdown: %d workers still running after %s", m.activeWorkerCount(), timeout)
+		if flushErr := m.flushAllPendingSnapshots(); flushErr != nil {
+			return errors.Join(shutdownErr, flushErr)
+		}
+		return shutdownErr
 	}
 }
 
@@ -689,6 +700,16 @@ func (m *Manager) DrainResults(n int) []Result {
 // the pending results queue so a waited child is not delivered again by
 // DrainResults or Agent View injection.
 func (m *Manager) WaitForJob(id string, timeout time.Duration) (Result, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return m.WaitForJobContext(ctx, id)
+}
+
+// WaitForJobContext waits until a job is terminal or ctx is cancelled.
+func (m *Manager) WaitForJobContext(ctx context.Context, id string) (Result, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.mu.Lock()
 	j, exists := m.jobs[id]
 	if !exists {
@@ -714,8 +735,6 @@ func (m *Manager) WaitForJob(id string, timeout time.Duration) (Result, bool) {
 		// allocates the channel before returning).
 		ticker := time.NewTicker(20 * time.Millisecond)
 		defer ticker.Stop()
-		deadline := time.NewTimer(timeout)
-		defer deadline.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -743,7 +762,7 @@ func (m *Manager) WaitForJob(id string, timeout time.Duration) (Result, bool) {
 					return out, true
 				}
 				m.mu.RUnlock()
-			case <-deadline.C:
+			case <-ctx.Done():
 				return Result{}, false
 			}
 		}
@@ -764,7 +783,7 @@ func (m *Manager) WaitForJob(id string, timeout time.Duration) (Result, bool) {
 		_ = m.savePersistedSnapshot(persisted)
 		m.fanOut(snap, subs)
 		return out, true
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		return Result{}, false
 	}
 }
@@ -943,8 +962,9 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 	subscribers := snapshotCallbacks(m.subscribers)
 	m.mu.Unlock()
 
-	// Persist the queued state best-effort.
-	_ = m.savePersistedSnapshot(persisted)
+	// Lifecycle transitions are sparse and recovery-critical, so persist the
+	// queued state immediately. High-frequency activity updates are coalesced.
+	_ = m.savePersistedSnapshotImmediate(persisted)
 
 	m.fanOut(snap, subscribers)
 
@@ -1182,7 +1202,7 @@ func (m *Manager) markTerminal(j *Job, newState State, summary, errMsg, reason s
 	persisted := toPersisted(j)
 	m.mu.Unlock()
 
-	_ = m.savePersistedSnapshot(persisted)
+	_ = m.savePersistedSnapshotImmediate(persisted)
 
 	if ch != nil {
 		// Best-effort close (channel may have been closed by a racing
@@ -1210,7 +1230,7 @@ func (m *Manager) markRunning(j *Job) {
 	snap := snapshotOf(j)
 	persisted := toPersisted(j)
 	m.mu.Unlock()
-	_ = m.savePersistedSnapshot(persisted)
+	_ = m.savePersistedSnapshotImmediate(persisted)
 	m.fanOut(snap, subs)
 }
 
@@ -1230,8 +1250,85 @@ func (m *Manager) updateActivity(j *Job, activity, message string, needsInput, n
 }
 
 func (m *Manager) savePersistedSnapshot(p persistedJob) error {
+	if parseState(p.State).IsTerminal() {
+		return m.saveTerminalSnapshot(p)
+	}
+	m.persistMu.Lock()
+	if current, ok := m.persistPending[p.ID]; !ok || p.Seq >= current.Seq {
+		m.persistPending[p.ID] = p
+	}
+	if _, ok := m.persistTimers[p.ID]; !ok {
+		delay := m.persistDelay
+		m.persistTimers[p.ID] = time.AfterFunc(delay, func() { m.flushPendingSnapshot(p.ID) })
+	}
+	m.persistMu.Unlock()
+	return nil
+}
+
+func (m *Manager) saveTerminalSnapshot(p persistedJob) error {
+	return m.savePersistedSnapshotImmediate(p)
+}
+
+// savePersistedSnapshotImmediate cancels a pending coalesced write and stores
+// the newest snapshot synchronously. It is used for queued/running/terminal
+// lifecycle transitions, which recovery must observe promptly.
+func (m *Manager) savePersistedSnapshotImmediate(p persistedJob) error {
+	m.persistMu.Lock()
+	if timer := m.persistTimers[p.ID]; timer != nil {
+		timer.Stop()
+	}
+	if pending, ok := m.persistPending[p.ID]; ok && pending.Seq > p.Seq {
+		p = pending
+	}
+	delete(m.persistTimers, p.ID)
+	delete(m.persistPending, p.ID)
+	err := m.savePersistedSnapshotLocked(p)
+	m.persistMu.Unlock()
+	return err
+}
+
+// flushAllPendingSnapshots stops every debounce timer and durably writes the
+// latest queued snapshot for each job. Shutdown calls this after workers exit
+// so no progress update is stranded in a timer goroutine.
+func (m *Manager) flushAllPendingSnapshots() error {
 	m.persistMu.Lock()
 	defer m.persistMu.Unlock()
+
+	ids := make([]string, 0, len(m.persistPending))
+	for id := range m.persistPending {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, timer := range m.persistTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+	m.persistTimers = map[string]*time.Timer{}
+
+	var firstErr error
+	for _, id := range ids {
+		p := m.persistPending[id]
+		if err := m.savePersistedSnapshotLocked(p); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		delete(m.persistPending, id)
+	}
+	return firstErr
+}
+
+func (m *Manager) flushPendingSnapshot(id string) {
+	m.persistMu.Lock()
+	p, ok := m.persistPending[id]
+	delete(m.persistPending, id)
+	delete(m.persistTimers, id)
+	if ok {
+		_ = m.savePersistedSnapshotLocked(p)
+	}
+	m.persistMu.Unlock()
+}
+
+func (m *Manager) savePersistedSnapshotLocked(p persistedJob) error {
 	if p.Seq > 0 && p.Seq < m.persistSeq[p.ID] {
 		return nil
 	}

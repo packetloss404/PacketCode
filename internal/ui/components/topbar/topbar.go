@@ -130,7 +130,7 @@ func (m Model) View() string {
 		width = 80
 	}
 	if m.customLine != "" {
-		return theme.StyleTopBar.Width(width - 2).Render(m.customLine)
+		return theme.StyleTopBar.Width(width).Render(m.customLine)
 	}
 
 	brand := theme.LabelBadge("⚡ packetcode", theme.AccentPrimary)
@@ -186,8 +186,8 @@ func (m Model) View() string {
 	droppable := []string{jobsSeg, opSeg, permissionSeg, contextSeg, projectSeg, gitSeg, durSeg}
 
 	// Drop right-most droppable segments until the line fits inside the
-	// content area (width minus border + padding budget).
-	contentWidth := width - 4 // border (2) + padding (2)
+	// content area (two columns of horizontal padding on each side).
+	contentWidth := width - 4
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -200,7 +200,7 @@ func (m Model) View() string {
 		segments = segments[:len(segments)-1]
 	}
 	line := joinWithSep(segments)
-	return theme.StyleTopBar.Width(width - 2).Render(line)
+	return theme.StyleTopBar.Width(width).Render(line)
 }
 
 func (m Model) renderOperation() string {

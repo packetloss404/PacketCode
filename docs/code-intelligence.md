@@ -9,7 +9,7 @@ Packetcode exposes code intelligence as model-facing read-only tools, not slash 
 - `find_references`: finds bounded whole-identifier references with one-line snippets.
 - `get_diagnostics`: reports bounded syntax diagnostics. Go syntax diagnostics are supported locally.
 
-All results are scoped to the project root, capped, and rendered as `path:line:column` entries. These tools never edit files and do not require approval under built-in permission profiles.
+All results are scoped to the project root, capped, and rendered as `path:line:column` entries. Defaults are intentionally context-conscious: 50 symbols, 20 definitions, 50 references, and 50 diagnostics, with hard caps of 200/100/200/200. These tools never edit files and do not require approval under built-in permission profiles.
 
 ## Engines
 

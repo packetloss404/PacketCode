@@ -86,6 +86,17 @@ name = "report"
 	require.Contains(t, write.Agent.Prompt, "{{.steps.scan}}")
 }
 
+func TestLoader_MalformedProjectOverrideDoesNotFallBack(t *testing.T) {
+	dir := t.TempDir()
+	wfDir := filepath.Join(dir, ".packetcode", "workflows")
+	require.NoError(t, os.MkdirAll(wfDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(wfDir, "review.toml"), []byte(`[[phases`), 0o644))
+
+	_, err := NewLoader(dir).Load("review")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "review.toml")
+}
+
 func TestLoader_GetUnknown(t *testing.T) {
 	l := NewLoader(t.TempDir())
 	_, ok := l.Get("does-not-exist")

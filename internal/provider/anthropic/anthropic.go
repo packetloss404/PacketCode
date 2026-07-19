@@ -238,12 +238,23 @@ func extractErrorMessage(body []byte) string {
 }
 
 type wireRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	Messages  []wireMessage `json:"messages"`
-	System    string        `json:"system,omitempty"`
-	Tools     []wireTool    `json:"tools,omitempty"`
-	Stream    bool          `json:"stream"`
+	Model        string            `json:"model"`
+	MaxTokens    int               `json:"max_tokens"`
+	Messages     []wireMessage     `json:"messages"`
+	System       []wireSystemBlock `json:"system,omitempty"`
+	Tools        []wireTool        `json:"tools,omitempty"`
+	Stream       bool              `json:"stream"`
+	CacheControl *wireCacheControl `json:"cache_control,omitempty"`
+}
+
+type wireCacheControl struct {
+	Type string `json:"type"`
+}
+
+type wireSystemBlock struct {
+	Type         string            `json:"type"`
+	Text         string            `json:"text"`
+	CacheControl *wireCacheControl `json:"cache_control,omitempty"`
 }
 
 type wireMessage struct {
@@ -262,16 +273,18 @@ type wireContentBlock struct {
 }
 
 type wireTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description,omitempty"`
+	InputSchema  json.RawMessage   `json:"input_schema"`
+	CacheControl *wireCacheControl `json:"cache_control,omitempty"`
 }
 
 func toWireRequest(req provider.ChatRequest) (wireRequest, error) {
 	wr := wireRequest{
-		Model:     req.Model,
-		MaxTokens: defaultMaxTokens,
-		Stream:    true,
+		Model:        req.Model,
+		MaxTokens:    defaultMaxTokens,
+		Stream:       true,
+		CacheControl: &wireCacheControl{Type: "ephemeral"},
 	}
 
 	var system []string
@@ -328,7 +341,9 @@ func toWireRequest(req provider.ChatRequest) (wireRequest, error) {
 			wr.Messages = append(wr.Messages, wireMessage{Role: "user", Content: content})
 		}
 	}
-	wr.System = strings.Join(system, "\n\n")
+	if len(system) > 0 {
+		wr.System = []wireSystemBlock{{Type: "text", Text: strings.Join(system, "\n\n"), CacheControl: &wireCacheControl{Type: "ephemeral"}}}
+	}
 
 	for _, t := range req.Tools {
 		schema := t.Parameters
@@ -340,6 +355,12 @@ func toWireRequest(req provider.ChatRequest) (wireRequest, error) {
 			Description: t.Description,
 			InputSchema: schema,
 		})
+	}
+	// Anthropic supports explicit ephemeral cache breakpoints. Marking the
+	// stable system prompt and final tool definition allows the provider to
+	// reuse those prefixes; other providers receive no synthetic parameters.
+	if len(wr.Tools) > 0 {
+		wr.Tools[len(wr.Tools)-1].CacheControl = &wireCacheControl{Type: "ephemeral"}
 	}
 
 	return wr, nil
@@ -544,7 +565,7 @@ func toProviderUsage(u *anthropicUsage) *provider.Usage {
 		return nil
 	}
 	return &provider.Usage{
-		InputTokens:              u.InputTokens,
+		InputTokens:              u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
 		OutputTokens:             u.OutputTokens,
 		CacheCreationInputTokens: u.CacheCreationInputTokens,
 		CacheReadInputTokens:     u.CacheReadInputTokens,

@@ -1,106 +1,107 @@
 # Troubleshooting
 
-Run `packetcode doctor` for a local health report covering config, providers, state-directory permissions, git, native tools, and MCP static checks. Use `packetcode doctor --json` when filing an issue or automating setup checks.
-
-## A Tool Was Denied Or Auto-Approved Unexpectedly
-
-Run:
+Start with:
 
 ```bash
-packetcode doctor --check permissions
+packetcode doctor
+packetcode doctor --json
 ```
 
-Inside the TUI, `/permissions` shows the active session policy. Configured rules in `[permissions.tools]` override the profile. For example, `profile = "read_only"` denies approval-gated tools unless a rule explicitly allows one, while `profile = "accept_edits"` auto-approves file edits but still asks for shell commands and MCP tools.
+The doctor checks config, credential sources, providers, state permissions, git/worktrees, native tools, permission policy, and MCP definitions without starting the TUI.
 
-Use `/permissions profile ask` to return the current session to prompt-first behavior.
+## Provider Is Not Configured
 
-## `/spawn --write` Failed Before Running
+Open `Ctrl+P` or `/provider`, focus the row, and press Ctrl+A. `/provider add <slug>` opens key entry directly.
 
-Write-capable background agents require git worktree isolation. If git is missing, the project is not a git repository, or git refuses the repository because of ownership checks, packetcode fails the job instead of writing in the main checkout.
+Keyless exceptions:
 
-Run:
+- `codex` requires an official Codex CLI ChatGPT login in `~/.codex/auth.json` (`codex login`).
+- `ollama` requires a reachable daemon, normally `localhost:11434`.
 
-```bash
-packetcode doctor --check project,state.worktrees
-```
+Anthropic, Gemini, MiniMax, DeepSeek, Grok/xAI, Mistral, OpenAI API, and OpenRouter require developer API keys. Consumer app/CLI subscriptions are not copied into packetcode.
 
-Then resolve the git issue directly. For dubious-ownership failures, run `git status` in the project and only add a `safe.directory` entry if you trust that checkout. For completed write jobs, `/jobs` and `/agents <id>` show the worktree path; inspect it with `git -C <path> status` and `git -C <path> diff`.
+## Gemini CLI No Longer Works
 
-## Missing Or Truncated Job Artifacts
-
-Background job artifacts are compact metadata captured from tool execution. Large diffs, command output, and file contents are intentionally truncated or omitted from fan-in text. Inspect the job transcript with `/jobs <id>` and, for write jobs, inspect the worktree directly when you need full detail.
-
-## `active provider "..." is not configured`
-
-The provider has no usable key in config or environment. Run packetcode without `--provider`, or open `Ctrl+P` / `/provider`, focus the provider, and press `Ctrl+A` to save a key. `/provider add` opens the same picker, and `/provider add <slug>` opens the same key prompt directly.
-
-## Add Or Update A Provider Key
-
-Use the provider picker:
-
-1. `Ctrl+P` or `/provider`
-2. Focus the provider row
-3. `Ctrl+A`
-4. Paste and validate the key
-
-## `/clear` Did Not Delete My Session
-
-That is expected. `/clear` and `Ctrl+L` clear packetcode's live transcript pane only. Sessions still live under `~/.packetcode/sessions/` and can be resumed with `--resume` or `/sessions resume <id>`.
-
-## I Cannot Scroll Inside packetcode
-
-Finalized output is printed into your terminal scrollback. Use your terminal's scroll, `Shift+PageUp`, or tmux copy mode. The app does not keep a separate scrollable transcript viewport.
-
-Tool output printed in history is not expandable/collapsible after it is committed. Current in-flight output appears in the live region.
-
-## Unknown Slash Command
-
-Unknown commands show an error. To send a normal prompt that starts with `/`, type two slashes:
-
-```text
-//explain this route
-```
-
-packetcode sends `/explain this route`.
+The packetcode `gemini` provider uses Google's developer API directly and does not reuse Gemini CLI authentication. Configure `PACKETCODE_GEMINI_API_KEY` or add the key through the provider picker. If the developer API/model is unavailable to the key, switch providers; the CLI login state is unrelated.
 
 ## Model Switch Fails
 
-Use `/model` or `Ctrl+M` to load the active provider's model list, then choose an exact model ID. If the provider's model API is temporarily unavailable, packetcode may still allow a direct `/model <id>` switch and let the next chat request surface the provider error.
+Use `/model` or Ctrl+M to load the active account's exact model IDs. Curated fallback catalogs keep some providers selectable when `/models` is unavailable, but the next request remains authoritative. Run `packetcode doctor --check providers` for credential/connectivity failures.
 
-## Ollama Is Unreachable
-
-Start Ollama and confirm the host:
+## Ollama Is Unreachable or Slow
 
 ```bash
 ollama serve
 ```
 
-packetcode defaults to `http://localhost:11434`. If you use a different host, set it in config:
-
-```toml
-[providers.ollama]
-host = "http://localhost:11434"
-default_model = "qwen2.5-coder:14b"
-```
-
-For a per-machine override without editing config:
+Then run `/ollama status`, `/ollama models`, and `/ollama ps`. packetcode defaults to `http://localhost:11434`; override with:
 
 ```bash
 PACKETCODE_OLLAMA_HOST=ollama.internal packetcode --provider ollama
 ```
 
-## Hooks Or Statusline Fail
+or `[providers.ollama].host`. A CPU-spill warning means the model/context does not fit the available unified-memory GPU budget. Reduce `num_ctx` or choose a smaller quantization/model.
 
-Hooks and statusline commands run through PowerShell on Windows and `sh -c` elsewhere. Keep commands short, deterministic, and project-local. Increase `timeout_sec` for slow commands.
+## Context Gauge Looks Wrong
 
-Use `/statusline` to see whether the custom statusline is active and `/statusline refresh` to rerun it.
+The gauge is current request occupancy, not cumulative tokens. It includes the latest prompt/completion occupancy reported by the provider and can drop after `/compact`. `/cost` remains cumulative.
+
+If a custom statusline disagrees, run `/statusline refresh` and confirm the script uses `context_window.used`/`max` (or the Claude-compatible aliases) rather than accumulating values itself.
+
+If context grows too quickly:
+
+- use `/compact`;
+- avoid repeatedly attaching large `@` files;
+- inspect unusually large tool/MCP results;
+- set background/workflow token budgets;
+- verify the model's context metadata in the picker or `/ollama models`.
+
+## Shift+Tab Does Not Change Auto Mode
+
+Shift+Tab cycles Manual → Accept Edits → Auto → Plan and works while a foreground turn is active. Two presses from Manual select Auto. A visible shell approval remains in Accept Edits and resolves after the second press to Auto.
+
+Picker, transcript, Agent, and Workflow workspaces own their keyboard while open; return to chat first. An already-running shell process is not retroactively changed, but later tool actions use the new mode.
+
+## A Tool Was Denied or Auto-Approved Unexpectedly
+
+```bash
+packetcode doctor --check permissions
+```
+
+Run `/permissions` in the TUI. Explicit session/config rules override profile defaults. Option 2 in the approval menu remembers a session rule; shell commands are remembered exactly. Use `/permissions profile ask` to return to Manual behavior.
+
+## `/spawn --write` Failed
+
+Write jobs require a trusted git repository and worktree support. Run:
+
+```bash
+packetcode doctor --check project,state.worktrees
+git status
+git worktree list
+```
+
+The job fails closed rather than editing the foreground checkout. Inspect successful worktrees with the path shown in `/agents` or `/jobs <id>`.
+
+## Missing or Truncated Agent Output
+
+Artifact manifests and model-facing tool results are intentionally bounded. Open `/jobs <id>` for the persisted transcript and inspect the worktree for full changes. Older oversized tool output is compacted only in requests sent back to the model; the persisted session remains complete.
+
+## A Workflow Hangs or Fails
+
+Use `/workflows` for live state and `/agents` for child jobs. `/workflows stop <id>` cascades cancellation. Check global job caps, the workflow's 16-agent guard, token budget, provider credentials, and malformed project/user TOML. Project workflow files override user/built-in files and parse errors are surfaced.
 
 ## MCP Server Does Not Start
 
-Run `/mcp` to see server state. Then inspect logs:
+Run `/mcp`, `/mcp status <name>`, and `/mcp logs <name>`. Logs live at `~/.packetcode/mcp-<name>.log` and are displayed through a bounded redacted tail. Config changes or crashed servers currently require a packetcode restart.
 
-```text
-/mcp logs <name>
-```
+## Hooks or Statusline Fail
 
-Logs are stored at `~/.packetcode/mcp-<name>.log`. After editing `[mcp.<name>]` config, restart packetcode.
+Commands run through PowerShell on Windows and `sh -c` elsewhere, with the project root as working directory. Keep commands deterministic and increase `timeout_sec` if appropriate. packetcode falls back to its native statusline when a custom command fails.
+
+## Cannot Scroll
+
+Finalized output is in terminal-native scrollback. Use terminal scrolling, Shift+PageUp, or tmux copy mode. `/transcript` opens persisted session history. `/clear` and Ctrl+L clear only visible packetcode output.
+
+## Unknown Slash Command
+
+Type `/` or `/help` for current commands. Use `//literal` to send a prompt beginning with `/`. Markdown custom commands belong in `~/.packetcode/commands/` or `.packetcode/commands/`.

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/hooks"
@@ -76,9 +78,11 @@ type Agent struct {
 	session      *session.Manager
 	costTracker  *cost.Tracker
 	approver     Approver
+	policyMu     sync.RWMutex
 	policy       *permissions.Policy
 	systemPrompt string
 	hooks        *hooks.Runner
+	tokenBudget  int
 }
 
 // Config bundles the agent's required dependencies.
@@ -91,6 +95,7 @@ type Config struct {
 	Policy       *permissions.Policy
 	SystemPrompt string
 	Hooks        *hooks.Runner
+	TokenBudget  int // input+output tokens; zero disables the boundary check
 }
 
 // New constructs an Agent. Approver defaults to AutoReject if omitted —
@@ -111,6 +116,7 @@ func New(cfg Config) *Agent {
 		policy:       cfg.Policy,
 		systemPrompt: cfg.SystemPrompt,
 		hooks:        cfg.Hooks,
+		tokenBudget:  cfg.TokenBudget,
 	}
 }
 
@@ -124,7 +130,19 @@ func (a *Agent) SetPolicy(policy *permissions.Policy) {
 	if policy == nil {
 		policy = permissions.DefaultPolicy()
 	}
+	a.policyMu.Lock()
 	a.policy = policy
+	a.policyMu.Unlock()
+}
+
+func (a *Agent) currentPolicy() *permissions.Policy {
+	a.policyMu.RLock()
+	policy := a.policy
+	a.policyMu.RUnlock()
+	if policy == nil {
+		return permissions.DefaultPolicy()
+	}
+	return policy
 }
 
 // Run processes a single user message through the full agentic loop.
@@ -176,6 +194,16 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 		if !more {
 			events <- AgentEvent{Type: EventDone}
 			return
+		}
+		if a.tokenBudget > 0 {
+			cur := a.session.Current()
+			if cur != nil {
+				used := cur.TokenUsage.TotalInput + cur.TokenUsage.TotalOutput
+				if used >= a.tokenBudget {
+					events <- AgentEvent{Type: EventError, Error: fmt.Errorf("token budget exhausted at turn boundary: used %d tokens (budget %d)", used, a.tokenBudget)}
+					return
+				}
+			}
 		}
 	}
 	events <- AgentEvent{Type: EventError, Error: fmt.Errorf("exceeded %d tool iterations", maxToolIterations)}
@@ -318,7 +346,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 	}
 
 	params := json.RawMessage(call.Arguments)
-	policyResult := a.policy.Decide(permissions.Request{
+	policyResult := a.currentPolicy().Decide(permissions.Request{
 		ToolName:         call.Name,
 		RequiresApproval: tool.RequiresApproval(),
 		Params:           params,
@@ -376,7 +404,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		events <- AgentEvent{Type: EventToolCallApproved, ToolCall: call}
 		if len(decision.EditedParams) > 0 {
 			params = decision.EditedParams
-			editedPolicyResult := a.policy.Decide(permissions.Request{
+			editedPolicyResult := a.currentPolicy().Decide(permissions.Request{
 				ToolName:         call.Name,
 				RequiresApproval: tool.RequiresApproval(),
 				Params:           params,
@@ -521,8 +549,11 @@ func validateToolCall(call provider.ToolCall) error {
 	return nil
 }
 
-// buildMessages assembles the message array sent to the provider:
-// optional system prompt + the session's accumulated messages.
+const olderToolResultLimit = 16 * 1024
+
+// buildMessages assembles the message array sent to the provider. Persisted
+// history remains complete; only older oversized tool results are compacted on
+// the model-facing copy. The newest complete tool exchange stays verbatim.
 func (a *Agent) buildMessages() []provider.Message {
 	cur := a.session.Current()
 	var msgs []provider.Message
@@ -533,9 +564,48 @@ func (a *Agent) buildMessages() []provider.Message {
 		})
 	}
 	if cur != nil {
-		msgs = append(msgs, normalizeToolTranscript(cur.Messages)...)
+		transcript := normalizeToolTranscript(cur.Messages)
+		msgs = append(msgs, compactOlderToolResults(transcript, olderToolResultLimit)...)
 	}
 	return msgs
+}
+
+func compactOlderToolResults(messages []provider.Message, limit int) []provider.Message {
+	out := append([]provider.Message(nil), messages...)
+	if limit <= 0 {
+		return out
+	}
+	preserveFrom := len(out)
+	groups := completeToolGroups(out)
+	if len(groups) > 0 {
+		preserveFrom = groups[len(groups)-1].start
+	}
+	for i := 0; i < preserveFrom; i++ {
+		if out[i].Role == provider.RoleTool && len(out[i].Content) > limit {
+			out[i].Content = compactToolResult(out[i].Content, limit)
+		}
+	}
+	return out
+}
+
+func compactToolResult(content string, limit int) string {
+	markerReserve := 256
+	kept := limit - markerReserve
+	if kept < 2 {
+		kept = 2
+	}
+	head := kept * 2 / 3
+	tail := kept - head
+	for head > 0 && !utf8.ValidString(content[:head]) {
+		head--
+	}
+	tailStart := len(content) - tail
+	for tailStart < len(content) && !utf8.RuneStart(content[tailStart]) {
+		tailStart++
+	}
+	tail = len(content) - tailStart
+	omitted := len(content) - head - tail
+	return content[:head] + fmt.Sprintf("\n\n[tool result truncated: original_bytes=%d kept_head_bytes=%d kept_tail_bytes=%d omitted_bytes=%d; full result remains in session/UI]\n\n", len(content), head, tail, omitted) + content[tailStart:]
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,7 @@ const (
 	KindUser MessageKind = iota
 	KindAgent
 	KindSystem
+	KindError
 	KindToolCall
 )
 
@@ -281,6 +283,13 @@ func (m *Model) AppendSystem(content string) {
 	m.emit(renderMessage(Message{Kind: KindSystem, Content: content}, m.contentWidth()))
 }
 
+// AppendError commits an actionable failure using the same assistant marker as
+// Claude Code, but in the semantic error color. Routine informational notes
+// continue to use AppendSystem's dim dot marker.
+func (m *Model) AppendError(content string) {
+	m.emit(renderMessage(Message{Kind: KindError, Content: content}, m.contentWidth()))
+}
+
 // PendingView renders the current pending message for the live region.
 // Returns "" when nothing is pending.
 func (m Model) PendingView() string {
@@ -364,11 +373,11 @@ func (m Model) contentWidth() int {
 func renderMessage(msg Message, width int) string {
 	switch msg.Kind {
 	case KindUser:
-		// Flat "> text" — no bordered box (Claude Code style).
+		// Flat "❯ text" — no bordered box (Claude Code style).
 		if msg.Queued {
-			return flatBlock(">", theme.TextDim, theme.StyleDim.Render(msg.Content+"  (queued)"), width)
+			return flatBlock("❯", theme.TextDim, theme.StyleDim.Render(msg.Content+"  (queued)"), width)
 		}
-		return flatBlock(">", theme.AccentPrimary, theme.StylePrimary.Render(msg.Content), width)
+		return flatBlock("❯", theme.AccentPrimary, theme.StylePrimary.Render(msg.Content), width)
 	case KindAgent:
 		out := ""
 		if strings.TrimSpace(msg.Reasoning) != "" {
@@ -389,6 +398,11 @@ func renderMessage(msg Message, width int) string {
 		}
 		// Dim, prefixed, no box.
 		return flatBlock("·", theme.TextDim, theme.StyleDim.Render(msg.Content), width)
+	case KindError:
+		if msg.Content == "" {
+			return ""
+		}
+		return flatBlock("⏺", theme.Error, theme.StyleError.Render(msg.Content), width)
 	case KindToolCall:
 		return renderToolCall(msg, width)
 	}
@@ -421,8 +435,7 @@ func flatBlock(marker string, markerColor lipgloss.Color, body string, width int
 
 func renderToolCall(msg Message, width int) string {
 	head := lipgloss.NewStyle().Foreground(theme.AccentSecondary).Render("⏺") + " " +
-		theme.StylePrimary.Render(msg.ToolName) +
-		theme.StyleDim.Render("("+truncate(msg.ToolArgs, 120)+")")
+		theme.StylePrimary.Render(toolDisplay(msg.ToolName, msg.ToolArgs))
 	parts := []string{head}
 
 	var body string
@@ -448,6 +461,52 @@ func renderToolCall(msg Message, width int) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func toolDisplay(name, args string) string {
+	var fields map[string]any
+	_ = json.Unmarshal([]byte(args), &fields)
+	field := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := fields[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+		return ""
+	}
+	display, detail := name, ""
+	switch name {
+	case "read_file":
+		display, detail = "Read", field("path")
+	case "write_file":
+		display, detail = "Write", field("path")
+	case "patch_file":
+		display, detail = "Update", field("path")
+	case "execute_command":
+		display, detail = "Bash", field("command")
+	case "search_codebase":
+		display, detail = "Search", field("query", "pattern")
+	case "list_directory":
+		display, detail = "List", field("path")
+	case "list_symbols":
+		display, detail = "Symbols", field("path")
+	case "find_definition":
+		display, detail = "Definition", field("symbol", "name")
+	case "find_references":
+		display, detail = "References", field("symbol", "name")
+	case "get_diagnostics":
+		display, detail = "Diagnostics", field("path")
+	case "spawn_agent":
+		display, detail = "Agent", field("prompt")
+	case "collect_agent_results":
+		display, detail = "Collect", field("scope")
+	default:
+		detail = strings.TrimSpace(args)
+	}
+	if detail == "" {
+		return display
+	}
+	return display + theme.StyleDim.Render("("+truncate(detail, 120)+")")
 }
 
 func renderToolResultBody(msg Message, width int) string {

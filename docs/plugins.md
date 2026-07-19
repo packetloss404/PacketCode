@@ -12,6 +12,8 @@ paths.
   `[providers.<slug>] type = "openai_compatible"`.
 - **Markdown prompt commands** add reusable slash prompts from
   `~/.packetcode/commands` or `.packetcode/commands`.
+- **Workflow TOML** adds reusable sequential/parallel orchestration from
+  `~/.packetcode/workflows` or `.packetcode/workflows`.
 - **Hooks and statusline commands** run local automation around prompts, tools,
   and the bottom statusline.
 - **Themes and permission profiles** customize presentation and trust policy.
@@ -30,11 +32,12 @@ config snippets it contributes:
 my-pack/
   README.md
   commands/review.md
+  workflows/review.toml
   config.example.toml
 ```
 
-Install the pieces by copying command files into `.packetcode/commands/` or
-`~/.packetcode/commands/`, and copying the relevant `[mcp.*]`,
+Install the pieces by copying command/workflow files into their `.packetcode/`
+or `~/.packetcode/` directories, and copying the relevant `[mcp.*]`,
 `[providers.*]`, `[hooks.*]`, `[statusline]`, theme, or permission blocks into
 `~/.packetcode/config.toml`.
 

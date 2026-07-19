@@ -30,7 +30,7 @@ func New() Model {
 	ta.CharLimit = 0
 	ta.MaxHeight = 4
 	ta.ShowLineNumbers = false
-	ta.Prompt = "> " // Claude Code-style prompt inside the input box
+	ta.Prompt = "❯ "
 	ta.SetHeight(1)
 
 	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(theme.TextPrimary)
@@ -47,7 +47,7 @@ func New() Model {
 
 func (m *Model) Resize(width, height int) {
 	m.width = width
-	m.ta.SetWidth(width - 4)
+	m.ta.SetWidth(max(1, width-2))
 	if height > 0 && height < m.maxRows+2 {
 		m.maxRows = max(1, height-2)
 	}
@@ -119,11 +119,19 @@ func (m Model) View() string {
 		style = theme.StyleInputFocused
 	}
 	body := m.ta.View()
-	width := m.width - 2
+	width := m.width
 	if width <= 0 {
 		width = 80
 	}
 	return style.Width(width).Render(body)
+}
+
+// ViewWithPlaceholder renders a copy with a context-specific placeholder.
+// Agent View uses this to mirror Claude Code's "describe a task" prompt
+// without mutating the normal chat placeholder or the underlying buffer.
+func (m Model) ViewWithPlaceholder(placeholder string) string {
+	m.ta.Placeholder = placeholder
+	return m.View()
 }
 
 func (m *Model) syncHeight() {

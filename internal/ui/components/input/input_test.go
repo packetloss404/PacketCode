@@ -63,6 +63,9 @@ func TestInput_ViewCompactByDefault(t *testing.T) {
 	if got, want := len(lines), 3; got != want {
 		t.Fatalf("empty input height = %d lines, want %d\n%s", got, want, m.View())
 	}
+	if strings.Contains(m.View(), "│") || !strings.Contains(m.View(), "─") {
+		t.Fatalf("input should use horizontal rules without side borders:\n%s", m.View())
+	}
 }
 
 func TestInput_ViewGrowsForMultilineText(t *testing.T) {
@@ -73,5 +76,16 @@ func TestInput_ViewGrowsForMultilineText(t *testing.T) {
 	lines := strings.Split(m.View(), "\n")
 	if got, want := len(lines), 5; got != want {
 		t.Fatalf("multiline input height = %d lines, want %d\n%s", got, want, m.View())
+	}
+}
+
+func TestInput_ViewWithPlaceholderDoesNotMutateDefault(t *testing.T) {
+	m := New()
+	m.Resize(80, 0)
+	if got := m.ViewWithPlaceholder("describe a task"); !strings.Contains(got, "describe a task") {
+		t.Fatalf("custom placeholder missing:\n%s", got)
+	}
+	if got := m.View(); !strings.Contains(got, "Ask packetcode anything") {
+		t.Fatalf("default placeholder was mutated:\n%s", got)
 	}
 }

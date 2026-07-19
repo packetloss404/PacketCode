@@ -50,23 +50,34 @@ func (l *Loader) List() []string {
 // Get resolves a workflow by name. Files take precedence over built-ins, with
 // project files winning over user files.
 func (l *Loader) Get(name string) (Workflow, bool) {
+	wf, err := l.Load(name)
+	return wf, err == nil
+}
+
+// Load resolves a workflow by name and reports errors from the first existing
+// file. A malformed higher-precedence file must not silently fall back.
+func (l *Loader) Load(name string) (Workflow, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return Workflow{}, false
+		return Workflow{}, fmt.Errorf("workflow name is empty")
 	}
 	// Project dir first, then user dir (highest precedence first).
 	for _, dir := range l.dirsByPrecedence() {
 		path := filepath.Join(dir, name+".toml")
 		if _, err := os.Stat(path); err == nil {
-			if wf, err := loadTOMLWorkflow(path); err == nil {
-				return wf, true
+			wf, loadErr := loadTOMLWorkflow(path)
+			if loadErr != nil {
+				return Workflow{}, loadErr
 			}
+			return wf, nil
+		} else if !os.IsNotExist(err) {
+			return Workflow{}, fmt.Errorf("load workflow %q: %w", name, err)
 		}
 	}
 	if wf, ok := builtinWorkflows()[name]; ok {
-		return wf, true
+		return wf, nil
 	}
-	return Workflow{}, false
+	return Workflow{}, fmt.Errorf("workflow %q not found", name)
 }
 
 // dirs returns the workflow directories in load order (user, then project).

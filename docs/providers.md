@@ -6,11 +6,11 @@ packetcode supports these provider slugs:
 | --- | --- | --- |
 | `openai` | Yes | Uses the OpenAI API. |
 | `codex` | No | Uses an OpenAI Codex ChatGPT subscription via `~/.codex/auth.json`. See [Codex subscription](#codex-subscription). |
-| `anthropic` | Yes | Uses the Anthropic Claude Messages API. |
-| `gemini` | Yes | Uses the Google Gemini API. |
+| `anthropic` | Yes | Uses the Anthropic Claude Messages API with an API key. |
+| `gemini` | Yes | Uses the Google Gemini API; it does not reuse Gemini CLI authentication. |
 | `minimax` | Yes | Uses MiniMax's OpenAI-compatible API surface. |
 | `deepseek` | Yes | Uses DeepSeek's OpenAI-compatible API (`api.deepseek.com`). |
-| `grok` | Yes | Uses xAI's OpenAI-compatible API (`api.x.ai`). |
+| `grok` | Yes | Uses xAI's OpenAI-compatible API (`api.x.ai`) with an xAI API key. |
 | `mistral` | Yes | Uses Mistral AI's OpenAI-compatible API (`api.mistral.ai`). |
 | `openrouter` | Yes | Lists models and pricing from OpenRouter. |
 | `ollama` | No | Uses a reachable Ollama server. |
@@ -18,8 +18,8 @@ packetcode supports these provider slugs:
 
 ## Codex Subscription
 
-The `codex` provider lets you drive packetcode with an OpenAI Codex **ChatGPT
-subscription** (Plus/Pro/Team/Enterprise) instead of a per-token API key. It
+The `codex` provider lets you drive packetcode with a **ChatGPT plan that
+includes Codex** instead of a per-token API key. It
 does not implement its own login — it reuses the OAuth credentials the official
 [Codex CLI](https://github.com/openai/codex) writes when you sign in.
 
@@ -60,6 +60,20 @@ in the picker, and `packetcode doctor` reports the credential source as the
 - Non-standard `CODEX_HOME` layouts are honored (the same env var the Codex CLI
   uses). You can also point at a specific file with `host` under
   `[providers.codex]` in `~/.packetcode/config.toml`.
+- Codex reasoning visibility is model-dependent. Models that emit a summary are
+  rendered live; models that return only opaque encrypted reasoning remain
+  display-silent. packetcode never attempts to expose raw chain-of-thought.
+
+## Subscription and CLI Logins
+
+Only the `codex` provider currently has a supported keyless subscription path,
+through the official Codex CLI OAuth store.
+
+The built-in `anthropic`, `gemini`, and `grok` providers use their documented
+developer APIs and require API credentials. packetcode does not copy consumer
+Claude, Gemini CLI, or Grok website/app subscription credentials. A consumer
+CLI becoming unavailable does not remove the corresponding developer API
+provider; configure an API key or choose another provider.
 
 ## Configure Keys
 
@@ -126,6 +140,18 @@ default_model = "gemini-2.5-pro"
 [providers.minimax]
 api_key = "sk-..."
 default_model = "MiniMax-M3"
+
+[providers.deepseek]
+api_key = "sk-..."
+default_model = "deepseek-chat"
+
+[providers.grok]
+api_key = "xai-..."
+default_model = "grok-4.5"
+
+[providers.mistral]
+api_key = "..."
+default_model = "mistral-large-latest"
 
 [providers.ollama]
 host = "http://localhost:11434"

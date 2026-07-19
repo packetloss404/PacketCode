@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+func TestParseWorkflowInputOverridesQuotedValues(t *testing.T) {
+	got := parseInputOverrides([]string{`target="the`, `staged`, `diff"`, `note='two`, `words'`, "plain=value"})
+	if got["target"] != "the staged diff" || got["note"] != "two words" || got["plain"] != "value" {
+		t.Fatalf("parseInputOverrides() = %#v", got)
+	}
+}
+
 func TestParseLoopArgs(t *testing.T) {
 	cases := []struct {
 		args     []string

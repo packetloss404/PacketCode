@@ -1,89 +1,73 @@
 # Changelog
 
-All notable changes to packetcode are recorded here.
-
-packetcode has not cut a stable 1.0 release yet. Entries under `Unreleased` describe the current main branch.
+All notable packetcode changes are recorded here. The project is pre-1.0; `Unreleased` describes the current `main` branch.
 
 ## [Unreleased]
 
 ### Added
 
-- **Prompt history recall** — **Up/Down** in the input bar page through previously submitted inputs (prompts and slash commands), shell-style. Your in-progress draft is stashed when you start paging and restored when you come back down past the newest entry. Recall only fires when the caret is at the top (Up) or bottom (Down) of the buffer, so multi-line editing keeps normal caret movement; blank inputs are skipped and consecutive duplicates collapse. History is per session.
-- **Shift+Tab permission-mode cycler** — a Claude Code-style footer beneath the input shows the active permission mode, and **Shift+Tab** cycles it: **normal** (mutating tools prompt) → **accept edits** (file edits auto-approve, shell still prompts) → **auto** (file edits *and* shell commands auto-approve; MCP and approval-gated tools still prompt) → **plan** (read-only; propose a plan) → back to normal. **Bypass permissions** — the full-auto "skip permissions" mode — is deliberately *out* of the cycle (Claude Code-style): it is entered on purpose with `/trust on`, shown as a distinct red banner, and Shift+Tab steps back out of it so it is never a trap. Adds a new `auto` permission profile between `edit` and `full`. The modes are a view over the permission profiles (`ask`/`edit`/`auto`/`safe`/`full`) and the `/plan` flag, so `/plan`, `/trust`, and `/permissions` continue to work and stay in sync. Cycling is a no-op mid-turn (finish or Ctrl+C first).
-- **DeepSeek, Grok (xAI), and Mistral providers** — three new built-in providers, each a thin shell over the shared OpenAI-compatible wire client with its own identity, base URL, brand color, curated fallback model list, and pricing/context tables (verified July 2026). `deepseek` (`api.deepseek.com`, default `deepseek-chat`, 1M context), `grok` (`api.x.ai`, default `grok-4.5`), and `mistral` (`api.mistral.ai`, default `mistral-large-latest`, plus the coding-focused `devstral`/`codestral`). Set a key via `/provider add <slug>` or `PACKETCODE_<SLUG>_API_KEY`; live model discovery falls back to the curated list when the account's `/models` endpoint is unavailable. See `docs/providers.md`.
-- **`/workflows`** — a Go-native multi-agent orchestration engine over the existing `jobs.Manager`. Workflows are TOML (under `~/.packetcode/workflows/` or `<project>/.packetcode/workflows/`) or built-in: sequential **phases**, single-agent steps, and **parallel fan-out** steps whose results bind into later prompts (`{{.steps.name}}`). A built-in `review` workflow works out of the box (`/workflows run review`). `/workflows list`, `/workflows stop [id|all]`, and a live `workflowview` (run → phase → step → agent). Bounded by the existing background-agent caps plus a per-run agent guard. (Phase 2; pipelines + adversarial verify are the next phase.)
-- **`/loop`** — repeat a prompt or `/command`. `/loop 5m /cost` re-runs on an interval; `/loop <prompt>` self-paces, re-running after each turn until the model ends a reply with `LOOP_DONE` or a 25-iteration cap. Ticks that land mid-turn queue instead of overlapping, and because each iteration is a normal turn it can fan out background agents (`spawn_agent`) or run a workflow. `/loop list` and `/loop stop [id|all]` manage active loops. (First phase; a full `/workflows` orchestration engine — Go-native, built on the existing `jobs.Manager` — is planned next.)
-- **Inline "always allow" in the approval prompt** — the approval modal now offers `[A] Always` alongside `[Y]/[N]`. Choosing it approves the call and adds a session permission rule so it isn't asked again: for shell commands the rule is scoped to the command family (e.g. `go test …`, not all commands); for other tools it allows the tool by name. Review or clear with `/permissions`.
-- **Plan mode** (`/plan`) — a read-only research mode. Toggling it on forces the `read_only` permission profile (edits and commands are disabled) and steers each turn to investigate and propose a numbered plan for approval; `/plan off` restores the previous profile so the model can execute. The top bar shows `plan` while active.
-- **@-file mentions** — write `@path/to/file` anywhere in a prompt and packetcode inlines that file's contents into the message sent to the model (your visible message keeps the literal `@path`, and a system note lists what was attached). Resolves relative/`~`/absolute paths, stays within the project, skips binaries, and caps large files. Typing `@` also opens an interactive fuzzy-find popup over the project's files (git-tracked + untracked, `.gitignore`-aware) — arrow/Tab/Enter to pick, and the path splices into your prompt.
-- **Reasoning/thinking display** — when a provider streams a reasoning summary (Responses API), packetcode renders it live as dim "✻ thinking" text above the answer, in the same bubble. New `EventReasoningDelta` flows provider → agent → UI. For Codex, `reasoning.summary` is now requested per-model from the model catalog: **`gpt-5.5`/`gpt-5.4` stream live thinking** (select them with `/model`), the `gpt-5.6` family reasons but returns it encrypted-only (nothing to display), and models that reject the parameter (`gpt-5.3-codex-spark`) omit it to avoid a 400.
-
-- **Ollama overhaul for first-class local use (tuned for Apple Silicon).** Local `localhost:11434` remains the zero-config default; remote hosts and tuning are opt-in.
-  - **Fixes silent context truncation:** every request now sets an auto-sized `num_ctx` (Ollama's ~4K default would silently drop earlier turns and file contents), snapped to a bucket to avoid KV-cache churn and capped to the model's real maximum.
-  - **Accurate model metadata via `/api/show`:** real context windows and authoritative per-model tool-calling detection (replacing a stale hardcoded allow-list), cached per model.
-  - **Protocol correctness:** native `tool_name` on tool results, `keep_alive: 30m` to avoid mid-session reloads, `done_reason: length` surfaced as a truncation error, and the standard `OLLAMA_HOST` env var honored.
-  - **Tuning under `[providers.ollama]`:** optional `num_ctx`, `keep_alive`, `temperature`.
-  - **Model management:** `PullModel` (streaming download progress), `LoadedModels` (`/api/ps` with GPU-vs-CPU-offload detection), `Warmup` (preload to avoid cold starts), and a "start it with `ollama serve`" hint when the daemon is down.
-  - **Apple Silicon awareness:** detects unified memory (`hw.memsize`), recommends coding models that fit the GPU budget (and warns before one would spill to CPU), and exposes tokens/sec + time-to-first-token from Ollama's timing fields.
-  - **`/ollama` command** — `status` (reachability, memory, model recommendations, tok/s), `models` (installed models with context window + tool support), `ps` (loaded models with GPU/CPU split), and `pull <model>`. Switching to an Ollama model warms it up in the background to avoid a cold-start on the first turn.
-- **Refreshed model catalogs** — updated built-in pricing/context tables and default models to the current lineups: OpenAI GPT-5.6 (`gpt-5.6-sol` default, plus `terra`/`luna`), Anthropic Claude Opus 4.8 (default), Sonnet 5, and Fable 5, and MiniMax M3 (default). Dynamic model listing still surfaces anything the account can access; these just fix the defaults and cost estimates.
-- **Statusline on by default** — packetcode now renders a Claude Code-style statusline natively out of the box (no `jq`/subprocess), `[provider·model] 🟢 pct% (used/max) | 📂 project | 🌿 branch | 💲cost | ◷ op`, refreshed live each second. Set `[statusline].command` to override it with your own script.
-- **Claude Code-compatible statusline** — the statusline stdin snapshot is now a superset of Claude Code's, adding `cwd`, `model.display_name`, and `context_window.context_window_size` / `current_usage.*` aliases, so a statusline script written for Claude Code runs against packetcode unchanged (point `[statusline].command` at your existing `~/.claude/statusline/statusline.sh`). A molded variant that keeps the Claude Code look and adds packetcode-native segments (provider, session cost, live operation) ships at `docs/statusline/statusline.sh`.
-- **Codex provider** — drive packetcode with an OpenAI Codex ChatGPT subscription instead of a per-token API key. It reuses the OAuth credentials the official Codex CLI stores in `~/.codex/auth.json` (`codex login` → "Sign in with ChatGPT"), refreshes the access token automatically on expiry, and talks to the ChatGPT backend's Responses API. The provider is keyless like Ollama, reports `$0` cost (the subscription bills a flat rate), and lists the account's Codex models by reading the Codex CLI's live `models_cache.json` (e.g. `gpt-5.6-sol`), each sent its Codex-default reasoning effort. Select it with `/provider codex` or `--provider codex`. See `docs/providers.md`.
-
-### Fixed
-
-- **Context-window gauge counted cumulative session tokens instead of current occupancy** — the top bar and statusline gauged the running *total* of input tokens across every turn against the model's context window, so the meter climbed past 100% and showed nonsense like `100% (1.2M/272K)` ("blowing through tokens") after a few turns, and could disagree between the two displays. They now show the **current** context occupancy (the most recent request's prompt + completion tokens), which reflects the live conversation size and drops after a `/compact`. Cumulative totals still drive cost. Both gauges read the same field, so they stay in sync (a custom `[statusline].command` still refreshes on its own throttle).
+- OpenAI Codex ChatGPT-subscription provider backed by the official Codex CLI OAuth store and Responses API, including catalog-driven reasoning effort/summary behavior.
+- DeepSeek, Grok (xAI), and Mistral built-in providers, plus refreshed OpenAI, Anthropic, MiniMax M3, Ollama, and Codex model metadata.
+- First-class native Ollama support with zero-config `localhost:11434`, remote-host overrides, bounded automatic `num_ctx`, `/api/show` capability discovery, keep-alive, model pull/status/PS commands, warmup, timing telemetry, and Apple Silicon memory recommendations.
+- Native statusline enabled by default, plus a Claude Code-compatible custom statusline JSON snapshot.
+- `@` file mentions with git-aware fuzzy completion and bounded project-root expansion.
+- Live reasoning-summary rendering for providers/models that expose it.
+- Prompt history recall with draft restoration and multiline-aware Up/Down behavior.
+- Permission modes and footer: Manual, Accept Edits, Auto, Plan, and explicit Bypass Permissions.
+- `/plan`, `/loop`, and `/workflows`; workflows support ordered phases, single-agent steps, parallel fan-out, template bindings, cancellation, live inspection, and aggregate token boundaries.
+- Full-screen Agent workspace with grouped state, direct task entry, transcripts, peek, cancellation, explicit injection, and compact artifact manifests.
+- Per-job and per-workflow token budgets.
+- Deterministic credential-free TUI lifecycle fixtures and a PTY/cell capture harness for packetcode/Claude comparisons at fixed terminal sizes.
 
 ### Changed
 
-- **Tighter, Claude Code-style responses** — the default agent system prompt now steers strongly toward brevity: minimize output tokens, skip preamble/postamble, scale reply length to the task, prefer plain prose over heavy multi-section scaffolding, and lead with the few highest-impact findings on reviews rather than exhaustively enumerating everything. Long open-ended tasks still get depth when warranted.
+- Reworked the TUI toward Claude Code's flow: flat conversation blocks, `❯` submitted prompts, understated horizontal input rules, Claude-style thinking/tool markers, numbered approval choices, message spacing, full-screen Agent/Workflow views, and exact mode footers.
+- Shift+Tab now changes permission mode during an active turn. The new policy applies to later tool actions and can resolve an approval already waiting; an already-running command is left alone.
+- The default system prompt favors concise, terminal-friendly answers and avoids unnecessary scaffolding.
+- Context estimation now includes the system prompt, transcript structure, tool schemas, and pending input using a conservative source-code-oriented estimate.
+- Automatic compaction runs before an over-threshold turn, preserves complete recent tool exchanges, records summarization usage, and updates live occupancy independently from cumulative billing.
+- Older oversized tool results are compacted only in the model-facing request; full content remains in persisted sessions and the UI.
+- Code-intelligence result defaults and hard caps are smaller to reduce context growth.
+- Anthropic requests use ephemeral cache breakpoints for stable system and tool-schema prefixes and account for cache tokens explicitly.
+- High-frequency background-job activity snapshots are coalesced while queued/running/terminal transitions remain synchronous and recovery-safe.
+- Documentation was consolidated around current behavior; shipped `Round N` design specs are now concise implementation/user guides.
+
+### Fixed
+
+- Context gauges now show current context occupancy instead of cumulative session input, keeping the native and custom statuslines aligned and allowing occupancy to drop after compaction.
+- Foreground permission-policy swaps are synchronized with the running agent; background job policy startup reads are synchronized as well.
+- Workflow cancellation closes spawn/register races, cancels sibling fan-out jobs on failure, drains terminal states with bounded waits, and reports malformed workflow files instead of silently falling back.
+- Provider/tool cancellation stops the generic thinking spinner on first visible progress and distinguishes cancellation from provider errors.
+- Job persistence flushes pending snapshots on shutdown.
+- Symlink-escape scans and file-as-parent write errors behave consistently on macOS.
+- MCP JSON-RPC request IDs correctly handle every `int64` value.
 
 ## [0.5.1] - 2026-05-30
 
 ### Added
 
-- Automatic retry with exponential backoff and jitter for transient provider failures — HTTP 429/5xx and dropped connections that occur before the response stream begins — honoring `Retry-After` and turn cancellation. Applies to all providers; configurable via `provider_max_retries` (default 3 attempts, 1 disables).
-- Per-call stall timeout that aborts a provider stream which goes silent mid-response, surfaced as a retryable timeout. Configurable via `provider_stall_timeout` (default 60 seconds).
-- `patch_file` now falls back to a whitespace- and line-ending-tolerant UNIQUE match when no exact match is found (still errors on ambiguity); behavior is unchanged when the exact match succeeds.
-- `execute_command` now streams output incrementally to the conversation as it runs (bounded cap and cancellation preserved).
+- Retry with backoff and jitter for transient provider failures, honoring `Retry-After` and cancellation.
+- Per-call provider stall timeout.
+- Whitespace- and line-ending-tolerant unique matching for `patch_file`.
+- Incremental `execute_command` stdout/stderr rendering with bounded final output.
 
 ## [0.5.0] - 2026-05-29
 
 ### Added
 
-- Multi-provider chat through one provider interface: OpenAI, Google Gemini, MiniMax, OpenRouter, and local Ollama.
-- Agent tool loop with `read_file`, `search_codebase`, `list_directory`, `write_file`, `patch_file`, and `execute_command`; mutating tools require approval unless trust mode is enabled.
-- Sessions, cost tracking, `/undo` file backups, context compaction, and git-aware status information.
-- Keyboard-first Bubble Tea TUI with inline terminal scrollback, approval prompts, provider/model pickers, slash-command autocomplete, and markdown-backed custom prompt commands.
-- Queued foreground prompts while a turn or `/compact` is already running.
-- Background agents via `/spawn`, `/agents`, `/jobs`, `/cancel`, and the `spawn_agent` tool. Background jobs are read-only by default and request normal approvals when launched with `--write`; Agent View provides live status, token/cost telemetry, transcripts, cancellation, and explicit result injection.
-- `/transcript` for opening the current saved session transcript.
-- MCP stdio server support through `[mcp.<name>]` config blocks. MCP tools are registered as provider-safe `<server>__<tool>` aliases and always go through approval.
-- `/mcp status <name>` and `/mcp tools <name>` diagnostics.
-- Optional custom statusline command under `[statusline]`.
-- Optional lifecycle hooks under `[[hooks.user_prompt_submit]]`, `[[hooks.pre_tool_use]]`, and `[[hooks.post_tool_use]]`.
-- User theme overrides through `~/.packetcode/theme.toml`, with presets under `docs/themes/`.
-- Packet Computers and Packet Control research/design notes in `PACKETCOMPUTERS.md`.
+- Multi-provider agent loop, native project tools, approvals, sessions, cost tracking, undo, context compaction, and git-aware status.
+- Bubble Tea TUI with terminal scrollback, provider/model pickers, slash completion, queued prompts, custom prompt commands, hooks, statusline, and themes.
+- Background agents, Agent View, isolated write worktrees, transcripts, cancellation, and explicit result injection.
+- MCP stdio tools registered as provider-safe aliases.
 
 ### Changed
 
-- Accepting `/provider` or `/model` from the slash-command autocomplete popup (Tab, or Enter on the bare verb) now opens the picker directly, so you select from a list instead of guessing a slug or id. Added `/providers` and `/models` plural aliases.
-- Topbar/statusline output now includes foreground operation state, elapsed time, and queued prompt count.
-- Approval prompts show clearer job/source context and pending approval depth.
-- Job/session transcript viewer opens at the newest content and includes better scroll hints.
-- `execute_command` descriptions and approval previews now call out the active shell runtime and Windows PowerShell/WSL/Git Bash invocation expectations.
-- Documentation now treats the project as pre-release / active development instead of calling the current feature set `v1`.
-- User docs now describe the real provider setup path: use `Ctrl+P`, `/provider`, or `/provider add`; focus a provider row and press `Ctrl+A`, or run `/provider add <slug>` to open the key prompt directly.
-- Transcript docs now match the inline-rendering model: finalized output is committed to terminal scrollback, `/clear` only clears packetcode's live pane, and historical tool blocks are not toggled after they are printed.
+- Provider/model completion opens interactive pickers rather than requiring guessed identifiers.
+- Topbar/statusline include operation state, elapsed time, queue depth, context, and job telemetry.
+- Approval and transcript views include clearer source, runtime, and worktree context.
 
 ### Fixed
 
-- Custom statusline auto-refresh is throttled so one-second topbar operation ticks do not spawn overlapping statusline commands.
-- `/mcp tools` now displays the same sanitized callable aliases that are registered with providers.
-- Removed a dead placeholder goroutine from foreground turn startup.
-- Hardened timing-sensitive Windows tests for hook/statusline process startup and command cancellation.
-
-### Testing
-
-- The Go test suite covers provider adapters, config loading, sessions, tools, the agent loop, cancellation, slash commands, pickers, jobs, MCP, hooks, statusline, and UI components.
+- Custom statusline refreshes are throttled.
+- MCP diagnostics display the actual provider-safe aliases.
+- Process startup/cancellation tests are reliable across supported operating systems.

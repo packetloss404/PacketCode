@@ -47,7 +47,7 @@ func (f *fakeProvider) ChatCompletion(ctx context.Context, req provider.ChatRequ
 	ch := make(chan provider.StreamEvent, 4)
 	go func() {
 		defer close(ch)
-		if f.holdOpen {
+		if f.holdOpen || strings.Contains(prompt, "HOLD") {
 			select {
 			case ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: "(running)"}:
 			case <-ctx.Done():
@@ -222,6 +222,78 @@ func TestEngine_FailFast(t *testing.T) {
 	require.EqualValues(t, 1, atomic.LoadInt32(&prov.spawns))
 }
 
+// Test: one failed fan-out child cancels and drains its siblings.
+func TestEngine_FanOutFailureCancelsSiblings(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{Name: "fan-failure", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "fan", Mode: StepParallel, FanOut: []string{"HOLD one", "FAIL", "HOLD two"},
+		Agent: AgentSpec{Prompt: "{{.item}}"},
+	}}}}}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Len(t, snap.Phases[0].Steps[0].Agents, 3)
+	for _, agent := range snap.Phases[0].Steps[0].Agents {
+		require.True(t, agent.Job.State.IsTerminal(), "sibling %s was left running", agent.JobID)
+	}
+}
+
+func TestEngine_PartialFanOutSpawnFailureCancelsSpawnedChildren(t *testing.T) {
+	prov := &fakeProvider{holdOpen: true}
+	mgr := newTestManager(t, prov, func(cfg *jobs.Config) { cfg.MaxTotal = 2 })
+	e := NewEngine(mgr)
+	wf := Workflow{Name: "partial-spawn", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "fan", Mode: StepParallel, FanOut: []string{"a", "b", "c"}, Agent: AgentSpec{Prompt: "{{.item}}"},
+	}}}}}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Len(t, snap.Phases[0].Steps[0].Agents, 2)
+	for _, child := range snap.Phases[0].Steps[0].Agents {
+		require.True(t, child.Job.State.IsTerminal(), "spawned child %s survived a later spawn failure", child.JobID)
+	}
+}
+
+func TestEngine_ParentCancellationCancelsAllSpawnedChildren(t *testing.T) {
+	prov := &fakeProvider{holdOpen: true}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	ctx, cancel := context.WithCancel(context.Background())
+	wf := Workflow{Name: "cancel-race", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "fan", Mode: StepParallel, FanOut: []string{"a", "b", "c", "d"}, Agent: AgentSpec{Prompt: "{{.item}}"},
+	}}}}}
+	run, err := e.Start(ctx, wf)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&prov.spawns) > 0 }, 3*time.Second, time.Millisecond)
+	cancel()
+	snap := waitRun(t, e, run.ID, RunCancelled, 5*time.Second)
+	for _, agent := range snap.Phases[0].Steps[0].Agents {
+		require.True(t, agent.Job.State.IsTerminal(), "spawned child %s survived cancellation", agent.JobID)
+	}
+}
+
+func TestEngine_JoinTimeoutCancelsAndDrainsChildren(t *testing.T) {
+	prov := &fakeProvider{holdOpen: true}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	e.waitTimeout = 20 * time.Millisecond
+	wf := Workflow{Name: "join-timeout", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "fan", Mode: StepParallel, FanOut: []string{"a", "b"}, Agent: AgentSpec{Prompt: "{{.item}}"},
+	}}}}}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Len(t, snap.Phases[0].Steps[0].Agents, 2)
+	for _, child := range snap.Phases[0].Steps[0].Agents {
+		require.True(t, child.Job.State.IsTerminal(), "timed-out child %s survived its workflow", child.JobID)
+	}
+}
+
 // Test: ContinueOnError lets the run proceed past a failing step.
 func TestEngine_ContinueOnError(t *testing.T) {
 	prov := &fakeProvider{}
@@ -303,6 +375,26 @@ func TestEngine_MaxAgentsGuard(t *testing.T) {
 	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
 	require.Contains(t, snap.Err, "agent cap")
 	require.EqualValues(t, 0, atomic.LoadInt32(&prov.spawns), "guard trips before any spawn")
+}
+
+func TestEngine_TokenBudgetStopsBeforeLaterStep(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	e.SetTokenBudget(7)
+
+	wf := Workflow{Name: "budgeted", Phases: []Phase{{Name: "p", Steps: []Step{
+		{Name: "first", Mode: StepSingle, Agent: AgentSpec{Prompt: "first"}},
+		{Name: "second", Mode: StepSingle, Agent: AgentSpec{Prompt: "must not run"}},
+	}}}}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Contains(t, snap.Err, "workflow token budget exhausted")
+	require.Len(t, snap.Phases[0].Steps[0].Agents, 1)
+	require.Empty(t, snap.Phases[0].Steps[1].Agents)
+	require.EqualValues(t, 1, atomic.LoadInt32(&prov.spawns))
 }
 
 // Test: Subscribe receives run updates including a terminal transition.

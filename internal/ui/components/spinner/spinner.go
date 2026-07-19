@@ -1,4 +1,4 @@
-// Package spinner is a Braille-frame "thinking" indicator.
+// Package spinner is a Claude Code-style star-frame working indicator.
 //
 // It's a thin wrapper around bubbles/spinner so the rest of the codebase
 // only depends on our theme tokens, not Charm's animation defaults.
@@ -12,8 +12,9 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
-// brailleFrames cycles through the design system's specified spinner.
-var brailleFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+// starFrames keeps the working line visually consistent with the ✻ reasoning
+// marker while retaining enough motion to show that the process is alive.
+var starFrames = []string{"✻", "✢", "✳", "✶", "✳", "✢"}
 
 type Model struct {
 	inner  bspinner.Model
@@ -24,11 +25,11 @@ type Model struct {
 func New() Model {
 	s := bspinner.New()
 	s.Spinner = bspinner.Spinner{
-		Frames: brailleFrames,
+		Frames: starFrames,
 		FPS:    80_000_000, // 80ms cadence per the design spec.
 	}
 	s.Style = lipgloss.NewStyle().Foreground(theme.AccentPrimary)
-	return Model{inner: s, label: "Thinking..."}
+	return Model{inner: s, label: "Thinking…"}
 }
 
 // Start activates the spinner and returns a tick command. Callers must

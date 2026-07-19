@@ -107,6 +107,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	collectToolFactory := m.cfg.CollectTool
 	systemPromptFor := m.cfg.SystemPromptFor
 	parentApprover := m.cfg.Approver
+	permissionPolicy := m.cfg.PermissionPolicy
 	hookRunner := m.cfg.Hooks
 	maxDepth := m.cfg.MaxDepth
 	m.mu.RUnlock()
@@ -134,7 +135,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	}
 
 	approver := NewJobApprover(parentApprover, j.ID, j.AllowWrite)
-	policy := m.cfg.PermissionPolicy
+	policy := permissionPolicy
 
 	a := agent.New(agent.Config{
 		Registry:     subRegistry,
@@ -145,6 +146,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 		Policy:       policy,
 		SystemPrompt: systemPrompt,
 		Hooks:        hookRunner,
+		TokenBudget:  m.cfg.TokenBudget,
 	})
 
 	events := a.Run(jobCtx, j.Prompt)

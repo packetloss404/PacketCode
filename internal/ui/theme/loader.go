@@ -200,11 +200,8 @@ func rebuildStyles() {
 	StyleInfo = lipgloss.NewStyle().Foreground(Info)
 
 	StyleTopBar = lipgloss.NewStyle().
-		Background(BaseSurface).
-		Foreground(TextPrimary).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(BaseBorder)
+		Foreground(TextSecondary).
+		Padding(0, 2)
 
 	StyleUserMessage = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -233,14 +230,12 @@ func rebuildStyles() {
 		Padding(0, 1)
 
 	StyleInputIdle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(BaseBorder).
-		Padding(0, 1)
+		Border(lipgloss.NormalBorder(), true, false, true, false).
+		BorderForeground(BaseBorder)
 
 	StyleInputFocused = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(AccentPrimary).
-		Padding(0, 1)
+		Border(lipgloss.NormalBorder(), true, false, true, false).
+		BorderForeground(BaseBorderBright)
 
 	StyleDiffAdded = lipgloss.NewStyle().Foreground(Success)
 	StyleDiffRemoved = lipgloss.NewStyle().Foreground(Error)

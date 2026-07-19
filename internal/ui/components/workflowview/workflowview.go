@@ -215,24 +215,19 @@ func (m Model) View() string {
 		return ""
 	}
 	w := m.modalWidth()
-	innerW := w - 4
+	innerW := w - 2
 	if innerW < 20 {
 		innerW = 20
 	}
 
-	title := theme.StyleAccent.Render(m.title)
-	meta := theme.StyleSecondary.Render(fmt.Sprintf("%d runs", len(m.runs)))
-	header := lipgloss.JoinHorizontal(lipgloss.Top, title, theme.StyleDim.Render("  "), meta)
+	title := theme.StyleAccent.Bold(true).Render("⚡ packetcode workflows")
+	meta := theme.StyleSecondary.Render(fmt.Sprintf("%d runs · fan-out agents and ordered phases", len(m.runs)))
+	header := title + "\n" + meta
 	body := m.renderRows(innerW)
 	footer := theme.StyleDim.Render(m.footerText())
 
-	content := strings.Join([]string{header, body, footer}, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.AccentPrimary).
-		Padding(0, 1).
-		Width(innerW + 2).
-		Render(content)
+	content := strings.Join([]string{header, "", body, "", footer}, "\n")
+	return lipgloss.NewStyle().Padding(0, 1).Width(w).Render(content)
 }
 
 func (m Model) footerText() string {
@@ -384,9 +379,6 @@ func (m Model) modalWidth() int {
 	if w <= 0 {
 		w = 96
 	}
-	if w > 120 {
-		w = 120
-	}
 	if w < 44 {
 		w = 44
 	}
@@ -408,7 +400,7 @@ func (m Model) modalHeight() int {
 }
 
 func (m Model) listHeight() int {
-	h := m.modalHeight() - 4
+	h := m.modalHeight() - 8
 	if h < 1 {
 		return 1
 	}
@@ -500,7 +492,9 @@ func (m Model) renderAgentRow(r row, selected bool, w int) string {
 	id := theme.StyleAccent.Render(padOrTrunc(shortID(j.ID), 8))
 	state := renderJobState(j.State.String(), 10)
 	prov := providerLabel(j.Provider, j.Model)
-	tokens := fmt.Sprintf("%d/%d", j.Tokens.Input, j.Tokens.Output)
+	// Background tokens are cumulative input/output API usage, not the
+	// foreground conversation's context-window occupancy.
+	tokens := fmt.Sprintf("api %d/%d", j.Tokens.Input, j.Tokens.Output)
 	cost := fmt.Sprintf("$%.4f", j.CostUSD)
 
 	fixedW := lipgloss.Width(cursor) + len(indent) + 8 + 1 + 10 + 1 + 20 + 1 + 11 + 1 + 8 + 1

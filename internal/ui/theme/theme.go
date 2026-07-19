@@ -87,7 +87,7 @@ var (
 	// matching Claude Code's restrained bottom status rather than a boxed bar.
 	StyleTopBar = lipgloss.NewStyle().
 			Foreground(TextSecondary).
-			Padding(0, 1)
+			Padding(0, 2)
 
 	StyleUserMessage = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -116,16 +116,14 @@ var (
 			Padding(0, 1)
 
 	StyleInputIdle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(BaseBorder).
-			Padding(0, 1)
+			Border(lipgloss.NormalBorder(), true, false, true, false).
+			BorderForeground(BaseBorder)
 
-	// Focused input uses a subtly brighter grey border (not the cyan accent),
-	// matching Claude Code's understated input box.
+	// Focused input uses two understated horizontal rules, matching Claude
+	// Code's input geometry without turning the field into a colored box.
 	StyleInputFocused = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(BaseBorderBright).
-				Padding(0, 1)
+				Border(lipgloss.NormalBorder(), true, false, true, false).
+				BorderForeground(BaseBorderBright)
 
 	StyleDiffAdded   = lipgloss.NewStyle().Foreground(Success)
 	StyleDiffRemoved = lipgloss.NewStyle().Foreground(Error)

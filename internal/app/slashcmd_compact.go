@@ -12,11 +12,14 @@ import (
 )
 
 type compactDoneMsg struct {
-	sessionID string
-	beforeTok int
-	keep      int
-	after     []provider.Message
-	err       error
+	sessionID  string
+	beforeTok  int
+	keep       int
+	after      []provider.Message
+	usage      *provider.Usage
+	inputRate  float64
+	outputRate float64
+	err        error
 }
 
 // handleCompactCommand summarises the middle of the conversation via a
@@ -53,8 +56,9 @@ func (a *App) handleCompactCommand(args []string) (tea.Model, tea.Cmd) {
 	a.cancelTurn = cancel
 	a.setOperation("compacting")
 
-	cmd := runCompact(ctx, a.contextMgr, prov, modelID, cur.ID, before, beforeTok, keep)
-	return a, tea.Batch(a.spinner.Start("Compacting..."), cmd)
+	inputRate, outputRate := prov.Pricing(modelID)
+	cmd := runCompact(ctx, a.contextMgr, prov, modelID, cur.ID, before, beforeTok, keep, inputRate, outputRate)
+	return a, tea.Batch(a.spinner.Start("Compacting…"), cmd)
 }
 
 func runCompact(
@@ -66,16 +70,21 @@ func runCompact(
 	before []provider.Message,
 	beforeTok int,
 	keep int,
+	inputRate float64,
+	outputRate float64,
 ) tea.Cmd {
 	before = append([]provider.Message(nil), before...)
 	return func() tea.Msg {
-		after, err := contextMgr.Compact(ctx, prov, modelID, before, keep)
+		after, usage, err := contextMgr.CompactWithUsage(ctx, prov, modelID, before, keep)
 		return compactDoneMsg{
-			sessionID: sessionID,
-			beforeTok: beforeTok,
-			keep:      keep,
-			after:     after,
-			err:       err,
+			sessionID:  sessionID,
+			beforeTok:  beforeTok,
+			keep:       keep,
+			after:      after,
+			usage:      usage,
+			inputRate:  inputRate,
+			outputRate: outputRate,
+			err:        err,
 		}
 	}
 }
@@ -108,12 +117,28 @@ func (a *App) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		a.conversation.AppendSystem("compact: save failed: " + saveErr.Error())
 		return a.startNextQueuedInput()
 	}
+	if msg.usage != nil {
+		if usageErr := a.deps.Sessions.UpdateUsage(*msg.usage, msg.inputRate, msg.outputRate); usageErr != nil {
+			a.conversation.AppendSystem("compact: usage update failed: " + usageErr.Error())
+		}
+	}
 
-	afterTok := a.contextMgr.EstimateTokens(msg.after)
+	afterTok := a.contextMgr.EstimateRequest(a.deps.SystemPrompt, msg.after, a.activeToolDefinitions()).Total
+	if usageErr := a.deps.Sessions.SetContextTokens(afterTok); usageErr != nil {
+		a.conversation.AppendSystem("compact: context update failed: " + usageErr.Error())
+	}
 	a.conversation.AppendSystem(fmt.Sprintf(
 		"compacted: %d -> %d tokens (kept %d recent messages)",
 		msg.beforeTok, afterTok, msg.keep,
 	))
 	a.refreshTopBar()
 	return a.startNextQueuedInput()
+}
+
+func (a *App) activeToolDefinitions() []provider.ToolDefinition {
+	prov, modelID := a.deps.Registry.Active()
+	if prov == nil || a.deps.Tools == nil || !prov.SupportsTools(modelID) {
+		return nil
+	}
+	return a.deps.Tools.Definitions()
 }

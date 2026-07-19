@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.minimax.io/v1"
-	DefaultModel   = "MiniMax-M2.7-highspeed"
+	DefaultModel   = "MiniMax-M3"
 	slug           = "minimax"
 	displayName    = "MiniMax"
 )

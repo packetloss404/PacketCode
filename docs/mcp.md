@@ -1,4 +1,4 @@
-# MCP servers
+# MCP Servers
 
 packetcode can extend its tool surface with external **MCP (Model
 Context Protocol) servers**. Each server is an external binary that
@@ -80,9 +80,9 @@ args    = ["-y", "@modelcontextprotocol/server-filesystem", "/home/alice/project
 ```
 
 After packetcode starts, the LLM sees `filesystem__read_file`,
-`filesystem__write_file`, etc. Since all MCP tools are
-approval-gated, every call routes through the same Y/N prompt as a
-native `write_file`.
+`filesystem__write_file`, etc. MCP tools participate in the normal permission
+policy. Manual, Accept Edits, and Auto ask by default; Bypass or an explicit
+allow rule can approve them automatically.
 
 ---
 
@@ -118,7 +118,7 @@ args    = ["mcp-server-fetch"]
 ```
 
 No extra args, no extra env — `uvx` handles the pip install-cum-run.
-As with every MCP tool, every `fetch__fetch` call requires approval.
+By default, each `fetch__fetch` call asks for approval.
 
 ---
 
@@ -133,12 +133,11 @@ As with every MCP tool, every `fetch__fetch` call requires approval.
   `find_definition`, `find_references`, `get_diagnostics`, `execute_command`,
   `spawn_agent`) are never prefixed and never collide with MCP tools.
 - Every MCP tool returns `true` from `RequiresApproval()`, no matter
-  what the server is. Trust mode (`--trust` or `trust_mode = true`)
-  auto-approves them like any other destructive tool.
+  what the server is. The active profile and explicit rules decide whether
+  that requirement asks, allows, or denies.
 
-The approval modal shows the exact tool name (`filesystem__write_file`)
-and the arguments the LLM proposed, so you can inspect them before
-pressing `Y`.
+The approval menu shows the exact tool name (`filesystem__write_file`)
+and proposed arguments before you select Yes, remember a session rule, or No.
 
 ---
 
@@ -180,11 +179,11 @@ a lot of servers print diagnostics to stderr before exiting.
   for those surfaces are refused with a JSON-RPC `-32601` (method not
   supported), so the server stays healthy; packetcode just ignores
   them.
-- **No per-server trust.** Every MCP call is approval-gated by the
-  same flag as native destructive tools.
+- **No separate per-server UI.** Use permission rules such as
+  `filesystem__*` or `mcp:*` to set server/tool policy.
 - **Text content only.** Server responses carrying image/audio/
   resource content are flattened to `[<type> content omitted]` in
   the tool result. Tools can still be useful — they just can't
   surface non-text payloads to the LLM.
 
-See `docs/feature-mcp.md` for the full design spec.
+See [MCP implementation notes](feature-mcp.md) for the maintained protocol contract.

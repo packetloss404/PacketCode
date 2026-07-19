@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -168,6 +169,61 @@ func TestNewManager_HydratedResultsAreOldestFirst(t *testing.T) {
 	require.Len(t, pending, 2)
 	assert.Equal(t, "zzzz9999", pending[0].JobID)
 	assert.Equal(t, "aaaa1111", pending[1].JobID)
+}
+
+func TestManagerPersistenceDebouncesNonterminalUpdates(t *testing.T) {
+	dir := t.TempDir()
+	mgr, _, err := NewManager(Config{JobsDir: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = mgr.Shutdown(time.Second) })
+	mgr.persistDelay = time.Hour
+
+	for seq := int64(1); seq <= 3; seq++ {
+		require.NoError(t, mgr.savePersistedSnapshot(persistedJob{
+			ID: "debounce", State: "running", Seq: seq, LastMessage: fmt.Sprintf("update-%d", seq),
+		}))
+	}
+	_, err = os.Stat(filepath.Join(dir, "debounce.json"))
+	require.ErrorIs(t, err, os.ErrNotExist, "nonterminal updates must not write synchronously")
+
+	mgr.flushPendingSnapshot("debounce")
+	got, ok := readPersistedJob(filepath.Join(dir, "debounce.json"))
+	require.True(t, ok)
+	assert.Equal(t, int64(3), got.Seq)
+	assert.Equal(t, "update-3", got.LastMessage)
+}
+
+func TestManagerPersistenceTerminalFlushIsSynchronous(t *testing.T) {
+	dir := t.TempDir()
+	mgr, _, err := NewManager(Config{JobsDir: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = mgr.Shutdown(time.Second) })
+	mgr.persistDelay = time.Hour
+	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "terminal", State: "running", Seq: 1}))
+	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "terminal", State: "completed", Seq: 2, Summary: "done"}))
+
+	got, ok := readPersistedJob(filepath.Join(dir, "terminal.json"))
+	require.True(t, ok, "terminal snapshot must be durable before return")
+	assert.Equal(t, "completed", got.State)
+	assert.Equal(t, int64(2), got.Seq)
+	mgr.persistMu.Lock()
+	_, pending := mgr.persistPending["terminal"]
+	mgr.persistMu.Unlock()
+	assert.False(t, pending)
+}
+
+func TestManagerShutdownFlushesPendingSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	mgr, _, err := NewManager(Config{JobsDir: dir})
+	require.NoError(t, err)
+	mgr.persistDelay = time.Hour
+	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "shutdown", State: "running", Seq: 7, LastMessage: "latest"}))
+
+	require.NoError(t, mgr.Shutdown(time.Second))
+	got, ok := readPersistedJob(filepath.Join(dir, "shutdown.json"))
+	require.True(t, ok)
+	assert.Equal(t, int64(7), got.Seq)
+	assert.Equal(t, "latest", got.LastMessage)
 }
 
 func TestSavePersistedSnapshotSkipsStaleSeq(t *testing.T) {

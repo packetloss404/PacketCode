@@ -38,10 +38,12 @@ type Job struct {
 	WorktreeBase, WorktreeNote               string
 	Artifacts                                []jobspkg.Artifact
 	CreatedAt, UpdatedAt, FinishedAt         time.Time
-	Tokens                                   struct{ Input, Output int }
-	CostUSD                                  float64
-	Depth                                    int
-	NeedsInput, NeedsApproval                bool
+	// Tokens are cumulative API usage across all turns of this background
+	// job. They are billing totals, not foreground context-window occupancy.
+	Tokens                    struct{ Input, Output int }
+	CostUSD                   float64
+	Depth                     int
+	NeedsInput, NeedsApproval bool
 }
 
 // CloseMsg is emitted when the user dismisses the agent view.
@@ -67,7 +69,8 @@ type IgnoreMsg struct{ JobID string }
 type group int
 
 const (
-	groupActive group = iota
+	groupNeedsInput group = iota
+	groupActive
 	groupCompleted
 	groupFailed
 	groupCancelled
@@ -277,24 +280,34 @@ func (m Model) View() string {
 		return ""
 	}
 	w := m.modalWidth()
-	innerW := w - 4
+	innerW := w - 2
 	if innerW < 20 {
 		innerW = 20
 	}
 
-	title := theme.StyleAccent.Render(m.title)
-	meta := theme.StyleSecondary.Render(fmt.Sprintf("%d jobs", len(m.jobs)))
-	header := lipgloss.JoinHorizontal(lipgloss.Top, title, theme.StyleDim.Render("  "), meta)
+	waiting, working, completed := m.groupCounts()
+	title := theme.StyleAccent.Bold(true).Render("⚡ packetcode agents")
+	meta := theme.StyleSecondary.Render(fmt.Sprintf("%d awaiting input · %d working · %d completed", waiting, working, completed))
+	header := title + "\n" + meta
 	body := m.renderRows(innerW)
 	footer := theme.StyleDim.Render(m.footerText())
 
-	content := strings.Join([]string{header, body, footer}, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.AccentPrimary).
-		Padding(0, 1).
-		Width(innerW + 2).
-		Render(content)
+	content := strings.Join([]string{header, "", body, "", footer}, "\n")
+	return lipgloss.NewStyle().Padding(0, 1).Width(w).Render(content)
+}
+
+func (m Model) groupCounts() (waiting, working, completed int) {
+	for _, job := range m.jobs {
+		switch groupForJob(job) {
+		case groupNeedsInput:
+			waiting++
+		case groupActive:
+			working++
+		default:
+			completed++
+		}
+	}
+	return waiting, working, completed
 }
 
 func (m Model) footerText() string {
@@ -307,7 +320,7 @@ func (m Model) footerText() string {
 			parts = append(parts, "i inject", "x ignore")
 		}
 	}
-	parts = append(parts, "Esc close")
+	parts = append(parts, "Esc return", "? shortcuts")
 	return strings.Join(parts, " · ")
 }
 
@@ -326,14 +339,17 @@ func (m Model) emitForSelection(fn func(string) tea.Msg) tea.Cmd {
 func (m *Model) rebuildRows() {
 	groups := map[group][]Job{}
 	for _, j := range m.jobs {
-		groups[groupForState(j.State)] = append(groups[groupForState(j.State)], j)
+		g := groupForJob(j)
+		groups[g] = append(groups[g], j)
 	}
 
-	order := []group{groupActive, groupCompleted, groupFailed, groupCancelled}
+	order := []group{groupNeedsInput, groupActive, groupCompleted, groupFailed, groupCancelled}
 	m.rows = m.rows[:0]
 	for _, g := range order {
 		items := groups[g]
-		if len(items) == 0 {
+		// Claude Code keeps the three primary lifecycle sections visible even
+		// when empty, which makes the screen stable as agents move between them.
+		if len(items) == 0 && g > groupCompleted {
 			continue
 		}
 		sort.SliceStable(items, func(i, j int) bool {
@@ -348,6 +364,13 @@ func (m *Model) rebuildRows() {
 		m.cursor = -1
 		m.scrollOffset = 0
 	}
+}
+
+func groupForJob(j Job) group {
+	if j.NeedsInput || j.NeedsApproval {
+		return groupNeedsInput
+	}
+	return groupForState(j.State)
 }
 
 func groupForState(s string) group {
@@ -365,8 +388,10 @@ func groupForState(s string) group {
 
 func groupLabel(g group) string {
 	switch g {
+	case groupNeedsInput:
+		return "Needs input"
 	case groupActive:
-		return "Active"
+		return "Working"
 	case groupCompleted:
 		return "Completed"
 	case groupFailed:
@@ -375,6 +400,23 @@ func groupLabel(g group) string {
 		return "Cancelled"
 	default:
 		return "Jobs"
+	}
+}
+
+func groupDescription(g group) string {
+	switch g {
+	case groupNeedsInput:
+		return "Agents with a question or permission decision wait here"
+	case groupActive:
+		return "Agents actively working in the background"
+	case groupCompleted:
+		return "Finished agents wait here for review or injection"
+	case groupFailed:
+		return "Agents that stopped with an error"
+	case groupCancelled:
+		return "Agents stopped before completion"
+	default:
+		return ""
 	}
 }
 
@@ -468,9 +510,6 @@ func (m Model) modalWidth() int {
 	if w <= 0 {
 		w = 88
 	}
-	if w > 112 {
-		w = 112
-	}
 	if w < 44 {
 		w = 44
 	}
@@ -492,7 +531,8 @@ func (m Model) modalHeight() int {
 }
 
 func (m Model) listHeight() int {
-	h := m.modalHeight() - 4
+	// Leave room for the two-line header, footer, input, and bottom status.
+	h := m.modalHeight() - 10
 	if h < 1 {
 		return 1
 	}
@@ -501,43 +541,32 @@ func (m Model) listHeight() int {
 
 func (m Model) renderRows(w int) string {
 	h := m.listHeight()
-	if len(m.rows) == 0 {
-		lines := make([]string, 0, h)
-		msg := theme.StyleDim.Render("no background agents - /spawn <prompt>")
-		pad := h / 2
-		for i := 0; i < pad; i++ {
-			lines = append(lines, "")
-		}
-		lines = append(lines, lipgloss.PlaceHorizontal(w, lipgloss.Center, msg))
-		for len(lines) < h {
-			lines = append(lines, "")
-		}
-		return strings.Join(lines, "\n")
-	}
-
-	rows := make([]string, 0, h)
-	end := m.scrollOffset + h
-	if end > len(m.rows) {
-		end = len(m.rows)
-	}
-	for i := m.scrollOffset; i < end; i++ {
+	lines := make([]string, 0, h)
+	for i := m.scrollOffset; i < len(m.rows) && len(lines) < h; i++ {
 		r := m.rows[i]
+		rendered := ""
 		if r.kind == rowHeader {
-			rows = append(rows, m.renderHeader(r.group, w))
-			continue
+			rendered = m.renderHeader(r.group, w)
+		} else {
+			rendered = m.renderJobRow(r.job, i == m.cursor, w)
 		}
-		rows = append(rows, m.renderJobRow(r.job, i == m.cursor, w))
+		for _, line := range strings.Split(rendered, "\n") {
+			if len(lines) >= h {
+				break
+			}
+			lines = append(lines, line)
+		}
 	}
-	for len(rows) < h {
-		rows = append(rows, "")
+	for len(lines) < h {
+		lines = append(lines, "")
 	}
-	return strings.Join(rows, "\n")
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderHeader(g group, w int) string {
-	label := " " + strings.ToUpper(groupLabel(g)) + " "
-	line := theme.StyleDim.Render(strings.Repeat("─", max(0, w-lipgloss.Width(label))))
-	return theme.StyleSecondary.Bold(true).Render(label) + line
+	label := theme.StylePrimary.Bold(true).Render(groupLabel(g))
+	desc := theme.StyleDim.Render(groupDescription(g))
+	return label + "\n " + truncate(desc, max(0, w-1))
 }
 
 func (m Model) renderJobRow(j Job, selected bool, w int) string {
@@ -545,36 +574,28 @@ func (m Model) renderJobRow(j Job, selected bool, w int) string {
 	if selected {
 		cursor = "▶ "
 	}
-	state := renderState(j.State, 10)
-	id := theme.StyleAccent.Render(padOrTrunc(j.ID, 8))
-	prov := providerLabel(j)
-	age := roundedAge(j)
-	tokens := fmt.Sprintf("%d/%d", j.Tokens.Input, j.Tokens.Output)
-	cost := fmt.Sprintf("$%.4f", j.CostUSD)
-	badge := statusBadge(j)
-
-	fixedW := lipgloss.Width(cursor) + 1 + 8 + 1 + 10 + 1 + 22 + 1 + 6 + 1 + 11 + 1 + 8 + 1 + 10 + 1
-	promptW := w - fixedW
-	if promptW < 8 {
-		promptW = 8
+	icon := "✻"
+	iconStyle := theme.StyleAccent
+	switch groupForJob(j) {
+	case groupNeedsInput:
+		icon, iconStyle = "●", theme.StyleWarning
+	case groupCompleted:
+		icon, iconStyle = "✓", theme.StyleSuccess
+	case groupFailed:
+		icon, iconStyle = "!", theme.StyleError
+	case groupCancelled:
+		icon, iconStyle = "×", theme.StyleSecondary
 	}
-	prompt := rowMessage(j)
-	prompt = truncate(strings.TrimSpace(prompt), promptW)
+	prompt := truncate(strings.TrimSpace(rowMessage(j)), max(8, w-30))
 	if prompt == "" {
 		prompt = "(no prompt)"
 	}
-
-	line := strings.Join([]string{
-		cursor + id,
-		state,
-		padOrTrunc(prov, 22),
-		padOrTrunc(age, 6),
-		padOrTrunc(tokens, 11),
-		padOrTrunc(cost, 8),
-		padOrTrunc(badge, 10),
-		prompt,
-	}, " ")
-	line = truncate(line, w)
+	age := roundedAge(j)
+	lead := cursor + iconStyle.Render(icon) + " " + theme.StyleAccent.Render(j.ID) + "  " + theme.StylePrimary.Render(prompt)
+	space := max(1, w-lipgloss.Width(lead)-lipgloss.Width(age))
+	line := truncate(lead+strings.Repeat(" ", space)+theme.StyleDim.Render(age), w)
+	details := fmt.Sprintf("    %s · %s · api %d/%d · $%.4f", providerLabel(j), statusBadge(j), j.Tokens.Input, j.Tokens.Output, j.CostUSD)
+	line += "\n" + theme.StyleDim.Render(truncate(details, w))
 	if selected {
 		line = lipgloss.NewStyle().Background(theme.BaseSurfaceBright).Render(line)
 	}

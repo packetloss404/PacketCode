@@ -1,8 +1,11 @@
 # Build output
 bin/
 dist/
+/packetcode
 *.exe
 *.test
+__pycache__/
+*.py[cod]
 
 # Coverage
 *.out
@@ -26,6 +29,9 @@ Thumbs.db
 .env
 .env.local
 *.local
+
+# Local PTY captures may contain machine/user-specific welcome text.
+/testdata/tui/captures/
 
 # Claude Code working files (workspace-specific, not project artefacts)
 .claude/

@@ -43,6 +43,8 @@ default_model = "qwen2.5-coder:14b"
 trust_mode = true
 auto_compact_threshold = 75
 max_input_rows = 8
+background_token_budget = 12000
+workflow_token_budget = 40000
 
 [permissions]
 profile = "balanced"
@@ -81,6 +83,8 @@ command = "echo guard"
 	assert.Equal(t, "http://localhost:11434", cfg.Providers["ollama"].Host)
 	assert.True(t, cfg.Behavior.TrustMode)
 	assert.Equal(t, 75, cfg.Behavior.AutoCompactThreshold)
+	assert.Equal(t, 12000, cfg.Behavior.BackgroundTokenBudget)
+	assert.Equal(t, 40000, cfg.Behavior.WorkflowTokenBudget)
 	assert.Equal(t, 8, cfg.Behavior.MaxInputRows)
 	assert.Equal(t, "balanced", cfg.Permissions.Profile)
 	assert.Equal(t, "allow", cfg.Permissions.Profiles["balanced"]["read_file"])

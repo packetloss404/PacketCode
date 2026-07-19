@@ -67,11 +67,19 @@ func main() {
 	modelFlag := flag.String("model", "", "override default model for this session")
 	resumeFlag := flag.String("resume", "", "resume a saved session by ID")
 	trustFlag := flag.Bool("trust", false, "auto-approve all tool actions for this session")
-	permissionFlag := flag.String("permission-mode", "", "override permission profile for this session (ask, accept-edits, read-only, bypass)")
+	permissionFlag := flag.String("permission-mode", "", "override permission profile for this session (ask, accept-edits, auto, read-only, bypass)")
+	tuiFixtureFlag := flag.String("tui-fixture", "", "render a deterministic TUI lifecycle fixture (development/testing)")
 	flag.Parse()
 
 	if *versionFlag {
 		fmt.Printf("packetcode %s (%s)\n", version, commit)
+		return
+	}
+	if *tuiFixtureFlag != "" {
+		if err := runTUIFixture(*tuiFixtureFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "packetcode: %s\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 	if code, ok := dispatchSubcommand(flag.Args(), os.Stdout, os.Stderr); ok {
@@ -346,6 +354,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		MaxConcurrent:    cfg.Behavior.BackgroundMaxConcurrent,
 		MaxDepth:         cfg.Behavior.BackgroundMaxDepth,
 		MaxTotal:         cfg.Behavior.BackgroundMaxTotal,
+		TokenBudget:      cfg.Behavior.BackgroundTokenBudget,
 		DefaultProvider:  cfg.Behavior.BackgroundDefaultProvider,
 		DefaultModel:     cfg.Behavior.BackgroundDefaultModel,
 		PermissionPolicy: permissionPolicy,
@@ -391,6 +400,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	// manager. It spawns ordinary background jobs, so it needs nothing
 	// beyond jobsMgr.
 	workflowEngine := workflow.NewEngine(jobsMgr)
+	workflowEngine.SetTokenBudget(cfg.Behavior.WorkflowTokenBudget)
 
 	a, err := app.New(app.Deps{
 		Config:           cfg,

@@ -227,11 +227,12 @@ type App struct {
 	// means "turn is live"; cancelTurn==nil plus streaming==true means
 	// "cancel requested, waiting for goroutine drain" — in that window a
 	// second Ctrl+C is a no-op (not a quit). Single-writer from Update.
-	cancelTurn       context.CancelFunc
-	startedAt        time.Time
-	operationLabel   string
-	operationStarted time.Time
-	queuedInputs     []queuedInput
+	cancelTurn          context.CancelFunc
+	startedAt           time.Time
+	operationLabel      string
+	operationStarted    time.Time
+	queuedInputs        []queuedInput
+	skipAutoCompactOnce bool
 
 	// /loop state. loops holds active loops by id; activeLoopID names the loop
 	// that owns the currently-running self-paced turn (so agentDoneMsg can
@@ -750,6 +751,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Permission mode remains live for the duration of a turn. Keep this ahead
+	// of the approval prompt so manual → accept-edits/auto can release an
+	// approval that is already waiting. Other modal workspaces retain ownership
+	// of their keyboard shortcuts.
+	if msg.String() == "shift+tab" && !a.prompt.Visible() && !a.picker.Visible() && !a.jobsPanel.Visible() && !a.agentView.Visible() && !a.workflowView.Visible() {
+		a.cyclePermissionMode()
+		return a, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+p":
 		// Refuse to stack on approval (more urgent) or an existing picker.
@@ -832,6 +842,32 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 	if a.agentView.Visible() {
+		// Agent View has its own task prompt. Typing focuses that prompt; Enter
+		// launches a background agent, while Enter on an empty prompt returns to
+		// the chat. Once text exists, editing keys belong to the textarea rather
+		// than moving the agent-list selection.
+		if msg.String() == "enter" {
+			text := strings.TrimSpace(a.input.Value())
+			if text == "" {
+				a.agentView.Hide()
+				return a, nil
+			}
+			a.input.Reset()
+			model, cmd := a.handleSpawnCommand([]string{text})
+			if a.jobs != nil {
+				a.agentView.Show(a.jobs.List())
+			}
+			return model, cmd
+		}
+		if msg.String() == "esc" && a.input.Value() != "" {
+			a.input.Reset()
+			return a, nil
+		}
+		if a.input.Value() != "" || len(msg.Runes) > 0 {
+			var cmd tea.Cmd
+			a.input, cmd = a.input.Update(msg)
+			return a, cmd
+		}
 		var cmd tea.Cmd
 		a.agentView, cmd = a.agentView.Update(msg)
 		return a, cmd
@@ -841,11 +877,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.workflowView, cmd = a.workflowView.Update(msg)
 		return a, cmd
 	}
-	// Shift+Tab cycles the permission mode (normal → accept edits → auto →
-	// plan), Claude Code-style. Reached here only when no modal is up (each
-	// modal above returns early while visible), so it never fights an overlay.
-	if msg.String() == "shift+tab" {
-		a.cyclePermissionMode()
+	// Claude Code exposes Agent View from the empty prompt with Left Arrow and
+	// advertises the shortcut in every permission-mode footer. Preserve normal
+	// cursor movement whenever the input contains text.
+	if msg.String() == "left" && a.jobs != nil && !a.streaming && a.input.Value() == "" {
+		a.agentView.Show(a.jobs.List())
 		return a, nil
 	}
 	// Up/Down page through previously submitted prompts, shell-style — but
@@ -973,6 +1009,16 @@ func (a *App) View() string {
 	// autocomplete popup, input, and topbar.
 	status := a.topbar.View()
 	in := a.input.View()
+	if a.agentView.Visible() {
+		// Agent View owns the screen's lifecycle summary and shortcut footer.
+		// Keep the input geometry but use its task-oriented placeholder.
+		in = a.input.ViewWithPlaceholder("describe a task for a new agent")
+		status = ""
+	} else if a.workflowView.Visible() {
+		// Workflows are a full-screen navigator with their own footer.
+		in = ""
+		status = ""
+	}
 	pending := a.conversation.PendingView()
 
 	overlay := ""
@@ -997,11 +1043,14 @@ func (a *App) View() string {
 		aboveInput = a.autocomplete.View()
 	}
 
-	// Claude Code-style permission-mode footer, directly beneath the input.
-	// Suppressed while a modal overlay owns the screen to avoid clutter.
+	// Claude Code-style permission-mode footer, below the statusline. Suppress
+	// it while a modal overlay owns the screen to avoid clutter.
 	if overlay == "" {
 		if hint := a.permModeHint(); hint != "" {
-			in = in + "\n" + hint
+			if status != "" {
+				status += "\n"
+			}
+			status += "  " + hint
 		}
 	}
 
@@ -1173,6 +1222,25 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 }
 
 func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
+	// Resolve model-facing additions before checking the threshold. Large file
+	// mentions and the plan-mode instruction must count toward the upcoming
+	// request even though the visible user message keeps the original text.
+	turnText := text
+	expanded, attached := expandFileMentions(text, a.deps.WorkingDir)
+	if len(attached) > 0 {
+		turnText = expanded
+	}
+	if a.planMode {
+		turnText = planModeInstruction + turnText
+	}
+
+	if !a.skipAutoCompactOnce && a.shouldAutoCompact(turnText) {
+		a.queueInput(text)
+		a.skipAutoCompactOnce = true
+		a.conversation.AppendSystem("automatic context compaction triggered")
+		return a.handleCompactCommand(nil)
+	}
+	a.skipAutoCompactOnce = false
 	a.input.Reset()
 	if emitUser {
 		a.conversation.AppendUser(text)
@@ -1180,14 +1248,8 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 
 	// @-file mentions: the displayed user message keeps the literal @path, but
 	// the model receives the referenced files' contents inlined as context.
-	turnText := text
-	if expanded, attached := expandFileMentions(text, a.deps.WorkingDir); len(attached) > 0 {
-		turnText = expanded
+	if len(attached) > 0 {
 		a.conversation.AppendSystem("attached " + plural(len(attached), "file", "files") + ": " + strings.Join(attached, ", "))
-	}
-	// Plan mode: steer the read-only turn toward proposing a plan.
-	if a.planMode {
-		turnText = planModeInstruction + turnText
 	}
 
 	a.streaming = true
@@ -1202,7 +1264,32 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	a.cancelTurn = cancel
 	stream := a.agent.Run(ctx, turnText)
 
-	return a, tea.Batch(a.spinner.Start("Thinking..."), readAgentEvent(stream))
+	return a, tea.Batch(a.spinner.Start("Thinking…"), readAgentEvent(stream))
+}
+
+func (a *App) shouldAutoCompact(text string) bool {
+	cur := a.deps.Sessions.Current()
+	prov, modelID := a.deps.Registry.Active()
+	if cur == nil || prov == nil || !a.contextMgr.CanCompact(cur.Messages, defaultCompactKeep) {
+		return false
+	}
+	maxTokens := prov.ContextWindow(modelID)
+	if maxTokens <= 0 {
+		return false
+	}
+	used := cur.TokenUsage.ContextTokens
+	if used > 0 {
+		used += a.contextMgr.EstimateTokens([]provider.Message{{Role: provider.RoleUser, Content: text}})
+	} else {
+		messages := append([]provider.Message(nil), cur.Messages...)
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Content: text})
+		var definitions []provider.ToolDefinition
+		if a.deps.Tools != nil && prov.SupportsTools(modelID) {
+			definitions = a.deps.Tools.Definitions()
+		}
+		used = a.contextMgr.EstimateRequest(a.deps.SystemPrompt, messages, definitions).Total
+	}
+	return used*100 >= a.contextMgr.Threshold()*maxTokens
 }
 
 func (a *App) queueInput(text string) {
@@ -1268,7 +1355,7 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 
 	switch ev.Type {
 	case agent.EventTextDelta:
-		if !a.spinner.Active() {
+		if a.spinner.Active() {
 			// First token arrived → silence the spinner.
 			a.spinner.Stop()
 		}
@@ -1284,6 +1371,8 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		a.conversation.AppendAgentReasoning(modelID, providerSlug, ev.Text)
 
 	case agent.EventToolCallProposed:
+		// A proposed tool is visible progress and replaces generic thinking.
+		a.spinner.Stop()
 		// Carry the provider call id so streamed output chunks
 		// (EventToolOutputChunk) can be routed to this exact pending block.
 		a.conversation.AppendToolCallWithID(ev.ToolCall.Name, ev.ToolCall.Arguments, ev.ToolCall.ID)
@@ -1327,7 +1416,7 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		if isCancellation(ev.Error) {
 			a.conversation.AppendSystem("turn cancelled")
 		} else {
-			a.conversation.AppendSystem("error: " + ev.Error.Error())
+			a.conversation.AppendError(ev.Error.Error())
 		}
 		if a.cancelTurn != nil {
 			a.cancelTurn()

@@ -1,67 +1,46 @@
 # Agent View
 
-Agent View is the foreground dashboard for background agents. It is inspired by Claude Code's Agent View, but scoped to packetcode's existing job model: background agents remain `internal/jobs` jobs, and `/agents` is the interactive surface for inspecting and acting on them.
+Agent View is packetcode's full-screen workspace for background jobs. It uses the same job manager as `/spawn`, model-initiated `spawn_agent`, loops, and workflows.
 
-## User Surface
+## Open and Start Work
 
-| Command | Behavior |
-|---|---|
-| `/agents` | Opens the grouped Agent View dashboard. |
-| `/agents <id>` | Opens the full transcript for one background agent. |
-| `/spawn <prompt>` | Starts a read-only background agent. |
-| `/spawn --write <prompt>` | Starts a background agent in an isolated git worktree that may request approval for writes, patches, and commands. |
-| `/cancel <id\|all>` | Cancels one background agent or every active one. |
+- Run `/agents`.
+- Press Left Arrow from an empty, idle chat prompt.
+- Run `/agents <id>` to open one transcript directly.
 
-Agent View groups jobs by state, keeps the current selection stable as live updates arrive, and shows per-agent telemetry: provider/model, age, input/output tokens, estimated cost, and a compact status badge such as `approval`, `ready`, `seen`, `injected`, or `consumed`. The final column shows the most recent useful activity: prompt, assistant text, tool activity, approval wait, summary, or error. Keyboard controls are local to the dashboard:
+The bottom Agent View prompt accepts a task. Enter starts a read-only agent, Enter on an empty prompt returns to chat, and Esc clears a draft before closing the workspace.
+
+## Layout and Controls
+
+Jobs are grouped into Needs Input, Working, Completed, Failed, and Cancelled. Rows show identifier, activity/summary, age, provider/model, state, API token counts, cost, and result status.
 
 | Key | Action |
-|---|---|
-| `Up` / `Down`, `k` / `j` | Move selection. |
-| `p` | Peek at the selected result or current summary in the conversation. |
-| `Enter` / `o` | Open the selected agent transcript. |
-| `c` | Request cancellation. |
-| `i` | Inject a terminal result into the next foreground turn. |
-| `Esc` / `q` | Close Agent View. |
+| --- | --- |
+| Up/Down or `j`/`k` | Move. |
+| `p` | Peek at current/completed output. |
+| Enter or `o` | Open transcript. |
+| `c` | Cancel an active job. |
+| `i` | Inject a completed result into foreground context. |
+| `x` | Ignore a completed result. |
+| Esc | Clear draft or return to chat. |
+
+Live snapshots use monotonic sequence numbers so stale asynchronous updates do not overwrite newer activity.
 
 ## Result Lifecycle
 
-Completed background results are no longer silently injected into the next foreground turn. Terminal updates mark results as `seen`, which keeps them available in Agent View. The user explicitly decides whether to inject with `i`; injected results are appended to the foreground session as a user-role message:
+Terminal results become `seen`; they are not silently inserted into the next prompt. Injection appends a bounded handoff containing outcome, summary, artifacts, and worktree metadata. Explicit parent-agent wait/collection marks a result `consumed` so it is not offered a second time.
 
-```text
-[Background job <id> handoff]
-Outcome: completed
-Summary: <summary>
-Artifacts:
-- A1 test: go test ./... [exit 0]
-```
+Artifact manifests summarize file changes, commands/tests, searches, child jobs, errors, and worktree diffs without copying raw logs or complete files into foreground model context.
 
-This keeps the foreground model context truthful and avoids surprise context changes after long-running background work.
+## Write-Capable Jobs
 
-`DrainResults` is retained for older callers and marks drained results as `injected`. New UI flows should use `PendingResults`, `MarkResultSeen`, `MarkResultIgnored`, and `MarkResultInjected`. Parent-agent `wait=true` and `collect_agent_results` fan-in marks delivered child results as `consumed` so they are not also offered for foreground injection.
+`/spawn --write` creates a dedicated git worktree and branch from current `HEAD`. Agent View and transcript headers show their paths. packetcode never merges or removes them automatically.
 
-## Live State
+## Current Limits
 
-Job snapshots include monotonic `Seq` and `UpdatedAt` fields so the TUI can ignore stale asynchronous updates. Snapshots also carry `LastActivity`, `LastMessage`, `NeedsInput`, `NeedsApproval`, `AllowWrite`, and `ResultStatus`. Running job transcripts are read from the live sub-session when available, then from the persisted job session after completion.
+- Active jobs recover as cancelled after restart rather than resuming.
+- Arbitrary clarification questions from a sub-agent are not implemented.
+- Live sub-agent output stays in its transcript instead of foreground chat.
+- Renaming, pinning, and grouping by future Packet Computer are deferred.
 
-Write-capable jobs also carry worktree metadata. `/agents`, `/jobs`, peek output, transcript headers, terminal notifications, and injected results expose the worktree path and branch so the user can inspect or merge the job's edits deliberately.
-
-Jobs also carry compact artifact metadata captured from tool execution: file changes, command and test runs, searches, spawned children, and worktree diffs. Agent View and transcript headers show artifact manifests; explicit injection adds a bounded handoff packet, not raw diffs, logs, or file contents.
-
-## Current Scope
-
-Implemented in this v1:
-
-- `/agents` dashboard over existing jobs.
-- Live job activity and needs-approval state.
-- Full transcript open for selected agents.
-- Peek, cancel, and explicit result injection actions.
-- Persisted snapshot metadata and result status.
-- Worktree metadata for write-capable background jobs.
-- Compact artifact manifests for richer fan-in.
-
-Deferred:
-
-- Standalone `packetcode agents` CLI command.
-- Pinning, renaming, and grouping agents.
-- Supervisor agents and DAG scheduling.
-- Pull request status dots.
+See [Background agents, loops, and workflows](feature-background-agents.md).

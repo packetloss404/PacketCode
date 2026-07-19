@@ -214,6 +214,19 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 	return m.Save()
 }
 
+// SetContextTokens immediately updates the live context occupancy without
+// changing cumulative billing totals.
+func (m *Manager) SetContextTokens(tokens int) error {
+	m.mu.Lock()
+	if m.current == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("set context tokens: no current session")
+	}
+	m.current.TokenUsage.ContextTokens = tokens
+	m.mu.Unlock()
+	return m.Save()
+}
+
 // ReplaceMessages swaps the current session transcript and saves it.
 func (m *Manager) ReplaceMessages(messages []provider.Message) error {
 	m.mu.Lock()

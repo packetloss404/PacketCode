@@ -6,16 +6,15 @@ packetcode reads `~/.packetcode/config.toml`. The file is written atomically wit
 
 ```toml
 [default]
-provider = "openai"
-model = "gpt-5.5"
+provider = "codex"
+model = "gpt-5.6-sol"
 
-[providers.openai]
-api_key = "sk-..."
-default_model = "gpt-5.5"
+[providers.codex]
+default_model = "gpt-5.6-sol"
 
 [providers.anthropic]
 api_key = "sk-ant-..."
-default_model = "claude-opus-4-7"
+default_model = "claude-opus-4-8"
 
 [providers.gemini]
 api_key = "AI..."
@@ -23,7 +22,19 @@ default_model = "gemini-2.5-pro"
 
 [providers.minimax]
 api_key = "sk-..."
-default_model = "MiniMax-M2.7-highspeed"
+default_model = "MiniMax-M3"
+
+[providers.deepseek]
+api_key = "sk-..."
+default_model = "deepseek-chat"
+
+[providers.grok]
+api_key = "xai-..."
+default_model = "grok-4.5"
+
+[providers.mistral]
+api_key = "..."
+default_model = "mistral-large-latest"
 
 [providers.ollama]
 host = "http://localhost:11434"
@@ -50,6 +61,8 @@ background_max_depth = 2
 background_max_total = 32
 background_default_provider = ""
 background_default_model = ""
+background_token_budget = 0
+workflow_token_budget = 0
 provider_max_retries = 3
 provider_stall_timeout = 60
 
@@ -92,9 +105,9 @@ timeout_sec = 10
 
 `[default]` selects the provider/model used at startup.
 
-`[providers.<slug>]` stores API keys, saved default models, the Ollama host, and custom OpenAI-compatible endpoint settings. `PACKETCODE_OLLAMA_HOST` overrides `[providers.ollama].host` at runtime. Custom providers use `type = "openai_compatible"`, `base_url`, optional `api_key_env`, optional `api_key_required = false` for keyless local endpoints, optional `headers`, and optional `[[providers.<slug>.models]]` fallback metadata.
+`[providers.<slug>]` stores API keys, saved default models, the Ollama host, and custom OpenAI-compatible endpoint settings. `codex` reuses the Codex CLI OAuth store and `ollama` is keyless; hosted API providers require their own API key. `PACKETCODE_OLLAMA_HOST` overrides `[providers.ollama].host` at runtime. Custom providers use `type = "openai_compatible"`, `base_url`, optional `api_key_env`, optional `api_key_required = false` for keyless local endpoints, optional `headers`, and optional `[[providers.<slug>.models]]` fallback metadata.
 
-`[behavior]` controls trust mode, input height, auto-compaction threshold, and background-agent limits.
+`[behavior]` controls trust mode, input height, automatic compaction, provider resilience, and background/workflow limits. Context occupancy includes the system prompt, transcript, tool schemas, and pending input estimate; compaction runs automatically before an over-threshold turn when enough history exists.
 
 Background-agent settings affect both `/spawn` and the `spawn_agent` tool:
 
@@ -102,6 +115,8 @@ Background-agent settings affect both `/spawn` and the `spawn_agent` tool:
 - `background_max_depth` limits nested `spawn_agent` calls.
 - `background_max_total` caps jobs created during one packetcode run.
 - `background_default_provider` and `background_default_model` override the foreground provider/model for jobs when set; empty values inherit the active provider/model.
+- `background_token_budget` stops each background job at a completed provider/tool boundary after its cumulative input+output usage reaches the limit; `0` disables it.
+- `workflow_token_budget` stops a workflow from starting later steps after completed child usage reaches the aggregate boundary; an already-running parallel fan-out may finish above it. `0` disables it.
 
 Provider resilience settings:
 
@@ -112,12 +127,15 @@ Write-capable background agents create git worktrees under `~/.packetcode/worktr
 
 Background job snapshots under `~/.packetcode/jobs/` also persist compact artifact metadata. Artifact previews are bounded and intended for manifests, not raw log or diff storage.
 
-`[permissions]` controls tool-call policy. `profile` can name a built-in profile (`balanced`/`ask`, `accept_edits`, `read_only`, or `bypass`) or a custom `[permissions.profiles.<name>]` table.
+`[permissions]` controls tool-call policy. `profile` can name a built-in profile (`balanced`/`ask`, `accept_edits`, `auto`, `read_only`, or `bypass`) or a custom `[permissions.profiles.<name>]` table.
 
 - `balanced` / `ask` allows read/search/list and prompts for writes, shell commands, background-agent spawns, and MCP tools.
 - `accept_edits` auto-approves `write_file` and `patch_file`, but asks for `execute_command`, `spawn_agent`, and MCP tools.
+- `auto` auto-approves file edits and shell commands, but still asks for MCP and other explicitly approval-gated tools.
 - `read_only` allows read/search/list and denies everything else.
 - `bypass` auto-approves tools unless an explicit deny rule matches.
+
+Shift+Tab cycles Ask → Accept Edits → Auto → Plan in the TUI, including during an active turn. Bypass is entered deliberately with `/trust on` or `--trust` and is not in the forward cycle.
 
 Custom profile values are `ask`, `allow`, and `deny`. Use `default` as the fallback, exact tool names for native tools, and `mcp = "ask"` for all MCP aliases.
 
@@ -125,7 +143,7 @@ Custom profile values are `ask`, `allow`, and `deny`. Use `default` as the fallb
 
 `[[permissions.rules]]` adds ordered policy rules. Later rules win when more than one matches. `command` matches an exact `execute_command` string, and `command_prefix` matches shell command fields from the beginning.
 
-`[statusline]` configures an optional shell command that replaces the built-in bottom bar. See [Hooks and statusline](hooks-and-statusline.md).
+`[statusline]` configures an optional shell command that replaces the native statusline, which is enabled by default even when `command` is empty. See [Hooks and statusline](hooks-and-statusline.md).
 
 `[mcp.<name>]` declares stdio MCP servers. See [MCP servers](mcp.md).
 
@@ -146,6 +164,15 @@ Review this code and call out correctness risks:
 
 $ARGUMENTS
 ```
+
+## Workflows
+
+Workflow files are separate from `config.toml`:
+
+- User: `~/.packetcode/workflows/<name>.toml`
+- Project: `.packetcode/workflows/<name>.toml`
+
+Project definitions override user definitions, which override built-ins. See [Background agents](feature-background-agents.md#workflows) for the current schema.
 
 ## Themes
 

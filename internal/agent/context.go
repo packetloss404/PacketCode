@@ -9,17 +9,26 @@ import (
 )
 
 // charsPerToken is the heuristic the context manager uses to estimate
-// tokens from string lengths. 4.0 is the rule-of-thumb for English text;
-// CJK and code skew lower (more tokens per char) but the heuristic is
-// deliberately conservative — better to over-estimate than under, since
-// the only consequence is suggesting /compact slightly early.
-const charsPerToken = 4.0
+// tokens from string lengths. Three bytes per token is intentionally more
+// conservative than the common four-characters English-prose heuristic:
+// source code, JSON schemas, and non-ASCII text often tokenize more densely.
+const charsPerToken = 3.0
 
 // ContextManager handles token estimation and conversation compaction.
 // It's stateless — methods operate on the messages and config the caller
 // passes in.
 type ContextManager struct {
-	threshold int // percent at which auto-suggest fires (e.g. 80)
+	threshold int // percent at which auto-compaction fires (e.g. 80)
+}
+
+// RequestTokens breaks a deterministic request estimate into the major wire
+// contributions. It is intentionally provider-neutral and suitable for
+// before/after benchmarks; providers may tokenize the same bytes differently.
+type RequestTokens struct {
+	SystemPrompt int
+	Transcript   int
+	ToolSchemas  int
+	Total        int
 }
 
 func NewContextManager(threshold int) *ContextManager {
@@ -37,17 +46,45 @@ func NewContextManager(threshold int) *ContextManager {
 // isn't worth the dependency: the only consumer is "should we suggest
 // compaction?" — being off by 20% is fine.
 func (cm *ContextManager) EstimateTokens(messages []provider.Message) int {
+	return estimateChars(messageChars(messages))
+}
+
+// EstimateRequest reports the complete model-facing request contribution,
+// including tool schemas (which are resent even though they are not stored in
+// the transcript). systemPrompt should only be supplied when it is not already
+// present as a system message in messages.
+func (cm *ContextManager) EstimateRequest(systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) RequestTokens {
+	system := estimateChars(len(systemPrompt))
+	transcript := estimateChars(messageChars(messages))
+	toolChars := 0
+	for _, tool := range tools {
+		toolChars += len(tool.Name) + len(tool.Description) + len(tool.Parameters) + 8
+	}
+	schemas := estimateChars(toolChars)
+	return RequestTokens{SystemPrompt: system, Transcript: transcript, ToolSchemas: schemas, Total: system + transcript + schemas}
+}
+
+func messageChars(messages []provider.Message) int {
 	chars := 0
 	for _, m := range messages {
-		chars += len(m.Content)
+		chars += len(m.Content) + len(m.Name) + len(m.ToolCallID)
 		for _, tc := range m.ToolCalls {
-			chars += len(tc.Name) + len(tc.Arguments)
+			chars += len(tc.ID) + len(tc.Name) + len(tc.Arguments)
 		}
-		// Add a per-message overhead for role + structural tokens.
-		chars += 8
+		chars += 8 // role and wire structure
 	}
-	return int(float64(chars) / charsPerToken)
+	return chars
 }
+
+func estimateChars(chars int) int {
+	if chars == 0 {
+		return 0
+	}
+	return int(float64(chars)/charsPerToken) + 1
+}
+
+// Threshold returns the configured compaction percentage.
+func (cm *ContextManager) Threshold() int { return cm.threshold }
 
 // UsagePercent returns current context usage as a percentage of the
 // model's window. Returns 0 if maxTokens is 0 (unknown — e.g. Ollama).
@@ -84,10 +121,21 @@ func (cm *ContextManager) Compact(
 	messages []provider.Message,
 	keepRecent int,
 ) ([]provider.Message, error) {
-	if len(messages) <= keepRecent+1 {
-		return normalizeToolTranscript(messages), nil
-	}
+	out, _, err := cm.CompactWithUsage(ctx, prov, modelID, messages, keepRecent)
+	return out, err
+}
 
+// CompactWithUsage is Compact plus the provider-reported usage of the
+// summarization request. App-level callers use it to keep cumulative token and
+// cost accounting honest while still resetting live occupancy to the compacted
+// transcript size.
+func (cm *ContextManager) CompactWithUsage(
+	ctx context.Context,
+	prov provider.Provider,
+	modelID string,
+	messages []provider.Message,
+	keepRecent int,
+) ([]provider.Message, *provider.Usage, error) {
 	// Identify the system prompt (if any) and the tail to preserve.
 	var systemMsgs []provider.Message
 	body := messages
@@ -96,7 +144,7 @@ func (cm *ContextManager) Compact(
 		body = messages[1:]
 	}
 	if len(body) <= keepRecent {
-		return normalizeToolTranscript(messages), nil
+		return normalizeToolTranscript(messages), nil, nil
 	}
 	toSummarize := body[:len(body)-keepRecent]
 	tailStart := compactTailStart(body, len(body)-keepRecent)
@@ -114,15 +162,21 @@ func (cm *ContextManager) Compact(
 	}
 	stream, err := prov.ChatCompletion(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("compact: request: %w", err)
+		return nil, nil, fmt.Errorf("compact: request: %w", err)
 	}
 	var summary strings.Builder
+	var usage *provider.Usage
 	for ev := range stream {
 		switch ev.Type {
 		case provider.EventTextDelta:
 			summary.WriteString(ev.TextDelta)
+		case provider.EventDone:
+			if ev.Usage != nil {
+				copy := *ev.Usage
+				usage = &copy
+			}
 		case provider.EventError:
-			return nil, fmt.Errorf("compact: stream: %w", ev.Error)
+			return nil, usage, fmt.Errorf("compact: stream: %w", ev.Error)
 		}
 	}
 
@@ -133,7 +187,25 @@ func (cm *ContextManager) Compact(
 	out := append([]provider.Message{}, systemMsgs...)
 	out = append(out, summaryMsg)
 	out = append(out, tail...)
-	return normalizeToolTranscript(out), nil
+	return normalizeToolTranscript(out), usage, nil
+}
+
+// CanCompact reports whether Compact has at least one older body message to
+// summarize after preserving keepRecent messages. The App uses the same check
+// before automatic compaction so a short but token-heavy conversation does not
+// run a no-op summary request on every subsequent turn.
+func (cm *ContextManager) CanCompact(messages []provider.Message, keepRecent int) bool {
+	if keepRecent <= 0 {
+		return false
+	}
+	body := messages
+	if len(body) > 0 && body[0].Role == provider.RoleSystem {
+		body = body[1:]
+	}
+	if len(body) <= keepRecent {
+		return false
+	}
+	return compactTailStart(body, len(body)-keepRecent) > 0
 }
 
 func buildSummaryPrompt(messages []provider.Message) string {

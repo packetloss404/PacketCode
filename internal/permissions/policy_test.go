@@ -15,6 +15,7 @@ func TestPolicy_DefaultProfilePromptsDestructiveAllowsRead(t *testing.T) {
 	assertDecision(t, p, Request{ToolName: "find_definition"}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "find_references"}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "get_diagnostics"}, DecisionAllow)
+	assertDecision(t, p, Request{ToolName: "collect_agent_results", RequiresApproval: true}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "write_file", RequiresApproval: true}, DecisionAsk)
 	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true}, DecisionAsk)
 	assertDecision(t, p, Request{ToolName: "filesystem__write_file", RequiresApproval: true}, DecisionAsk)
@@ -43,6 +44,7 @@ func TestPolicy_SafeProfileDeniesDestructiveAndAllowsRead(t *testing.T) {
 	assertDecision(t, p, Request{ToolName: "search_codebase"}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "find_references"}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "get_diagnostics"}, DecisionAllow)
+	assertDecision(t, p, Request{ToolName: "collect_agent_results", RequiresApproval: true}, DecisionAllow)
 	assertDecision(t, p, Request{ToolName: "patch_file", RequiresApproval: true}, DecisionDeny)
 	assertDecision(t, p, Request{ToolName: "spawn_agent", RequiresApproval: true}, DecisionDeny)
 	assertDecision(t, p, Request{ToolName: "filesystem__read_file", RequiresApproval: true}, DecisionDeny)
@@ -75,6 +77,26 @@ func TestPolicy_CommandPrefixMatchesFields(t *testing.T) {
 	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionAsk)
 
 	params, _ = json.Marshal(map[string]any{"command": "git status-rm"})
+	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionDeny)
+
+	for _, command := range []string{
+		"git status && echo chained",
+		"git status; echo chained",
+		"git status | sh",
+		"git status > /tmp/result",
+		"git status $(malicious)",
+		"git status\necho chained",
+	} {
+		params, _ = json.Marshal(map[string]any{"command": command})
+		assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionDeny)
+	}
+}
+
+func TestPolicy_EmptySessionCommandRulesAreNoOps(t *testing.T) {
+	p := Must(config.PermissionConfig{Profile: string(ProfileSafe)})
+	p = p.WithCommandRule("", DecisionAllow)
+	p = p.WithCommandPrefixRule(nil, DecisionAllow)
+	params, _ := json.Marshal(map[string]any{"command": "echo harmless"})
 	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionDeny)
 }
 

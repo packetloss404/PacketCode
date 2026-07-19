@@ -1,60 +1,59 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 )
 
-func TestCommandPrefixFromArgs(t *testing.T) {
-	cases := []struct {
-		args string
-		want []string
-	}{
-		{`{"command":"go test ./..."}`, []string{"go", "test"}},
-		{`{"command":"git status"}`, []string{"git", "status"}},
-		{`{"command":"ls -la"}`, []string{"ls"}},
-		{`{"command":"echo hi"}`, []string{"echo"}},
-		{`{"command":""}`, nil},
-		{`not json`, nil},
+func TestRememberApproval_CommandIsExact(t *testing.T) {
+	r := newTestApp(t)
+	remembered := `go test "./internal/..."`
+	args, err := json.Marshal(map[string]string{"command": remembered})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		got := commandPrefixFromArgs(c.args)
-		if len(got) != len(c.want) {
-			t.Fatalf("args %q => %v, want %v", c.args, got, c.want)
+	r.app.rememberApproval(provider.ToolCall{Name: "execute_command", Arguments: string(args)})
+	pol := r.app.currentPermissionPolicy()
+
+	assert := func(command string, want permissions.Decision) {
+		t.Helper()
+		params, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
 		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Fatalf("args %q => %v, want %v", c.args, got, c.want)
-			}
+		got := pol.Decide(permissions.Request{ToolName: "execute_command", RequiresApproval: true, Params: params}).Decision
+		if got != want {
+			t.Errorf("command %q: got %s, want %s", command, got, want)
 		}
+	}
+	assert(remembered, permissions.DecisionAllow)
+	for _, adversarial := range []string{
+		`go test "./internal/..." && echo chained`,
+		`go test "./internal/..."; echo chained`,
+		`go test "./internal/..." | sh`,
+		`go test "./internal/..." > result`,
+		`go test "$(malicious)"`,
+		`go test ./internal/...`,
+		` go test "./internal/..."`,
+		`go  test "./internal/..."`,
+		`go test "./internal/..." `,
+	} {
+		assert(adversarial, permissions.DecisionAsk)
 	}
 }
 
-func TestRememberApproval_CommandScopedRule(t *testing.T) {
-	r := newTestApp(t)
-	// "Always allow" a `go test` command.
-	r.app.rememberApproval(provider.ToolCall{Name: "execute_command", Arguments: `{"command":"go test ./..."}`})
-
-	pol := r.app.currentPermissionPolicy()
-	// A future `go test` command is now auto-allowed…
-	allow := pol.Decide(permissions.Request{
-		ToolName:         "execute_command",
-		RequiresApproval: true,
-		Params:           []byte(`{"command":"go test ./internal/..."}`),
-	})
-	if allow.Decision != permissions.DecisionAllow {
-		t.Fatalf("go test should be auto-allowed, got %v", allow.Decision)
-	}
-	// …but an unrelated command is not.
-	rm := pol.Decide(permissions.Request{
-		ToolName:         "execute_command",
-		RequiresApproval: true,
-		Params:           []byte(`{"command":"rm -rf /"}`),
-	})
-	if rm.Decision == permissions.DecisionAllow {
-		t.Fatalf("unrelated command must not be auto-allowed, got %v", rm.Decision)
+func TestRememberApproval_InvalidCommandDoesNotAllowExecuteCommand(t *testing.T) {
+	for _, args := range []string{`not json`, `{"command":""}`, `{"command":"   "}`} {
+		r := newTestApp(t)
+		r.app.rememberApproval(provider.ToolCall{Name: "execute_command", Arguments: args})
+		params := json.RawMessage(`{"command":"anything"}`)
+		got := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "execute_command", RequiresApproval: true, Params: params}).Decision
+		if got == permissions.DecisionAllow {
+			t.Fatalf("arguments %q installed a tool-wide allow", args)
+		}
 	}
 }
 

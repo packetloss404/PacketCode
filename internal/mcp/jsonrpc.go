@@ -1,6 +1,9 @@
 package mcp
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 // JSONRPCVersion is the only JSON-RPC version this package speaks.
 const JSONRPCVersion = "2.0"
@@ -79,25 +82,7 @@ func newRequest(id int64, method string, params any) Request {
 }
 
 func fmtInt64(id int64) []byte {
-	if id == 0 {
-		return []byte("0")
-	}
-	neg := id < 0
-	if neg {
-		id = -id
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for id > 0 {
-		pos--
-		buf[pos] = byte('0' + id%10)
-		id /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return buf[pos:]
+	return strconv.AppendInt(nil, id, 10)
 }
 
 // newNotification builds a Notification with the JSON-RPC version

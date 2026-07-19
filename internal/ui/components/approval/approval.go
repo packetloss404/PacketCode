@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/tools"
@@ -45,6 +46,7 @@ type Model struct {
 	width      int
 	result     Result
 	queueDepth int
+	cursor     int
 }
 
 func New() Model { return Model{} }
@@ -57,6 +59,7 @@ func (m *Model) Show(tool tools.Tool, call provider.ToolCall) {
 	m.visible = true
 	m.result = Pending
 	m.queueDepth = 1
+	m.cursor = 0
 }
 
 func (m *Model) Hide()         { m.visible = false }
@@ -78,21 +81,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
-		case "y", "Y":
-			m.result = Approved
-			m.visible = false
-			return m, emit(ResultMsg{Result: Approved, ToolCall: m.toolCall})
-		case "a", "A":
-			m.result = Approved
-			m.visible = false
-			return m, emit(ResultMsg{Result: Approved, ToolCall: m.toolCall, Remember: true})
-		case "n", "N", "esc":
-			m.result = Rejected
-			m.visible = false
-			return m, emit(ResultMsg{Result: Rejected, ToolCall: m.toolCall})
+		case "up", "k", "shift+tab":
+			m.cursor = (m.cursor + 2) % 3
+		case "down", "j", "tab":
+			m.cursor = (m.cursor + 1) % 3
+		case "enter":
+			return m.resolveCursor()
+		case "1", "y", "Y":
+			return m.resolve(Approved, false)
+		case "2", "a", "A":
+			return m.resolve(Approved, true)
+		case "3", "n", "N", "esc":
+			return m.resolve(Rejected, false)
 		}
 	}
 	return m, nil
+}
+
+func (m Model) resolveCursor() (Model, tea.Cmd) {
+	switch m.cursor {
+	case 0:
+		return m.resolve(Approved, false)
+	case 1:
+		return m.resolve(Approved, true)
+	default:
+		return m.resolve(Rejected, false)
+	}
+}
+
+func (m Model) resolve(result Result, remember bool) (Model, tea.Cmd) {
+	m.result = result
+	m.visible = false
+	return m, emit(ResultMsg{Result: result, ToolCall: m.toolCall, Remember: remember})
 }
 
 func emit(msg ResultMsg) tea.Cmd {
@@ -112,6 +132,7 @@ func (m Model) View() string {
 		displayName = m.toolCall.Name
 	}
 	source, action := splitApprovalDisplay(displayName)
+	action = approvalActionLabel(action)
 	headerText := action
 	if source != "" {
 		headerText = source + " · " + action
@@ -125,20 +146,54 @@ func (m Model) View() string {
 		body = r(RenderContext{
 			Tool:      m.tool,
 			Arguments: m.toolCall.Arguments,
-			Width:     width - 4,
+			Width:     width - 8,
 		})
 	} else {
 		body = summariseParams(m.toolCall.Arguments)
 	}
-	actions := strings.Join([]string{
-		theme.StyleAccent.Render("[Y]") + theme.StylePrimary.Render(" Approve"),
-		theme.StyleAccent.Render("[A]") + theme.StylePrimary.Render(" Always"),
-		theme.StyleAccent.Render("[N]") + theme.StylePrimary.Render(" Reject"),
-		theme.StyleDim.Render("[Esc] Cancel"),
-	}, "   ")
+	choices := []string{
+		"1. Yes",
+		"2. Yes, and don't ask again for this tool",
+		"3. No",
+	}
+	for i, choice := range choices {
+		prefix := "  "
+		style := theme.StyleSecondary
+		if i == m.cursor {
+			prefix = "❯ "
+			style = theme.StyleAccent
+		}
+		choices[i] = prefix + style.Render(choice)
+	}
+	question := theme.StylePrimary.Bold(true).Render("Do you want to proceed?")
+	footer := theme.StyleDim.Render("Esc to cancel · ↑/↓ to select · Enter to confirm")
+	body = lipgloss.NewStyle().Width(max(10, width-8)).Render(body)
+	content := strings.Join([]string{header, "", indent(body, "  "), "", question, strings.Join(choices, "\n"), "", footer}, "\n")
+	return lipgloss.NewStyle().Padding(0, 2).Width(width).Render(content)
+}
 
-	content := strings.Join([]string{header, "", body, "", actions}, "\n")
-	return theme.StyleApprovalPrompt.Width(width - 4).Render(content)
+func approvalActionLabel(action string) string {
+	switch strings.TrimSpace(action) {
+	case "execute_command":
+		return "Bash command"
+	case "write_file":
+		return "Write file"
+	case "patch_file":
+		return "Edit file"
+	default:
+		return action
+	}
+}
+
+func indent(body, prefix string) string {
+	if body == "" {
+		return prefix + theme.StyleDim.Render("(no details)")
+	}
+	lines := strings.Split(body, "\n")
+	for i := range lines {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func splitApprovalDisplay(name string) (source, action string) {

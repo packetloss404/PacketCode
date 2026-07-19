@@ -25,7 +25,7 @@ const listSymbolsSchema = `{
     "path": { "type": "string", "description": "Optional file or directory path relative to the project root. Defaults to the project root." },
     "query": { "type": "string", "description": "Optional case-insensitive substring filter for symbol names." },
     "file_glob": { "type": "string", "description": "Optional glob filter such as '*.go' or '**/*.ts'." },
-    "max_results": { "type": "integer", "description": "Maximum symbols to return (default 100, hard cap 1000)." }
+    "max_results": { "type": "integer", "description": "Maximum symbols to return (default 50, hard cap 200)." }
   }
 }`
 
@@ -38,7 +38,7 @@ const findDefinitionSchema = `{
     "column": { "type": "integer", "description": "Optional 1-indexed source column used with path/line. If omitted, the first identifier on the line is used." },
     "character": { "type": "integer", "description": "Alias for column, for editor/LSP-style callers." },
     "file_glob": { "type": "string", "description": "Optional glob filter such as '*.go' or '**/*.ts'." },
-    "max_results": { "type": "integer", "description": "Maximum definitions to return (default 50, hard cap 500)." }
+    "max_results": { "type": "integer", "description": "Maximum definitions to return (default 20, hard cap 100)." }
   }
 }`
 
@@ -53,7 +53,7 @@ const findReferencesSchema = `{
     "scope_path": { "type": "string", "description": "Optional file or directory path that narrows the reference scan. Defaults to the project root." },
     "include_declaration": { "type": "boolean", "description": "Whether to include likely definition lines in reference results. Default true." },
     "file_glob": { "type": "string", "description": "Optional glob filter such as '*.go' or '**/*.ts'." },
-    "max_results": { "type": "integer", "description": "Maximum references to return (default 100, hard cap 1000)." }
+    "max_results": { "type": "integer", "description": "Maximum references to return (default 50, hard cap 200)." }
   }
 }`
 
@@ -62,19 +62,19 @@ const getDiagnosticsSchema = `{
   "properties": {
     "path": { "type": "string", "description": "Optional file or directory path relative to the project root. Defaults to the project root." },
     "file_glob": { "type": "string", "description": "Optional glob filter such as '*.go'." },
-    "max_results": { "type": "integer", "description": "Maximum diagnostics to return (default 100, hard cap 1000)." }
+    "max_results": { "type": "integer", "description": "Maximum diagnostics to return (default 50, hard cap 200)." }
   }
 }`
 
 const (
-	defaultSymbolLimit     = 100
-	maxSymbolLimit         = 1000
-	defaultDefinitionLimit = 50
-	maxDefinitionLimit     = 500
-	defaultReferenceLimit  = 100
-	maxReferenceLimit      = 1000
-	defaultDiagnosticLimit = 100
-	maxDiagnosticLimit     = 1000
+	defaultSymbolLimit     = 50
+	maxSymbolLimit         = 200
+	defaultDefinitionLimit = 20
+	maxDefinitionLimit     = 100
+	defaultReferenceLimit  = 50
+	maxReferenceLimit      = 200
+	defaultDiagnosticLimit = 50
+	maxDiagnosticLimit     = 200
 	maxCodeIntelFileBytes  = 1024 * 1024
 	maxCodeIntelSnippet    = 300
 	maxCodeIntelOutput     = 64 * 1024

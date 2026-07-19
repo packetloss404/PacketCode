@@ -61,7 +61,7 @@ func TestAppendToolCallDiscardsPendingAgentText(t *testing.T) {
 
 	out := stripANSI(m.View())
 	assert.NotContains(t, out, "<|python_tag|>")
-	assert.Contains(t, out, "read_file")
+	assert.Contains(t, out, "Read(main.go)")
 	assert.Contains(t, out, "package main")
 }
 
@@ -107,7 +107,7 @@ func TestAppendToolOutput_RendersInPendingView(t *testing.T) {
 	assert.True(t, ok)
 
 	out := stripANSI(m.PendingView())
-	assert.Contains(t, out, "execute_command")
+	assert.Contains(t, out, "Bash(go test ./...)")
 	assert.Contains(t, out, "ok  pkg/foo")
 	assert.Contains(t, out, "ok  pkg/bar")
 }
@@ -207,5 +207,26 @@ func TestAppendAgentReasoning_RendersDimAboveAnswer(t *testing.T) {
 	}
 	if !strings.Contains(out, "Final answer.") {
 		t.Fatalf("answer text missing:\n%s", out)
+	}
+}
+
+func TestSubmittedUserAndProviderErrorMatchClaudeMarkers(t *testing.T) {
+	m := New()
+	m.Resize(80, 24)
+	m.AppendUser("hello")
+	m.AppendError("request failed")
+	out := stripANSI(m.View())
+	assert.Contains(t, out, "❯ hello")
+	assert.Contains(t, out, "⏺ request failed")
+}
+
+func TestToolDisplayUsesClaudeStyleBuiltInNames(t *testing.T) {
+	cases := map[string]string{
+		toolDisplay("read_file", `{"path":"main.go"}`):                "Read(main.go)",
+		toolDisplay("execute_command", `{"command":"go test ./..."}`): "Bash(go test ./...)",
+		toolDisplay("patch_file", `{"path":"main.go"}`):               "Update(main.go)",
+	}
+	for got, want := range cases {
+		assert.Contains(t, stripANSI(got), want)
 	}
 }

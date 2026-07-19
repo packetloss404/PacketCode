@@ -1,102 +1,100 @@
 # Getting Started
 
-## Build And Run
+## Build and Run
 
-Requires Go 1.24.2+.
+packetcode requires Go 1.24.2 or newer.
 
 ```bash
-go build -o bin/packetcode ./cmd/packetcode
+make build
 ./bin/packetcode
 ```
 
-On Windows:
+The first run creates `~/.packetcode/config.toml`. Choose a provider, enter an API key when required, and select a model.
 
-```powershell
-go build -o bin/packetcode.exe ./cmd/packetcode
-.\bin\packetcode.exe
+For a Codex ChatGPT subscription, sign in through the official Codex CLI first:
+
+```bash
+codex login
+packetcode --provider codex
 ```
 
-First run starts a setup wizard. Pick a provider, paste an API key if that provider needs one, choose a model, and packetcode saves `~/.packetcode/config.toml`.
+For local Ollama, start the standard daemon; packetcode uses `http://localhost:11434` with no key or extra configuration:
 
-Ollama is keyless. packetcode defaults to `http://localhost:11434`; start or expose Ollama there, then choose `ollama` during setup. For a remote daemon, set `[providers.ollama].host` or `PACKETCODE_OLLAMA_HOST`.
+```bash
+ollama serve
+packetcode --provider ollama
+```
 
-## Starting Later
+Useful startup commands:
 
 ```bash
 packetcode
-packetcode --provider gemini --model gemini-2.5-pro
+packetcode --provider codex --model gpt-5.6-sol
 packetcode --resume <session-id>
+packetcode --permission-mode auto
 packetcode --trust
 packetcode doctor
+packetcode doctor --json
 ```
 
-`--provider` only works for providers already configured in `~/.packetcode/config.toml` or available without a key. Use the provider picker to add missing keys. To add a custom OpenAI-compatible endpoint, add a `[providers.<slug>]` block with `type = "openai_compatible"` and `base_url`, then run `packetcode doctor`.
-Use `packetcode doctor` before starting the TUI when setup, permissions, git, provider config, or MCP startup looks suspect. Add `--json` for machine-readable output.
+`--provider` requires an already-configured provider, except keyless Codex/Ollama. Use `Ctrl+P`, `/provider`, or `/provider add <slug>` to add a hosted provider key.
 
 ## Everyday Keys
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Send the prompt. |
-| `Shift+Enter` | Insert a newline. |
-| `Ctrl+C` | Cancel the current turn; press again while idle to quit. |
-| `Ctrl+L` | Clear packetcode's live transcript pane. |
-| `Ctrl+P` | Open the provider picker. |
-| `Ctrl+M` | Open the model picker. |
+| `Enter` | Send. |
+| `Shift+Enter` | Newline. |
+| `Up` / `Down` | Prompt history at the input boundary. |
+| `Shift+Tab` | Cycle Manual → Accept Edits → Auto → Plan, even during a turn. |
+| `Left` on an empty prompt | Open Agent View. |
+| `Ctrl+P` / `Ctrl+M` | Provider/model picker. |
+| `Ctrl+C` | Cancel active work; quit when idle. |
+| `Ctrl+L` | Clear visible output, keep the saved session. |
 
-Finalized output is printed into your terminal scrollback. Use your terminal scroll, `Shift+PageUp`, or tmux copy mode to review older turns.
+Finalized output goes to terminal scrollback. The bottom live region contains only current thinking, streaming text, tool output, input, context status, and permission mode.
 
-## Approvals
+## Prompts and Context
 
-packetcode asks before file writes, patches, shell commands, background-agent writes, and MCP tool calls.
+- Type `/` for command completion.
+- Type `@` at a token boundary for fuzzy project-file completion.
+- Submit during an active turn to queue the prompt.
+- Use `//text` to send a prompt beginning with a literal `/`.
+- Use `/compact` to summarize older history manually; automatic compaction also runs at the configured threshold.
 
-| Key | Action |
-| --- | --- |
-| `Y` | Approve. |
-| `N` / `Esc` | Reject. |
+The context gauge is current occupancy, not cumulative billed tokens.
 
-Trust mode skips approvals for the current session:
+## Approvals and Modes
+
+The numbered approval menu supports arrows, Enter, `1`/`2`/`3`, and the legacy `Y`/`A`/`N` shortcuts. Option 2 remembers a session rule; shell approvals remember the exact command.
+
+Shift+Tab remains active while the model is thinking or streaming. If an approval is already visible, switching to a mode that allows or denies the action resolves it immediately. Already-running processes are not interrupted.
+
+Bypass Permissions is intentionally separate from the Shift+Tab cycle:
 
 ```bash
 packetcode --trust
 ```
 
-or:
+or `/trust on` for the current session. Explicit deny rules remain effective.
 
-```toml
-[behavior]
-trust_mode = true
+## Agents, Loops, and Workflows
+
+```text
+/spawn audit the current diff
+/spawn --write fix the focused tests
+/agents
+/workflows run review target="the staged diff"
+/loop Continue improving the implementation until complete
+/loop 15m /workflows run review
 ```
 
-## Slash Commands
+Read-only agents share the project root. Write-capable agents receive a dedicated git worktree. Results remain outside foreground model context until explicitly collected or injected.
 
-Type `/` to open autocomplete. Useful commands:
+## Where Next
 
-| Command | Action |
-| --- | --- |
-| `/help` | Show available keys and commands. |
-| `/provider` | Open the provider picker. |
-| `/model` | Open the model picker. |
-| `/spawn <prompt>` | Start a read-only background agent. |
-| `/spawn --write <prompt>` | Start a write-capable background agent in an isolated git worktree. |
-| `/agents` | Open Agent View for live background-agent status and actions. |
-| `/agents <id>` | Open one background-agent transcript. |
-| `/jobs` / `/jobs <id>` | List jobs or open a transcript. |
-| `/cancel <id\|all>` | Cancel one active job or all active jobs. |
-| `/mcp` | Inspect configured MCP servers and tools. |
-| `/sessions` | List saved sessions. |
-| `/sessions rename <name>` | Rename the current session. |
-| `/queue` | Inspect queued foreground prompts. |
-| `/compact` | Summarize older conversation context. |
-| `/clear` | Clear the live pane only; saved session data remains. |
-| `/exit` | Quit. |
-
-Unknown slash commands show an error. Use `//text` when you want to send a prompt that starts with `/`.
-
-The agent also has read-only code-intelligence tools for symbols, likely definitions, references, and syntax diagnostics. These are model-facing tools rather than slash commands, so you can ask natural questions like "find the definition of X" or "show references before editing".
-
-Agent View keys: `p` peeks, `Enter` or `o` opens a transcript, `c` cancels active jobs, `i` injects a completed result into the next foreground turn, `x` ignores a completed result, and `Esc` or `q` closes the dashboard.
-
-Write-capable background agents require git worktree isolation. They create `~/.packetcode/worktrees/<repo-key>/<job-id>` on branch `packetcode-job-<job-id>` from the current `HEAD`; uncommitted foreground changes are not copied. Packetcode leaves the worktree for review after completion.
-
-Completed jobs include a bounded artifact manifest for changed files, commands, tests, searches, spawned children, and worktree changes. Use `/agents` or `/jobs <id>` to inspect the manifest, then inject a compact handoff into the foreground conversation only when you choose. Model-initiated `collect_agent_results` is approval-gated in the foreground and only returns compact summaries/manifests.
+- [Providers and models](providers.md)
+- [Configuration](configuration.md)
+- [Security and permissions](security.md)
+- [Background agents and workflows](feature-background-agents.md)
+- [Troubleshooting](troubleshooting.md)

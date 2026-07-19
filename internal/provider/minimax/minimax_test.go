@@ -19,9 +19,9 @@ func TestProvider_Identity(t *testing.T) {
 func TestProvider_PricingFallback(t *testing.T) {
 	p := New("")
 	in, out := p.Pricing(DefaultModel)
-	assert.Equal(t, 0.60, in)
-	assert.Equal(t, 2.40, out)
-	assert.Equal(t, 204_800, p.ContextWindow(DefaultModel))
+	assert.Equal(t, 0.30, in)
+	assert.Equal(t, 1.20, out)
+	assert.Equal(t, 1_000_000, p.ContextWindow(DefaultModel))
 	assert.True(t, p.SupportsTools(DefaultModel))
 
 	in, out = p.Pricing("totally-unknown")
@@ -56,7 +56,7 @@ func TestProvider_ListModels_FallbackOnError(t *testing.T) {
 
 func TestProvider_ListModels_PassesThroughUpstream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"MiniMax-M2.7"},{"id":"MiniMax-M2.7-highspeed"},{"id":"abab6.5s-chat"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"MiniMax-M2.7"},{"id":"MiniMax-M3"},{"id":"abab6.5s-chat"}]}`))
 	}))
 	defer server.Close()
 
@@ -65,7 +65,7 @@ func TestProvider_ListModels_PassesThroughUpstream(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, models, 3)
 	assert.Equal(t, DefaultModel, models[0].ID)
-	assert.Equal(t, 204_800, models[0].ContextWindow)
+	assert.Equal(t, 1_000_000, models[0].ContextWindow)
 	assert.True(t, models[0].SupportsTools)
 	assert.False(t, models[2].SupportsTools)
 	for _, m := range models {

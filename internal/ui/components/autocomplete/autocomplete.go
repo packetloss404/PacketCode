@@ -1,4 +1,4 @@
-// Package autocomplete renders a small filter-as-you-type popup above
+// Package autocomplete renders a small filter-as-you-type list above
 // the input bar whenever the user has typed "/" but not yet completed a
 // verb with whitespace. The App drives open/close based on the input
 // buffer; this component owns presentation, filter bucketing, and
@@ -218,7 +218,7 @@ func (m Model) View() string {
 		return ""
 	}
 	outerW := m.clampedWidth()
-	innerW := outerW - 4 // border (2) + padding (2)
+	innerW := outerW - 2 // two-column list indent
 	if innerW < 10 {
 		innerW = 10
 	}
@@ -241,8 +241,8 @@ func (m Model) View() string {
 	if usageW < 8 {
 		usageW = 8
 	}
-	// marker (3) + usage (usageW) + space (1) + desc (rest)
-	descW := innerW - 3 - usageW - 1
+	// indent (2) + usage (usageW) + space (1) + desc (rest)
+	descW := innerW - 2 - usageW - 1
 	if descW < 4 {
 		descW = 4
 	}
@@ -258,33 +258,23 @@ func (m Model) View() string {
 	}
 	if len(m.filtered) > maxRows {
 		hidden := len(m.filtered) - maxRows
-		footer := theme.StyleDim.Render(fmt.Sprintf("+%d more", hidden))
+		footer := "  " + theme.StyleDim.Render(fmt.Sprintf("+%d more", hidden))
 		lines = append(lines, footer)
 	}
 
-	frame := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.BaseBorder).
-		Padding(0, 1).
-		Width(innerW + 2)
-	return frame.Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
-// renderRow renders a single usage/desc line, prefixing a 3-column
-// gutter for the cursor marker.
+// renderRow renders a single usage/desc line with Claude Code-style flat
+// indentation. The selected row is identified by its background treatment;
+// there is no extra box or marker glyph competing with the input prompt.
 func (m Model) renderRow(e Entry, cursorOn bool, usageW, descW int) string {
-	gutter := "  "
-	if cursorOn {
-		gutter = "▶ "
-	}
-	gutter += " " // trailing column so the total is 3
-
 	usage := padOrTrunc(e.Usage, usageW)
 	usageCol := theme.StyleAccent.Render(usage)
 	desc := truncate(e.Desc, descW)
 	descCol := theme.StyleSecondary.Render(desc)
 
-	line := gutter + usageCol + " " + descCol
+	line := "  " + usageCol + " " + descCol
 	if cursorOn {
 		return lipgloss.NewStyle().Background(theme.BaseSurfaceBright).Render(line)
 	}

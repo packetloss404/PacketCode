@@ -75,14 +75,14 @@ func (a *App) handleWorkflowRun(args []string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	name := args[0]
-	wf, ok := a.workflowLoader.Get(name)
-	if !ok {
-		a.conversation.AppendSystem(fmt.Sprintf("workflows run: unknown workflow %q (try /workflows list)", name))
+	wf, err := a.workflowLoader.Load(name)
+	if err != nil {
+		a.conversation.AppendSystem("workflows run: " + err.Error())
 		return a, nil
 	}
 
-	// Overlay any key=value overrides onto the spec inputs so a user can
-	// steer a run without editing the spec, e.g. /workflows run review target=diff.
+	// Overlay key=value overrides; quote multiword values, e.g.
+	// /workflows run review target="the staged diff".
 	if overrides := parseInputOverrides(args[1:]); len(overrides) > 0 {
 		if wf.Inputs == nil {
 			wf.Inputs = map[string]string{}
@@ -170,17 +170,26 @@ func (a *App) handleWorkflowUpdate(run workflow.RunSnapshot) (tea.Model, tea.Cmd
 	return a, nil
 }
 
-// parseInputOverrides parses key=value tokens into a map. Tokens without an
-// '=' are ignored.
+// parseInputOverrides parses key=value tokens. Quoted values split by the
+// slash parser are reassembled until the closing quote.
 func parseInputOverrides(args []string) map[string]string {
 	out := map[string]string{}
-	for _, a := range args {
-		if k, v, ok := strings.Cut(a, "="); ok {
-			k = strings.TrimSpace(k)
-			if k != "" {
-				out[k] = strings.TrimSpace(v)
-			}
+	for i := 0; i < len(args); i++ {
+		k, v, ok := strings.Cut(args[i], "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			continue
 		}
+		if len(v) > 0 && (v[0] == '\'' || v[0] == '"') {
+			quote := v[0]
+			v = v[1:]
+			for !strings.HasSuffix(v, string(quote)) && i+1 < len(args) {
+				i++
+				v += " " + args[i]
+			}
+			v = strings.TrimSuffix(v, string(quote))
+		}
+		out[k] = strings.TrimSpace(v)
 	}
 	return out
 }

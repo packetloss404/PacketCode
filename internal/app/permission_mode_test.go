@@ -1,9 +1,16 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/permissions"
+	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 func TestNextPermMode_CycleOrder(t *testing.T) {
@@ -73,14 +80,49 @@ func TestCyclePermissionMode_WalksProfilesAndPlan(t *testing.T) {
 	}
 }
 
-func TestCyclePermissionMode_NoOpWhileStreaming(t *testing.T) {
+func TestCyclePermissionMode_WhileStreamingUpdatesLivePolicy(t *testing.T) {
 	r := newTestApp(t)
 	r.app.applyPermMode(modeNormal)
 	r.app.streaming = true
 
-	r.app.cyclePermissionMode()
-	if got := r.app.currentPermMode(); got != modeNormal {
-		t.Fatalf("streaming cycle changed mode to %v, want unchanged normal", got)
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if got := r.app.currentPermMode(); got != modeAcceptEdits {
+		t.Fatalf("first streaming cycle = %v, want accept-edits", got)
+	}
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if got := r.app.currentPermMode(); got != modeAuto {
+		t.Fatalf("second streaming cycle = %v, want auto", got)
+	}
+	if got := r.app.currentPermissionPolicy().Profile(); got != permissions.ProfileAuto {
+		t.Fatalf("live profile = %v, want auto", got)
+	}
+}
+
+func TestCyclePermissionMode_ReevaluatesVisibleApproval(t *testing.T) {
+	r := newTestApp(t)
+	r.app.applyPermMode(modeNormal)
+	r.app.streaming = true
+	tool := tools.NewExecuteCommandTool(r.tmp)
+	call := provider.ToolCall{ID: "call-1", Name: tool.Name(), Arguments: `{"command":"go test ./..."}`}
+	req := agent.ApprovalRequest{Tool: tool, ToolCall: call, Params: json.RawMessage(call.Arguments)}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	decisionCh := make(chan agent.ApprovalDecision, 1)
+	go func() { decisionCh <- r.app.approver.Approve(ctx, req) }()
+
+	waitPendingApproval(t, r.app.approver)
+	r.app.approval.Show(tool, call)
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}) // manual -> accept edits; shell still asks
+	if !r.app.approval.Visible() {
+		t.Fatal("accept-edits should keep a shell approval visible")
+	}
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}) // accept edits -> auto; shell is allowed
+	if r.app.approval.Visible() {
+		t.Fatal("auto mode should resolve and hide the existing shell approval")
+	}
+	decision := waitDecision(t, decisionCh)
+	if !decision.Approved {
+		t.Fatalf("live auto-mode decision = %+v, want approved", decision)
 	}
 }
 

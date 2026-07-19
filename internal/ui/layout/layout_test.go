@@ -13,6 +13,12 @@ func TestFrame_OrdersBodyOverlayInputStatus(t *testing.T) {
 	assert.Equal(t, []string{"BODY", "OVL", "INPUT", "STATUS"}, lines)
 }
 
+func TestFrame_EmptyPendingDoesNotAddLeadingBlankBeforeInput(t *testing.T) {
+	out := Frame("", "", "", "INPUT", "STATUS")
+	assert.Equal(t, "INPUT\nSTATUS", out)
+	assert.False(t, strings.HasPrefix(out, "\n"))
+}
+
 func TestFrame_OmitsEmptyRegions(t *testing.T) {
 	out := Frame("BODY", "", "", "INPUT", "STATUS")
 	assert.Equal(t, "BODY\nINPUT\nSTATUS", out)

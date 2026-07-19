@@ -182,21 +182,49 @@ func (p *Policy) WithRule(tool string, decision Decision) *Policy {
 	return out
 }
 
-// WithCommandPrefixRule returns a copy with an execute_command rule scoped to a
-// command prefix (e.g. ["go", "test"] allows any `go test …`). Used by the
-// approval prompt's "always allow this command" choice so a single approval
-// doesn't open up every command.
+// WithCommandPrefixRule returns a copy with an execute_command prefix rule.
+// Prefix rules are intended for explicit configuration, not remembered
+// approvals: shell syntax makes inferred command families unsafe.
 func (p *Policy) WithCommandPrefixRule(prefix []string, decision Decision) *Policy {
 	out := &Policy{profile: ProfileAsk}
 	if p != nil {
 		out.profile = p.Profile()
 		out.rules = p.Rules()
 	}
+	trimmed := make([]string, 0, len(prefix))
+	for _, field := range prefix {
+		if field = strings.TrimSpace(field); field != "" {
+			trimmed = append(trimmed, field)
+		}
+	}
+	if len(trimmed) == 0 {
+		return out
+	}
 	out.rules = append(out.rules, Rule{
 		Tool:          "execute_command",
-		CommandPrefix: append([]string(nil), prefix...),
+		CommandPrefix: trimmed,
 		Decision:      NormalizeDecision(decision),
 		Reason:        "session rule",
+	})
+	return out
+}
+
+// WithCommandRule returns a copy with an execute_command rule that matches the
+// complete shell program byte-for-byte.
+func (p *Policy) WithCommandRule(command string, decision Decision) *Policy {
+	out := &Policy{profile: ProfileAsk}
+	if p != nil {
+		out.profile = p.Profile()
+		out.rules = p.Rules()
+	}
+	if command == "" {
+		return out
+	}
+	out.rules = append(out.rules, Rule{
+		Tool:     "execute_command",
+		Command:  command,
+		Decision: NormalizeDecision(decision),
+		Reason:   "session rule",
 	})
 	return out
 }
@@ -350,6 +378,9 @@ func profileDecision(profile Profile, req Request) (Decision, string) {
 	case ProfileAsk:
 		fallthrough
 	default:
+		if readOnlyTool(req.ToolName) {
+			return DecisionAllow, "read-only tool"
+		}
 		if req.RequiresApproval || isMCPTool(req.ToolName) {
 			return DecisionAsk, "ask profile prompts for approval-gated tools"
 		}
@@ -359,7 +390,7 @@ func profileDecision(profile Profile, req Request) (Decision, string) {
 
 func readOnlyTool(name string) bool {
 	switch name {
-	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics":
+	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics", "collect_agent_results":
 		return true
 	default:
 		return false
@@ -397,6 +428,13 @@ func commandPrefixMatches(params json.RawMessage, prefix []string) bool {
 	}
 	command, ok := commandParam(params)
 	if !ok {
+		return false
+	}
+	// A prefix rule describes one simple command invocation. Never let it
+	// authorize a larger shell program assembled with control operators,
+	// redirections, substitutions, or newlines. Exact command rules remain
+	// available when a user deliberately approves such a program verbatim.
+	if strings.ContainsAny(command, ";&|<>`$()\n\r") {
 		return false
 	}
 	fields := strings.Fields(command)

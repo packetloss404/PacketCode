@@ -261,12 +261,14 @@ func TestAutocomplete_ViewContainsUsageAndDesc(t *testing.T) {
 	}
 }
 
-func TestAutocomplete_ViewShowsCursorRowHighlight(t *testing.T) {
+func TestAutocomplete_ViewIsFlatAndShowsCursorRowHighlight(t *testing.T) {
 	m := newSized("")
 	out := m.View()
-	// The marker glyph lives on the cursor row.
-	if !strings.Contains(out, "▶") {
-		t.Fatalf("View should render cursor marker ▶ on the cursor row; got:\n%s", out)
+	if strings.ContainsAny(out, "╭╮╰╯│") {
+		t.Fatalf("autocomplete should be a flat list without a surrounding box; got:\n%s", out)
+	}
+	if !strings.HasPrefix(out, "  ") {
+		t.Fatalf("autocomplete rows should use a two-column indent; got:\n%s", out)
 	}
 }
 

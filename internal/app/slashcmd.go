@@ -96,11 +96,13 @@ func ParseSpawnFlags(args []string) (provSlug, modelID string, allowWrite bool, 
 	return provSlug, modelID, allowWrite, prompt, nil
 }
 
+const defaultCompactKeep = 10
+
 // parseCompactFlags reads the optional `--keep <N>` flag for /compact.
 // Default keep is 10. Extra positional tokens are an error so typos like
 // "/compact 5" (missing --keep) don't silently succeed.
 func parseCompactFlags(args []string) (keep int, err error) {
-	keep = 10
+	keep = defaultCompactKeep
 	i := 0
 	for i < len(args) {
 		switch args[i] {

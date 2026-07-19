@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,7 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/hooks"
+	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
@@ -36,6 +38,49 @@ type scriptedProvider struct {
 	chatCount    int32
 	lastRequest  provider.ChatRequest
 	disableTools bool
+}
+
+// gatedToolProvider pauses the first provider turn before emitting a tool call,
+// allowing a test to change permission mode while Agent.Run is active.
+type gatedToolProvider struct {
+	started chan struct{}
+	release chan struct{}
+	turn    int32
+}
+
+func (g *gatedToolProvider) Name() string                              { return "gated" }
+func (g *gatedToolProvider) Slug() string                              { return "gated" }
+func (g *gatedToolProvider) BrandColor() lipgloss.Color                { return lipgloss.Color("#000000") }
+func (g *gatedToolProvider) ValidateKey(context.Context, string) error { return nil }
+func (g *gatedToolProvider) Pricing(string) (float64, float64)         { return 0, 0 }
+func (g *gatedToolProvider) ContextWindow(string) int                  { return 100_000 }
+func (g *gatedToolProvider) SupportsTools(string) bool                 { return true }
+func (g *gatedToolProvider) ListModels(context.Context) ([]provider.Model, error) {
+	return nil, nil
+}
+func (g *gatedToolProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	turn := atomic.AddInt32(&g.turn, 1)
+	ch := make(chan provider.StreamEvent, 4)
+	go func() {
+		defer close(ch)
+		if turn == 1 {
+			close(g.started)
+			select {
+			case <-g.release:
+			case <-ctx.Done():
+				ch <- provider.StreamEvent{Type: provider.EventError, Error: ctx.Err()}
+				return
+			}
+			ch <- provider.StreamEvent{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "execute_command"}}
+			ch <- provider.StreamEvent{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{}`}}
+			ch <- provider.StreamEvent{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}}
+			ch <- provider.StreamEvent{Type: provider.EventDone}
+			return
+		}
+		ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: "done"}
+		ch <- provider.StreamEvent{Type: provider.EventDone}
+	}()
+	return ch, nil
 }
 
 func (s *scriptedProvider) Name() string                                           { return "scripted" }
@@ -129,6 +174,26 @@ func collect(events <-chan AgentEvent) []AgentEvent {
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
+func TestAgent_TokenBudgetStopsAtToolTurnBoundary(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{{
+		{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "read", ArgumentsDelta: `{}`}},
+		{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+		{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 8, OutputTokens: 2}},
+	}}}
+	a, _, _ := newAgentRig(t, prov, &recordingTool{name: "read"})
+	a.tokenBudget = 10
+	events := collect(a.Run(context.Background(), "read"))
+	var budgetErr error
+	for _, ev := range events {
+		if ev.Type == EventError {
+			budgetErr = ev.Error
+		}
+	}
+	require.Error(t, budgetErr)
+	assert.Contains(t, budgetErr.Error(), "used 10 tokens (budget 10)")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&prov.chatCount), "must not begin another provider stream")
+}
+
 func TestAgent_TextOnlyTurn(t *testing.T) {
 	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
 		{
@@ -216,6 +281,30 @@ func TestAgent_ToolCallApprovedAndExecuted(t *testing.T) {
 	assert.Equal(t, "tool ran", cur.Messages[2].Content)
 	assert.Equal(t, provider.RoleAssistant, cur.Messages[3].Role)
 	assert.Equal(t, "All done", cur.Messages[3].Content)
+}
+
+func TestAgent_SetPolicyDuringRunAppliesToLaterToolCall(t *testing.T) {
+	prov := &gatedToolProvider{started: make(chan struct{}), release: make(chan struct{})}
+	tool := &recordingTool{name: "execute_command", approval: true}
+	a, _, _ := newAgentRig(t, prov, tool)
+	a.SetApprover(AutoReject("manual mode would reject"))
+	a.SetPolicy(permissions.DefaultPolicy().WithProfile(permissions.ProfileAsk))
+
+	events := a.Run(context.Background(), "run tests")
+	select {
+	case <-prov.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider turn did not start")
+	}
+	// This is the live Shift+Tab path at the agent boundary: the policy changes
+	// while Run is active, before the model's subsequent tool call is handled.
+	a.SetPolicy(permissions.DefaultPolicy().WithProfile(permissions.ProfileAuto))
+	close(prov.release)
+	_ = collect(events)
+
+	if got := atomic.LoadInt32(&tool.executed); got != 1 {
+		t.Fatalf("tool executions = %d, want 1 after live switch to auto", got)
+	}
 }
 
 func TestAgent_DropsTextOnToolCallTurn(t *testing.T) {
@@ -746,7 +835,7 @@ func TestContextManager_ShouldSuggestCompact(t *testing.T) {
 		long[i] = 'x'
 	}
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: string(long)}}
-	// 2000 chars / 4 = ~500 tokens; in a 1000-token window that's 50%.
+	// The conservative estimator uses three bytes/token, so this crosses 50%.
 	assert.True(t, cm.ShouldSuggestCompact(msgs, 1000))
 	assert.False(t, cm.ShouldSuggestCompact(msgs, 10_000))
 }
@@ -817,6 +906,35 @@ func TestContextManager_CompactTailStartingOnToolMessageKeepsGroup(t *testing.T)
 	assert.Equal(t, provider.RoleTool, out[3].Role)
 	assert.Equal(t, "call-b", out[3].ToolCallID)
 	assert.Equal(t, "done", out[4].Content)
+}
+
+func TestCompactOlderToolResultsPreservesNewestExchangeAndOrdering(t *testing.T) {
+	largeOld := strings.Repeat("old", 10000)
+	largeRecent := strings.Repeat("recent", 6000)
+	messages := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "run", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "old", Name: "run", Content: largeOld},
+		{Role: provider.RoleAssistant, Content: "continue"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "run", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "new", Name: "run", Content: largeRecent},
+	}
+
+	got := compactOlderToolResults(messages, 1024)
+	require.Len(t, got, len(messages))
+	assert.Contains(t, got[1].Content, "tool result truncated")
+	assert.Contains(t, got[1].Content, "original_bytes=30000")
+	assert.Less(t, len(got[1].Content), len(largeOld)/10)
+	assert.Equal(t, largeRecent, got[4].Content)
+	assert.Equal(t, "old", got[1].ToolCallID)
+	assert.Equal(t, "new", got[4].ToolCallID)
+	assert.Equal(t, largeOld, messages[1].Content, "persisted/source transcript must remain complete")
+}
+
+func TestCompactToolResultPreservesUTF8(t *testing.T) {
+	content := strings.Repeat("界", 2000)
+	got := compactToolResult(content, 1024)
+	assert.True(t, utf8.ValidString(got))
+	assert.Contains(t, got, "tool result truncated")
 }
 
 func TestAgent_BuildMessagesNormalizesSplitToolCallGroups(t *testing.T) {

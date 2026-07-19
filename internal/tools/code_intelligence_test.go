@@ -206,8 +206,21 @@ func TestFindReferencesTool_SkipsSymlinkEscapeDuringWorkspaceScan(t *testing.T) 
 	res, err := NewFindReferencesTool(root).Execute(context.Background(), json.RawMessage(`{"symbol":"SecretSymbol"}`))
 	require.NoError(t, err)
 	require.False(t, res.IsError, res.Content)
-	assert.NotContains(t, res.Content, "SecretSymbol")
+	assert.NotContains(t, res.Content, "secret.go:", "escaped file must not contribute a result")
 	assert.Equal(t, 0, res.Metadata["reference_count"])
+}
+
+func TestCodeIntelligenceLimitsAreFocusedAndStillUseful(t *testing.T) {
+	assert.Equal(t, 50, defaultSymbolLimit)
+	assert.Equal(t, 200, maxSymbolLimit)
+	assert.Equal(t, 20, defaultDefinitionLimit)
+	assert.Equal(t, 100, maxDefinitionLimit)
+	assert.Equal(t, 50, defaultReferenceLimit)
+	assert.Equal(t, 200, maxReferenceLimit)
+	assert.Equal(t, 50, defaultDiagnosticLimit)
+	assert.Equal(t, 200, maxDiagnosticLimit)
+	assert.Equal(t, maxReferenceLimit, boundedInt(maxReferenceLimit+1, defaultReferenceLimit, maxReferenceLimit))
+	assert.Equal(t, 75, boundedInt(75, defaultReferenceLimit, maxReferenceLimit), "explicit useful searches remain supported")
 }
 
 func TestCodeIntelligenceTools_SchemasAndApproval(t *testing.T) {
