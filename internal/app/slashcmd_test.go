@@ -391,6 +391,13 @@ func TestParseSlashCommand_Clear(t *testing.T) {
 	}
 }
 
+func TestParseSlashCommand_Effort(t *testing.T) {
+	cmd, args, ok := ParseSlashCommand("/effort high")
+	if !ok || cmd != "effort" || !reflect.DeepEqual(args, []string{"high"}) {
+		t.Fatalf("parse = %q %v %v", cmd, args, ok)
+	}
+}
+
 func TestParseSlashCommand_StatusLine(t *testing.T) {
 	cmd, args, ok := ParseSlashCommand("/statusline refresh")
 	if !ok || cmd != "statusline" || !reflect.DeepEqual(args, []string{"refresh"}) {

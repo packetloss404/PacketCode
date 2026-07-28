@@ -24,6 +24,19 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
 }
 
+// Unregister removes a tool by name. It returns true when a tool was present.
+// Dynamic integrations such as a restarted MCP server use this to replace
+// adapters that still point at the previous process.
+func (r *Registry) Unregister(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	return true
+}
+
 // Get returns the named tool.
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()

@@ -31,9 +31,54 @@ func TestDoctorJSONOutputNoConfig(t *testing.T) {
 	if report.Status != doctorWarn {
 		t.Fatalf("status = %q, want warn", report.Status)
 	}
+	if report.EffectiveHome != filepath.Join(os.Getenv("USERPROFILE"), ".packetcode") {
+		t.Fatalf("effective_home = %q", report.EffectiveHome)
+	}
+	if report.HomeSource != "default" {
+		t.Fatalf("home_source = %q, want default", report.HomeSource)
+	}
+	if report.ProviderSummary != (doctorProviderSummary{}) {
+		t.Fatalf("provider_summary = %+v, want empty", report.ProviderSummary)
+	}
 	assertDoctorCheck(t, report, "config.file", doctorWarn)
 	assertDoctorCheck(t, report, "providers.none", doctorWarn)
 	assertDoctorCheck(t, report, "mcp.none", doctorOK)
+}
+
+func TestDoctorReportsEffectiveHomeAndProviderSummary(t *testing.T) {
+	restore := isolateDoctorEnv(t)
+	defer restore()
+
+	override := filepath.Join(t.TempDir(), "packetcode-data")
+	t.Setenv(config.HomeEnv, override)
+	cfg := config.Default()
+	cfg.Default.Provider = "ollama"
+	cfg.Default.Model = "qwen3"
+	cfg.Providers["ollama"] = config.ProviderConfig{
+		Host:         "http://localhost:11434",
+		DefaultModel: "qwen3",
+	}
+	cfg.Providers["openai"] = config.ProviderConfig{
+		DefaultModel: "gpt-4.1",
+	}
+	requireSaveConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctorCommand([]string{"--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doctor exit = %d, stderr=%q, stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("doctor json: %v\n%s", err, stdout.String())
+	}
+	if report.EffectiveHome != override || report.HomeSource != "environment" {
+		t.Fatalf("home = %q (%s), want %q (environment)", report.EffectiveHome, report.HomeSource, override)
+	}
+	want := doctorProviderSummary{Configured: 2, Ready: 1, Warning: 1}
+	if report.ProviderSummary != want {
+		t.Fatalf("provider_summary = %+v, want %+v", report.ProviderSummary, want)
+	}
 }
 
 func TestDoctorPlainOutputDoesNotLeakSecrets(t *testing.T) {
@@ -434,6 +479,7 @@ func isolateDoctorEnv(t *testing.T) func() {
 	work := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv(config.HomeEnv, "")
 	t.Setenv("PACKETCODE_OPENAI_API_KEY", "")
 	t.Setenv("PACKETCODE_ANTHROPIC_API_KEY", "")
 	t.Setenv("PACKETCODE_GEMINI_API_KEY", "")

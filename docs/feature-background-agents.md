@@ -42,7 +42,7 @@ The active foreground permission profile is snapshotted when a job starts. `/spa
 
 ## Agent View
 
-Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen workspace groups jobs into Needs Input, Working, Completed, Failed, and Cancelled sections. Type in its bottom prompt and press Enter to spawn a new task.
+Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen workspace groups jobs into Needs Input, Working, Completed, Failed, and Cancelled sections. Press `n`, type in its bottom prompt, and press Enter to spawn a new task.
 
 | Key | Action |
 | --- | --- |
@@ -127,7 +127,10 @@ Pipelines and adversarial verification/retry are not implemented yet; see [BACKL
 - `/loop list` shows active loops.
 - `/loop stop <id|all>` stops scheduling future iterations.
 
-Self-paced loops ask the model to end with `LOOP_DONE` and stop after 25 iterations regardless. A tick during active foreground work queues instead of overlapping. Loop bodies can spawn agents or invoke workflows.
+Self-paced loops ask the model for a versioned `packetcode-loop-decision`
+block, retain `LOOP_DONE` for compatibility, and stop after 25 iterations
+regardless. A tick during active foreground work queues instead of overlapping.
+Loop bodies can spawn agents or invoke workflows.
 
 ## Current Limits
 

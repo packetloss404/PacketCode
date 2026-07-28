@@ -10,13 +10,42 @@ import (
 // dirName is the name of packetcode's config/state directory under $HOME.
 const dirName = ".packetcode"
 
-// HomeDir returns ~/.packetcode, creating it (with 0700) if it does not exist.
-func HomeDir() (string, error) {
+const HomeEnv = "PACKETCODE_HOME"
+
+// ResolveHomeDir returns the effective PacketCode data home without creating
+// it. PACKETCODE_HOME is an explicit data-directory override, not an OS HOME
+// replacement: it must be absolute so sessions, jobs, worktrees, workflows,
+// commands, themes, logs, and cost state cannot drift with the process cwd.
+// When unset, the backward-compatible location remains ~/.packetcode.
+func ResolveHomeDir() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(HomeEnv)); override != "" {
+		if !filepath.IsAbs(override) {
+			return "", fmt.Errorf("%s must be an absolute path: %q", HomeEnv, override)
+		}
+		return filepath.Clean(override), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate user home: %w", err)
 	}
-	dir := filepath.Join(home, dirName)
+	return filepath.Join(home, dirName), nil
+}
+
+// HomeSource reports which stable channel selected the effective data home.
+func HomeSource() string {
+	if strings.TrimSpace(os.Getenv(HomeEnv)) != "" {
+		return "environment"
+	}
+	return "default"
+}
+
+// HomeDir returns the effective PacketCode data home, creating it with 0700
+// when missing. See ResolveHomeDir for PACKETCODE_HOME semantics.
+func HomeDir() (string, error) {
+	dir, err := ResolveHomeDir()
+	if err != nil {
+		return "", err
+	}
 	if err := EnsureDir(dir); err != nil {
 		return "", err
 	}

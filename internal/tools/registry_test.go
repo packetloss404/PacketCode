@@ -39,6 +39,16 @@ func TestRegistry_RegisterAndGet(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRegistry_Unregister(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&stubTool{name: "dynamic"})
+
+	assert.True(t, r.Unregister("dynamic"))
+	assert.False(t, r.Unregister("dynamic"))
+	_, ok := r.Get("dynamic")
+	assert.False(t, ok)
+}
+
 func TestRegistry_AllSorted(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&stubTool{name: "zeta"})

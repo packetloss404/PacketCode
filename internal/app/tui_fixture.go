@@ -11,6 +11,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/statusline"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/agentview"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
@@ -134,7 +135,7 @@ func (m *tuiFixtureModel) View() string {
 	status := m.topbar.View() + "\n  " + renderPermModeHint(m.mode)
 	in := m.input.View()
 	if m.state == "agents" {
-		in = m.input.ViewWithPlaceholder("describe a task for a new agent")
+		in = m.input.ViewWithPlaceholder("press n to dispatch a new agent")
 		status = ""
 	} else if m.state == "workflows" {
 		in = ""
@@ -144,7 +145,13 @@ func (m *tuiFixtureModel) View() string {
 }
 
 func (m *tuiFixtureModel) populate() {
-	m.topbar.SetCustomLine("[Codex (ChatGPT)·gpt-5.6-sol] 🟢 12% (33K/272K) | 📂 packetcode | 🌿 main")
+	m.topbar.SetCustomLine(statusline.RenderDefaultWidth(statusline.Snapshot{
+		Provider:      statusline.ProviderInfo{DisplayName: "Codex (ChatGPT)"},
+		Model:         statusline.ModelInfo{ID: "gpt-5.6-sol", ReasoningEffort: "high"},
+		ContextWindow: statusline.ContextInfo{Used: 33_000, Max: 272_000, UsedPercentage: 12},
+		Project:       "packetcode",
+		GitBranch:     "main",
+	}, m.width-4))
 	switch m.state {
 	case "user-assistant":
 		m.conversation.AppendUser("Summarize the current change.")
@@ -200,6 +207,7 @@ func (m *tuiFixtureModel) populate() {
 		m.mode = modeBypass
 	case "agents":
 		m.agentView.Show(fixtureJobs())
+		m.input.Blur()
 	case "workflows":
 		m.workflowView.Show(fixtureWorkflows())
 	}

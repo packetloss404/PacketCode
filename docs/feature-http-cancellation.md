@@ -8,7 +8,7 @@ Ctrl+C cancellation is lifecycle-scoped and propagates through the active foregr
 - The thinking spinner stops and the conversation shows `turn cancelled`, not a provider-error block.
 - Queued foreground prompts are cleared so cancellation is predictable.
 - A second Ctrl+C while the agent goroutine is still draining is ignored rather than exiting.
-- Ctrl+C while idle exits packetcode.
+- Ctrl+C while idle clears a non-empty draft first; from an empty prompt it exits packetcode.
 - Background agents and workflows have independent contexts; foreground cancellation does not cascade to them.
 
 Provider stream parsers receive the turn context and close promptly on cancellation. `execute_command` uses process-tree cancellation so children do not continue silently after the UI settles.

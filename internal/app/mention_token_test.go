@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestActiveMentionToken(t *testing.T) {
 	cases := []struct {
@@ -42,5 +45,20 @@ func TestActiveMentionToken(t *testing.T) {
 				t.Fatalf("text[start] = %q, want '@'", tc.text[start])
 			}
 		})
+	}
+}
+
+func TestActiveMentionTokenAtCursorIncludesSuffix(t *testing.T) {
+	text := "review @internal/components/input.go and tests"
+	cursor := strings.Index(text, "components") + len("compo")
+	start, end, query, ok := activeMentionTokenAtCursor(text, cursor)
+	if !ok {
+		t.Fatal("mention at caret not detected")
+	}
+	if got, want := text[start:end], "@internal/components/input.go"; got != want {
+		t.Fatalf("span = %q, want %q", got, want)
+	}
+	if got, want := query, "internal/components/input.go"; got != want {
+		t.Fatalf("query = %q, want %q", got, want)
 	}
 }

@@ -57,12 +57,16 @@ type agentEventMsg struct{ ev agent.AgentEvent }
 // agentDoneMsg signals the agent's event channel has closed.
 type agentDoneMsg struct{}
 
-// pollApproverMsg fires periodically so the App can pick up pending
-// approval requests posted by the agent goroutine.
-type pollApproverMsg struct{}
+// approvalPendingMsg is pushed when an agent queues an approval request.
+type approvalPendingMsg struct{}
 
 // tickTopbarMsg updates the duration counter in the top bar.
 type tickTopbarMsg struct{}
+
+// gitBranchMsg returns an off-thread branch lookup. Git startup can take tens
+// of milliseconds on Windows, so it must not run in Bubble Tea's key/event
+// loop on every status tick.
+type gitBranchMsg struct{ branch string }
 
 // toolOutputFlushMsg fires on a throttle interval while a long-running
 // command is streaming. On receipt the App drains the coalesced
@@ -75,6 +79,8 @@ type toolOutputFlushMsg struct{}
 // can emit chunks far faster than a human reads; coalescing to ~10 fps
 // keeps the renderer idle without making progress feel laggy.
 const toolOutputThrottle = 100 * time.Millisecond
+
+const gitBranchRefreshInterval = 15 * time.Second
 
 type statusLineMsg struct {
 	seq    int
@@ -99,6 +105,14 @@ type jobUpdateMsg struct{ Snap jobs.Snapshot }
 // tea.Program.Send. The App uses it to refresh the workflow view and, on
 // terminal run transitions, append a system message describing the outcome.
 type workflowUpdateMsg struct{ Run workflow.RunSnapshot }
+
+type mcpRestartedMsg struct {
+	Name     string
+	Report   mcp.StartupReport
+	Client   *mcp.Client
+	Previous *mcp.Client
+	Err      error
+}
 
 // Deps bundles everything App needs from main(). main() owns the lifecycle
 // of these objects; App just borrows them.
@@ -147,13 +161,18 @@ type App struct {
 	// list, stashed so file-mention mode can swap it back out when the
 	// user returns to a slash buffer. fileIndex is the lazily-built
 	// "@file" list (built once from WorkingDir on the first @-mention).
-	// mentionStart is the byte offset of the "@" for the token the popup
-	// is currently completing, so acceptMentionAutocomplete knows where to
-	// splice the chosen path.
+	// mentionStart/mentionEnd are the byte span of the @token currently under
+	// the caret, so accepting completion can replace that token in place.
 	slashEntries   []autocomplete.Entry
 	fileIndex      []autocomplete.Entry
 	fileIndexBuilt bool
 	mentionStart   int
+	mentionEnd     int
+	// agentDispatchFocused separates Agent View list shortcuts from its task
+	// composer. Without an explicit focus, printable actions such as p/c/i/x
+	// are swallowed by the textarea and Enter closes the workspace instead of
+	// opening the selected agent.
+	agentDispatchFocused bool
 
 	// Agent + bridge.
 	agent            *agent.Agent
@@ -245,6 +264,9 @@ type App struct {
 	statusLineInFlight int
 	statusLineLastRun  time.Time
 	lastStatusLineErr  error
+	gitBranch          string
+	gitBranchLastRun   time.Time
+	gitBranchInFlight  bool
 	jobSeqSeen         map[string]int64
 	jobTerminalSeen    map[string]bool
 	jobWorktreeSeen    map[string]bool
@@ -332,11 +354,15 @@ func New(deps Deps) (*App, error) {
 
 	slashCommands := LoadSlashRegistry(deps.WorkingDir)
 	slashEntries := buildAutocompleteEntries(slashCommands.HelpRows())
+	inputModel := input.New()
+	if deps.Config != nil {
+		inputModel.SetMaxRows(deps.Config.Behavior.MaxInputRows)
+	}
 	app := &App{
 		deps:                 deps,
 		topbar:               topbar.New(),
 		conversation:         conv,
-		input:                input.New(),
+		input:                inputModel,
 		approval:             approval.New(),
 		jobsPanel:            jobs_ui.New(),
 		agentView:            agentview.New(),
@@ -400,6 +426,11 @@ func New(deps Deps) (*App, error) {
 // jobs.Manager subscriber) can post messages into the Update loop.
 func (a *App) SetSendFunc(fn func(tea.Msg)) {
 	a.sendMsg = fn
+	a.approver.SetNotify(func() {
+		if a.sendMsg != nil {
+			a.sendMsg(approvalPendingMsg{})
+		}
+	})
 }
 
 // Approver returns the App's uiApprover so the host can inject it as the
@@ -411,9 +442,9 @@ func (a *App) Approver() agent.Approver {
 
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
-		pollApprover(),
 		tickTopbar(),
-		a.renderStatusLine(false),
+		a.refreshGitBranch(),
+		func() tea.Msg { return approvalPendingMsg{} },
 	)
 }
 
@@ -428,14 +459,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if len(drained) == 0 {
 		return model, cmd
 	}
-	cmds := make([]tea.Cmd, 0, len(drained)+1)
-	for _, s := range drained {
-		cmds = append(cmds, tea.Println(s))
-	}
+	// One print message preserves FIFO ordering. tea.Batch-ing one Println per
+	// block lets the runtime deliver them concurrently and visibly reorder a
+	// rejection/system note pair under load.
+	printCmd := tea.Println(strings.Join(drained, "\n"))
 	if cmd != nil {
-		cmds = append(cmds, cmd)
+		return model, tea.Batch(printCmd, cmd)
 	}
-	return model, tea.Batch(cmds...)
+	return model, printCmd
 }
 
 func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -481,6 +512,11 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case jobUpdateMsg:
 		if a.agentView.Visible() && a.jobs != nil {
 			a.agentView.SetJobs(a.jobs.List())
+		}
+		if a.jobsPanel.Visible() && a.jobs != nil && a.jobsPanel.JobID() == msg.Snap.ID {
+			if transcript, ok := a.jobs.Transcript(msg.Snap.ID); ok {
+				a.jobsPanel.RefreshJob(msg.Snap, transcript)
+			}
 		}
 		if a.workflowView.Visible() && a.workflow != nil {
 			// A workflow's agents are ordinary jobs; refresh the live
@@ -533,15 +569,37 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleCompactDone(msg)
 
 	case approval.ResultMsg:
+		decision := agent.ApprovalDecision{Approved: false, Reason: "user rejected"}
 		switch msg.Result {
 		case approval.Approved:
 			if msg.Remember {
 				a.rememberApproval(msg.ToolCall)
 			}
-			a.approver.Resolve(agent.ApprovalDecision{Approved: true})
-		case approval.Rejected:
-			a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "user rejected"})
+			decision = agent.ApprovalDecision{Approved: true}
 		}
+		a.approver.Resolve(decision)
+		a.showPendingApproval()
+		return a, nil
+
+	case mcpRestartedMsg:
+		unregisterMCPClientTools(a.deps.Tools, msg.Previous)
+		if msg.Err != nil {
+			a.conversation.AppendSystem("mcp restart: " + msg.Err.Error())
+			return a, nil
+		}
+		registrations := mcp.RegisterTools(a.deps.Tools, []*mcp.Client{msg.Client})
+		registered := 0
+		for _, registration := range registrations {
+			if registration.Status == "registered" {
+				registered++
+			}
+		}
+		a.conversation.AppendSystem(fmt.Sprintf(
+			"mcp restart: %s running (pid %d, %d tools registered)",
+			msg.Name,
+			msg.Report.PID,
+			registered,
+		))
 		return a, nil
 
 	case picker.SelectMsg:
@@ -577,6 +635,8 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case agentview.CloseMsg:
+		a.agentDispatchFocused = false
+		a.input.Focus()
 		return a, nil
 
 	case agentview.OpenMsg:
@@ -606,24 +666,36 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case providerKeyValidatedMsg:
 		return a.handleProviderKeyValidated(msg)
 
-	case pollApproverMsg:
-		if a.approval.Visible() {
-			a.approval.SetQueueDepth(a.approver.QueueDepth())
-			return a, pollApprover()
+	case approvalPendingMsg:
+		a.showPendingApproval()
+		if a.sendMsg == nil && a.streaming {
+			return a, pollApproverFallback()
 		}
-		if req, ok := a.approver.Pending(); ok {
-			a.approval.Show(req.Tool, req.ToolCall)
-			a.approval.SetWidth(a.width)
-			a.approval.SetQueueDepth(a.approver.QueueDepth())
-		}
-		return a, pollApprover()
+		return a, nil
 
 	case toolOutputFlushMsg:
 		return a, a.flushToolOutput()
 
 	case tickTopbarMsg:
 		a.refreshTopBar()
-		return a, tea.Batch(tickTopbar(), a.renderStatusLine(false))
+		branchCmd := a.refreshGitBranch()
+		var statusCmd tea.Cmd
+		if !a.gitBranchInFlight {
+			statusCmd = a.renderStatusLine(false)
+		}
+		return a, tea.Batch(tickTopbar(), branchCmd, statusCmd)
+
+	case gitBranchMsg:
+		a.gitBranchInFlight = false
+		a.gitBranch = msg.branch
+		a.refreshTopBar()
+		// The first external statusline render may have raced the initial branch
+		// lookup. Let it run once more with the populated snapshot.
+		if a.statusLine != nil && a.statusLine.Enabled() {
+			a.statusLineLastRun = time.Time{}
+			return a, a.renderStatusLine(false)
+		}
+		return a, nil
 
 	case statusLineMsg:
 		if msg.seq == a.statusLineInFlight {
@@ -795,6 +867,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if a.approval.Visible() {
 				a.approval.Hide()
 				a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "cancelled"})
+				a.showPendingApproval()
 			}
 			a.clearQueuedInputs()
 			return a, nil
@@ -806,9 +879,19 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.approval.Visible() {
 			a.approval.Hide()
 			a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "cancelled"})
+			a.showPendingApproval()
+			return a, nil
+		}
+		if !a.picker.Visible() && !a.jobsPanel.Visible() && !a.agentView.Visible() && !a.workflowView.Visible() && a.input.Value() != "" {
+			a.input.Reset()
+			a.autocomplete.Close()
 			return a, nil
 		}
 		return a, tea.Quit
+	case "ctrl+d":
+		if !a.streaming && !a.prompt.Visible() && !a.approval.Visible() && !a.picker.Visible() && !a.jobsPanel.Visible() && !a.agentView.Visible() && !a.workflowView.Visible() && a.input.Value() == "" {
+			return a, tea.Quit
+		}
 	case "ctrl+l":
 		return a.handleClearCommand(nil)
 	}
@@ -842,14 +925,30 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 	if a.agentView.Visible() {
-		// Agent View has its own task prompt. Typing focuses that prompt; Enter
-		// launches a background agent, while Enter on an empty prompt returns to
-		// the chat. Once text exists, editing keys belong to the textarea rather
-		// than moving the agent-list selection.
+		// Agent View has two explicit focus states. List focus owns navigation
+		// and row actions; n enters the task composer. This prevents printable
+		// shortcuts (p/c/i/x/o) from becoming accidental draft text.
+		if !a.agentDispatchFocused {
+			if msg.String() == "n" {
+				a.agentDispatchFocused = true
+				a.input.Reset()
+				a.input.Focus()
+				return a, nil
+			}
+			var cmd tea.Cmd
+			a.agentView, cmd = a.agentView.Update(msg)
+			if !a.agentView.Visible() {
+				a.agentDispatchFocused = false
+				a.input.Focus()
+			}
+			return a, cmd
+		}
+
 		if msg.String() == "enter" {
 			text := strings.TrimSpace(a.input.Value())
 			if text == "" {
-				a.agentView.Hide()
+				a.agentDispatchFocused = false
+				a.input.Blur()
 				return a, nil
 			}
 			a.input.Reset()
@@ -857,19 +956,18 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if a.jobs != nil {
 				a.agentView.Show(a.jobs.List())
 			}
+			a.agentDispatchFocused = false
+			a.input.Blur()
 			return model, cmd
 		}
-		if msg.String() == "esc" && a.input.Value() != "" {
+		if msg.String() == "esc" {
 			a.input.Reset()
+			a.agentDispatchFocused = false
+			a.input.Blur()
 			return a, nil
 		}
-		if a.input.Value() != "" || len(msg.Runes) > 0 {
-			var cmd tea.Cmd
-			a.input, cmd = a.input.Update(msg)
-			return a, cmd
-		}
 		var cmd tea.Cmd
-		a.agentView, cmd = a.agentView.Update(msg)
+		a.input, cmd = a.input.Update(msg)
 		return a, cmd
 	}
 	if a.workflowView.Visible() {
@@ -881,7 +979,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// advertises the shortcut in every permission-mode footer. Preserve normal
 	// cursor movement whenever the input contains text.
 	if msg.String() == "left" && a.jobs != nil && !a.streaming && a.input.Value() == "" {
-		a.agentView.Show(a.jobs.List())
+		a.showAgentView()
 		return a, nil
 	}
 	// Up/Down page through previously submitted prompts, shell-style — but
@@ -937,7 +1035,7 @@ func (a *App) refreshAutocomplete() {
 	}
 
 	// File-mention completer: the token ending at the caret is "@query".
-	start, query, ok := activeMentionToken(text)
+	start, end, query, ok := activeMentionTokenAtCursor(text, a.input.CursorByteOffset())
 	if !ok {
 		a.autocomplete.Close()
 		return
@@ -947,6 +1045,7 @@ func (a *App) refreshAutocomplete() {
 		a.fileIndexBuilt = true
 	}
 	a.mentionStart = start
+	a.mentionEnd = end
 	// Only swap the (potentially large) file list in when entering file
 	// mode; on subsequent keystrokes the entries are already loaded and we
 	// just re-filter.
@@ -991,7 +1090,7 @@ func (a *App) acceptAutocomplete(verb string) tea.Cmd {
 // buffer (the trailing space means the mention token is complete, so the
 // popup stays closed until the next "@").
 func (a *App) acceptMentionAutocomplete(path string) tea.Cmd {
-	a.input.ReplaceMention(a.mentionStart, len(a.input.Value()), path)
+	a.input.ReplaceMention(a.mentionStart, a.mentionEnd, path)
 	a.autocomplete.Close()
 	a.refreshAutocomplete()
 	return nil
@@ -1012,7 +1111,11 @@ func (a *App) View() string {
 	if a.agentView.Visible() {
 		// Agent View owns the screen's lifecycle summary and shortcut footer.
 		// Keep the input geometry but use its task-oriented placeholder.
-		in = a.input.ViewWithPlaceholder("describe a task for a new agent")
+		placeholder := "press n to describe a task for a new agent"
+		if a.agentDispatchFocused {
+			placeholder = "describe a task for a new agent"
+		}
+		in = a.input.ViewWithPlaceholder(placeholder)
 		status = ""
 	} else if a.workflowView.Visible() {
 		// Workflows are a full-screen navigator with their own footer.
@@ -1106,7 +1209,7 @@ func (a *App) refreshTopBar() {
 	}
 
 	root := a.deps.WorkingDir
-	a.topbar.SetProject(filepath.Base(root), git.Branch(root))
+	a.topbar.SetProject(filepath.Base(root), a.gitBranch)
 
 	// The ⚙ N jobs counter reflects StateQueued + StateRunning jobs. We
 	// pass 0 when no manager is wired so the segment stays hidden in
@@ -1134,7 +1237,8 @@ func (a *App) refreshTopBar() {
 	// operation timer current. An external [statusline].command, when set,
 	// owns the custom line instead (see renderStatusLine).
 	if a.statusLine == nil || !a.statusLine.Enabled() {
-		a.topbar.SetCustomLine(statusline.RenderDefault(a.statusLineSnapshot()))
+		contentWidth := a.width - 4 // topbar has two columns of padding per side
+		a.topbar.SetCustomLine(statusline.RenderDefaultWidth(a.statusLineSnapshot(), contentWidth))
 	}
 }
 
@@ -1164,7 +1268,7 @@ func (a *App) renderStatusLine(manual bool) tea.Cmd {
 func (a *App) statusLineSnapshot() statusline.Snapshot {
 	root := a.deps.WorkingDir
 	project := filepath.Base(root)
-	branch := git.Branch(root)
+	branch := a.gitBranch
 	var sessionID string
 	var used int
 	if cur := a.deps.Sessions.Current(); cur != nil {
@@ -1173,13 +1277,16 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 		// bar so the two gauges never disagree.
 		used = cur.TokenUsage.ContextTokens
 	}
-	var provSlug, provName, modelID string
+	var provSlug, provName, modelID, reasoningEffort string
 	var max int
 	if prov, activeModel := a.deps.Registry.Active(); prov != nil {
 		provSlug = prov.Slug()
 		provName = prov.Name()
 		modelID = activeModel
 		max = prov.ContextWindow(activeModel)
+		if controller, ok := prov.(provider.ReasoningEffortController); ok {
+			reasoningEffort = controller.ReasoningEffort(activeModel)
+		}
 	}
 	pct := 0
 	if max > 0 {
@@ -1206,7 +1313,7 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 		Project:       project,
 		GitBranch:     branch,
 		Provider:      statusline.ProviderInfo{Slug: provSlug, DisplayName: provName},
-		Model:         statusline.ModelInfo{ID: modelID},
+		Model:         statusline.ModelInfo{ID: modelID, ReasoningEffort: reasoningEffort},
 		ContextWindow: statusline.ContextInfo{Used: used, Max: max, UsedPercentage: pct},
 		Cost:          statusline.CostInfo{TotalCostUSD: totalCost},
 		Jobs:          statusline.JobsInfo{Active: activeJobs},
@@ -1218,6 +1325,31 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 		},
 		DurationSeconds: int(time.Since(a.startedAt).Seconds()),
 		Version:         a.deps.Version,
+	}
+}
+
+func (a *App) refreshGitBranch() tea.Cmd {
+	if a.gitBranchInFlight || (!a.gitBranchLastRun.IsZero() && time.Since(a.gitBranchLastRun) < gitBranchRefreshInterval) {
+		return nil
+	}
+	a.gitBranchInFlight = true
+	a.gitBranchLastRun = time.Now()
+	root := a.deps.WorkingDir
+	return func() tea.Msg {
+		return gitBranchMsg{branch: git.Branch(root)}
+	}
+}
+
+func (a *App) showPendingApproval() {
+	if a.approval.Visible() {
+		a.approval.SetQueueDepth(a.approver.QueueDepth())
+		return
+	}
+	if req, ok := a.approver.Pending(); ok {
+		a.autocomplete.Close()
+		a.approval.Show(req.Tool, req.ToolCall)
+		a.approval.SetWidth(a.width)
+		a.approval.SetQueueDepth(a.approver.QueueDepth())
 	}
 }
 
@@ -1264,7 +1396,14 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	a.cancelTurn = cancel
 	stream := a.agent.Run(ctx, turnText)
 
-	return a, tea.Batch(a.spinner.Start("Thinking…"), readAgentEvent(stream))
+	cmds := []tea.Cmd{a.spinner.Start("Thinking…"), readAgentEvent(stream)}
+	// Embedders and direct model tests may not wire tea.Program.Send. Keep a
+	// turn-scoped compatibility poll for them; the desktop/CLI path is entirely
+	// event-driven and does no idle approval redraws.
+	if a.sendMsg == nil {
+		cmds = append(cmds, pollApproverFallback())
+	}
+	return a, tea.Batch(cmds...)
 }
 
 func (a *App) shouldAutoCompact(text string) bool {
@@ -1770,6 +1909,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleProviderCommand(args)
 	case "model", "models":
 		return a.handleModelCommand(args)
+	case "effort":
+		return a.handleEffortCommand(args)
 	case "sessions":
 		return a.handleSessionsCommand(args)
 	case "queue":
@@ -1896,10 +2037,20 @@ func (a *App) handleAgentsCommand(args []string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	if len(args) == 0 {
-		a.agentView.Show(a.jobs.List())
+		a.showAgentView()
 		return a, nil
 	}
 	return a.openJobTranscript(args[0], "agent")
+}
+
+func (a *App) showAgentView() {
+	if a.jobs == nil {
+		return
+	}
+	a.agentDispatchFocused = false
+	a.input.Reset()
+	a.input.Blur()
+	a.agentView.Show(a.jobs.List())
 }
 
 func (a *App) handleAgentPeek(id string) (tea.Model, tea.Cmd) {
@@ -2230,14 +2381,14 @@ func (a *App) openModelPicker() tea.Cmd {
 	return a.picker.Open(loader)
 }
 
-func pollApprover() tea.Cmd {
-	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
-		return pollApproverMsg{}
-	})
-}
-
 func tickTopbar() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg {
 		return tickTopbarMsg{}
+	})
+}
+
+func pollApproverFallback() tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
+		return approvalPendingMsg{}
 	})
 }

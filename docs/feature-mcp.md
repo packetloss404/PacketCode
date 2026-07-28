@@ -10,6 +10,8 @@ For user configuration and diagnostics, see [MCP servers](mcp.md). This file rec
 - Provider name: `<sanitized-server>__<sanitized-tool>` with deterministic collision handling.
 - Logs: bounded/redacted display from `~/.packetcode/mcp-<name>.log`.
 - Failure isolation: one missing/crashed server does not prevent packetcode or other servers from running.
+- Recovery: `/mcp restart <name>` replaces one process and its tool adapters
+  without disturbing other configured servers.
 
 Server processes inherit a small launch-environment allowlist plus explicit `env` and named `env_from` variables. This limits accidental secret inheritance; it is not a sandbox.
 
@@ -22,7 +24,8 @@ Only tools are exposed. Prompts, resources, sampling, elicitation, roots, and no
 ## Current Limits
 
 - stdio only; no Streamable HTTP.
-- no hot reload or per-server restart.
+- no live configuration reload; restart uses the configuration loaded at
+  PacketCode startup.
 - no automatic reconnect after process death.
 - non-text result blocks are represented as omitted content.
 - MCP calls remain approval-gated unless the active policy/rule allows them.

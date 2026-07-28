@@ -311,7 +311,7 @@ func (m Model) groupCounts() (waiting, working, completed int) {
 }
 
 func (m Model) footerText() string {
-	parts := []string{"↑/↓ move", "p peek", "enter open"}
+	parts := []string{"↑/↓ move", "p peek", "enter open", "n new task"}
 	if job, ok := m.selectedJob(); ok {
 		if canCancel(job) {
 			parts = append(parts, "c cancel")
@@ -320,7 +320,7 @@ func (m Model) footerText() string {
 			parts = append(parts, "i inject", "x ignore")
 		}
 	}
-	parts = append(parts, "Esc return", "? shortcuts")
+	parts = append(parts, "Esc return")
 	return strings.Join(parts, " · ")
 }
 

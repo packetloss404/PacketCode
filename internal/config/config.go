@@ -49,17 +49,18 @@ type DefaultConfig struct {
 }
 
 type ProviderConfig struct {
-	Type           string                `toml:"type,omitempty"`
-	APIKey         string                `toml:"api_key"`
-	APIKeyEnv      string                `toml:"api_key_env,omitempty"`
-	APIKeyRequired *bool                 `toml:"api_key_required,omitempty"`
-	DefaultModel   string                `toml:"default_model"`
-	Host           string                `toml:"host,omitempty"` // Ollama only
-	BaseURL        string                `toml:"base_url,omitempty"`
-	DisplayName    string                `toml:"display_name,omitempty"`
-	BrandColor     string                `toml:"brand_color,omitempty"`
-	Headers        map[string]string     `toml:"headers,omitempty"`
-	Models         []ProviderModelConfig `toml:"models,omitempty"`
+	Type            string                `toml:"type,omitempty"`
+	APIKey          string                `toml:"api_key"`
+	APIKeyEnv       string                `toml:"api_key_env,omitempty"`
+	APIKeyRequired  *bool                 `toml:"api_key_required,omitempty"`
+	DefaultModel    string                `toml:"default_model"`
+	ReasoningEffort string                `toml:"reasoning_effort,omitempty"`
+	Host            string                `toml:"host,omitempty"` // Ollama only
+	BaseURL         string                `toml:"base_url,omitempty"`
+	DisplayName     string                `toml:"display_name,omitempty"`
+	BrandColor      string                `toml:"brand_color,omitempty"`
+	Headers         map[string]string     `toml:"headers,omitempty"`
+	Models          []ProviderModelConfig `toml:"models,omitempty"`
 
 	// Ollama-only tuning. All optional — omitted means packetcode's smart
 	// defaults (auto-sized context, 30m keep-alive, the model's own default

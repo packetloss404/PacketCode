@@ -62,6 +62,31 @@ func TestUIApproverRoutesDecisionToVisibleRequest(t *testing.T) {
 	}
 }
 
+func TestUIApproverNotifiesInsteadOfRequiringIdlePolling(t *testing.T) {
+	u := newUIApprover()
+	notified := make(chan struct{}, 1)
+	u.SetNotify(func() { notified <- struct{}{} })
+	decisions := make(chan agent.ApprovalDecision, 1)
+
+	go func() {
+		decisions <- u.Approve(context.Background(), approvalReq("event-driven"))
+	}()
+
+	select {
+	case <-notified:
+	case <-time.After(time.Second):
+		t.Fatal("approval did not notify the UI")
+	}
+	req := waitPendingApproval(t, u)
+	if req.ToolCall.ID != "event-driven" {
+		t.Fatalf("pending id = %q, want event-driven", req.ToolCall.ID)
+	}
+	u.Resolve(agent.ApprovalDecision{Approved: true})
+	if got := waitDecision(t, decisions); !got.Approved {
+		t.Fatalf("decision = %+v, want approved", got)
+	}
+}
+
 func TestUIApproverPermissionPolicyAllowAndDeny(t *testing.T) {
 	u := newUIApprover()
 	u.SetPermissionPolicy(permissions.DefaultPolicy().WithRule("test_tool", permissions.ActionDeny))

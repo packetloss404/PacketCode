@@ -8,7 +8,7 @@ Agent View is packetcode's full-screen workspace for background jobs. It uses th
 - Press Left Arrow from an empty, idle chat prompt.
 - Run `/agents <id>` to open one transcript directly.
 
-The bottom Agent View prompt accepts a task. Enter starts a read-only agent, Enter on an empty prompt returns to chat, and Esc clears a draft before closing the workspace.
+Agent View opens in list mode so row shortcuts cannot accidentally become prompt text. Press `n` to focus the bottom task composer, then Enter starts a read-only agent. Esc returns from the composer to the list; a second Esc closes the workspace.
 
 ## Layout and Controls
 
@@ -16,6 +16,7 @@ Jobs are grouped into Needs Input, Working, Completed, Failed, and Cancelled. Ro
 
 | Key | Action |
 | --- | --- |
+| `n` | Focus the new-agent task composer. |
 | Up/Down or `j`/`k` | Move. |
 | `p` | Peek at current/completed output. |
 | Enter or `o` | Open transcript. |

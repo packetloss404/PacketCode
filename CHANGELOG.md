@@ -15,9 +15,15 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Prompt history recall with draft restoration and multiline-aware Up/Down behavior.
 - Permission modes and footer: Manual, Accept Edits, Auto, Plan, and explicit Bypass Permissions.
 - `/plan`, `/loop`, and `/workflows`; workflows support ordered phases, single-agent steps, parallel fan-out, template bindings, cancellation, live inspection, and aggregate token boundaries.
+- Versioned structured stop decisions for self-paced `/loop`, retaining the
+  legacy sentinel and hard 25-iteration cap.
+- Per-server `/mcp restart <name>` recovery with safe dynamic tool-adapter
+  replacement.
 - Full-screen Agent workspace with grouped state, direct task entry, transcripts, peek, cancellation, explicit injection, and compact artifact manifests.
 - Per-job and per-workflow token budgets.
 - Deterministic credential-free TUI lifecycle fixtures and a PTY/cell capture harness for packetcode/Claude comparisons at fixed terminal sizes.
+- Runtime `/effort` control for Codex models, including catalog-advertised levels, persistent configuration, and a compact footer indicator.
+- A practical user manual, advanced operator guide, printable terminal cheat sheet, and self-contained offline HTML5 manual.
 
 ### Changed
 
@@ -31,6 +37,7 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Anthropic requests use ephemeral cache breakpoints for stable system and tool-schema prefixes and account for cache tokens explicitly.
 - High-frequency background-job activity snapshots are coalesced while queued/running/terminal transitions remain synchronous and recovery-safe.
 - Documentation was consolidated around current behavior; shipped `Round N` design specs are now concise implementation/user guides.
+- The built-in agent prompt now encourages parallel fan-out for independent work, while Agent View separates list shortcuts from its explicit `n` task composer.
 
 ### Fixed
 
@@ -41,6 +48,10 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Job persistence flushes pending snapshots on shutdown.
 - Symlink-escape scans and file-as-parent write errors behave consistently on macOS.
 - MCP JSON-RPC request IDs correctly handle every `int64` value.
+- Prompt editing now respects the caret for file mentions, supports portable multiline bindings, honors `max_input_rows`, keeps history navigation at visual-row boundaries, and clears a draft before Ctrl+C exits.
+- Terminal-originated text is sanitized before rendering, preventing tool output from enabling mouse modes, writing the clipboard, or corrupting the TUI; split UTF-8 and progress-line output remain intact.
+- Statuslines stay on one row at narrow widths, background transcripts refresh without losing scroll position, and reasoning activity is visible while an agent is thinking.
+- Git branch refreshes no longer block the Bubble Tea event loop, and approval prompts wake the UI on demand instead of forcing continuous idle redraws.
 
 ## [0.5.1] - 2026-05-30
 

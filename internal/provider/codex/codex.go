@@ -11,6 +11,8 @@ package codex
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -46,10 +48,12 @@ var brandColor = lipgloss.Color("#19C37D")
 
 // Provider implements provider.Provider for Codex subscription auth.
 type Provider struct {
-	store    *codexauth.Store
-	client   *responses.Client
-	authPath string
-	catalog  []cachedModel
+	store          *codexauth.Store
+	client         *responses.Client
+	authPath       string
+	mu             sync.RWMutex
+	catalog        []cachedModel
+	effortOverride string
 }
 
 // New constructs a Codex provider. authPath is the path to the Codex auth.json
@@ -86,12 +90,75 @@ func NewWithBaseURL(authPath, baseURL string) *Provider {
 // effortFor returns the reasoning effort to send for a model, using the Codex
 // CLI's per-model default from the cache when known.
 func (p *Provider) effortFor(model string) string {
+	return p.ReasoningEffort(model)
+}
+
+// ReasoningEffort returns the effective level for model: a supported user
+// override when set, otherwise the model's cache-advertised default.
+func (p *Provider) ReasoningEffort(model string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	for _, m := range p.catalog {
-		if m.Slug == model && m.DefaultEffort != "" {
+		if m.Slug != model {
+			continue
+		}
+		if p.effortOverride != "" && supportsReasoningEffort(m, p.effortOverride) {
+			return p.effortOverride
+		}
+		if m.DefaultEffort != "" {
 			return m.DefaultEffort
 		}
 	}
+	if p.effortOverride != "" {
+		return p.effortOverride
+	}
 	return defaultEffort
+}
+
+func (p *Provider) ReasoningEfforts(model string) []provider.ReasoningEffort {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, m := range p.catalog {
+		if m.Slug == model {
+			return append([]provider.ReasoningEffort(nil), m.SupportedEfforts...)
+		}
+	}
+	return nil
+}
+
+// SetReasoningEffort sets the provider-wide override used for the active
+// model. "default", "auto", or an empty value clears it.
+func (p *Provider) SetReasoningEffort(model, effort string) error {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "" || effort == "default" || effort == "auto" {
+		p.mu.Lock()
+		p.effortOverride = ""
+		p.mu.Unlock()
+		return nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, m := range p.catalog {
+		if m.Slug != model {
+			continue
+		}
+		if supportsReasoningEffort(m, effort) {
+			p.effortOverride = effort
+			return nil
+		}
+		return fmt.Errorf("reasoning effort %q is not supported by %s", effort, model)
+	}
+	return fmt.Errorf("cannot set reasoning effort for unknown model %q", model)
+}
+
+func supportsReasoningEffort(model cachedModel, effort string) bool {
+	for _, option := range model.SupportedEfforts {
+		if option.ID == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // summaryFor returns the reasoning.summary value to request for a model:
@@ -101,6 +168,8 @@ func (p *Provider) effortFor(model string) string {
 // harmlessly ignored by those that don't (the gpt-5.6 family). Unknown models
 // default to "auto".
 func (p *Provider) summaryFor(model string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	for _, m := range p.catalog {
 		if m.Slug == model {
 			if m.SummarySupported {
@@ -133,8 +202,11 @@ func (p *Provider) ValidateKey(_ context.Context, _ string) error {
 // endpoint for subscription auth. The cache is re-read each call so newly
 // available models appear without restarting packetcode.
 func (p *Provider) ListModels(_ context.Context) ([]provider.Model, error) {
-	p.catalog = loadCatalog(p.authPath)
-	return toProviderModels(p.catalog), nil
+	catalog := loadCatalog(p.authPath)
+	p.mu.Lock()
+	p.catalog = catalog
+	p.mu.Unlock()
+	return toProviderModels(catalog), nil
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
@@ -145,6 +217,8 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 func (p *Provider) Pricing(string) (float64, float64) { return 0, 0 }
 
 func (p *Provider) ContextWindow(modelID string) int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	for _, m := range p.catalog {
 		if m.Slug == modelID && m.Context > 0 {
 			return m.Context

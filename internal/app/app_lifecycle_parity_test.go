@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/ui/components/agentview"
 )
 
 func TestFirstVisibleProgressStopsThinkingSpinner(t *testing.T) {
@@ -47,7 +48,8 @@ func TestAgentWorkspaceTaskPromptCanClearReturnAndSpawn(t *testing.T) {
 	mgr := wireJobsManagerForSlashTest(t, r)
 	t.Cleanup(func() { mgr.Shutdown(2 * time.Second) })
 
-	r.app.agentView.Show(nil)
+	r.app.showAgentView()
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("audit code")})
 	if got := r.app.input.Value(); got != "audit code" {
 		t.Fatalf("agent task prompt = %q, want %q", got, "audit code")
@@ -60,6 +62,7 @@ func TestAgentWorkspaceTaskPromptCanClearReturnAndSpawn(t *testing.T) {
 		t.Fatal("Esc with a draft should leave Agent View open")
 	}
 
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("review fixtures")})
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := r.app.input.Value(); got != "" {
@@ -72,8 +75,27 @@ func TestAgentWorkspaceTaskPromptCanClearReturnAndSpawn(t *testing.T) {
 		t.Fatal("spawning from Agent View should keep the workspace open")
 	}
 
-	r.app.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if r.app.agentView.Visible() {
-		t.Fatal("Enter on an empty agent task prompt should return to chat")
+		t.Fatal("Esc from Agent View list should return to chat")
+	}
+}
+
+func TestAgentWorkspaceListActionsAreNotSwallowedByTaskInput(t *testing.T) {
+	r := newTestApp(t)
+	mgr := wireJobsManagerForSlashTest(t, r)
+	t.Cleanup(func() { mgr.Shutdown(2 * time.Second) })
+
+	_, _ = r.app.handleSpawnCommand([]string{"inspect the renderer"})
+	r.app.showAgentView()
+	_, cmd := r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	if got := r.app.input.Value(); got != "" {
+		t.Fatalf("list action leaked into task input: %q", got)
+	}
+	if cmd == nil {
+		t.Fatal("peek action did not emit a command")
+	}
+	if _, ok := cmd().(agentview.PeekMsg); !ok {
+		t.Fatalf("peek action emitted %T", cmd())
 	}
 }

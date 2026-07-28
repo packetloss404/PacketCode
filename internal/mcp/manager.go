@@ -143,6 +143,86 @@ func (m *Manager) Client(name string) (*Client, bool) {
 	return c, ok
 }
 
+// Restart replaces one configured server process without disturbing the rest
+// of the MCP fleet. The manager keeps its startup configuration immutable:
+// configuration file changes still take effect on the next PacketCode start,
+// while a crashed or unhealthy process can be reconnected immediately.
+//
+// The previous client is returned so the caller can remove tool adapters that
+// still point at it before registering tools from the replacement.
+func (m *Manager) Restart(ctx context.Context, name string) (StartupReport, *Client, *Client, error) {
+	var server *ServerConfig
+	for i := range m.cfg.Servers {
+		if m.cfg.Servers[i].Name == name {
+			copy := m.cfg.Servers[i]
+			server = &copy
+			break
+		}
+	}
+	if server == nil {
+		return StartupReport{}, nil, nil, fmt.Errorf("mcp: no configured server named %s", name)
+	}
+	if !server.Enabled {
+		return StartupReport{}, nil, nil, fmt.Errorf("mcp: server %s is disabled", name)
+	}
+
+	m.mu.Lock()
+	previous := m.clients[name]
+	delete(m.clients, name)
+	m.mu.Unlock()
+
+	if previous != nil {
+		if err := previous.Close(2 * time.Second); err != nil {
+			report := startupReportFor(*server, "failed", nil, fmt.Errorf("close previous process: %w", err))
+			m.replaceReport(report)
+			return report, nil, previous, fmt.Errorf("mcp restart %s: %w", name, err)
+		}
+	}
+
+	client, err := NewClient(ctx, *server, m.cfg.LogDir, m.cfg.ClientInfo)
+	if err != nil {
+		report := startupReportFor(*server, "failed", nil, err)
+		m.replaceReport(report)
+		return report, nil, previous, fmt.Errorf("mcp restart %s: %w", name, err)
+	}
+	report := startupReportFor(*server, "running", client, nil)
+	m.mu.Lock()
+	m.clients[name] = client
+	m.mu.Unlock()
+	m.replaceReport(report)
+	return report, client, previous, nil
+}
+
+func startupReportFor(sc ServerConfig, status string, client *Client, err error) StartupReport {
+	report := StartupReport{
+		Name:       sc.Name,
+		Status:     status,
+		Command:    renderServerCommand(sc),
+		TimeoutSec: effectiveTimeoutSec(sc),
+		Auth:       authSummary(sc),
+	}
+	if client != nil {
+		report.ToolCount = len(client.Tools())
+		report.PID = client.PID()
+	}
+	if err != nil {
+		report.Err = err.Error()
+	}
+	return report
+}
+
+func (m *Manager) replaceReport(report StartupReport) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.reports {
+		if m.reports[i].Name == report.Name {
+			m.reports[i] = report
+			return
+		}
+	}
+	m.reports = append(m.reports, report)
+}
+
 // Reports returns the cached StartupReport slice from Start, adjusted
 // for clients that have exited since startup. Returns a defensive copy.
 func (m *Manager) Reports() []StartupReport {

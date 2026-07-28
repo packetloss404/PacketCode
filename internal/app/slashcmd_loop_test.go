@@ -94,3 +94,38 @@ func TestLoopSelfPaced_CapsIterations(t *testing.T) {
 		t.Fatalf("loop should be removed at cap")
 	}
 }
+
+func TestLoopSelfPaced_StopsOnStructuredDecision(t *testing.T) {
+	r := newTestApp(t)
+	r.app.loops = map[string]*loopState{}
+	ls := &loopState{id: "loop1", mode: loopSelfPaced, body: "do a thing", maxIters: 25, iterations: 2}
+	r.app.loops["loop1"] = ls
+	r.app.activeLoopID = "loop1"
+	r.app.lastAgentText = `done
+<packetcode-loop-decision>{"version":1,"decision":"stop","reason":"tests pass"}</packetcode-loop-decision>`
+
+	if cmd := r.app.onLoopTurnDone(); cmd != nil {
+		t.Fatalf("expected structured stop to finish the loop")
+	}
+	if _, ok := r.app.loops["loop1"]; ok {
+		t.Fatalf("loop should be removed after structured stop")
+	}
+}
+
+func TestParseLoopDecision_RejectsMalformedOrUnknownVersions(t *testing.T) {
+	for _, text := range []string{
+		`<packetcode-loop-decision>not json</packetcode-loop-decision>`,
+		`<packetcode-loop-decision>{"version":2,"decision":"stop"}</packetcode-loop-decision>`,
+		`<packetcode-loop-decision>{"version":1,"decision":"maybe"}</packetcode-loop-decision>`,
+	} {
+		if _, _, ok := parseLoopDecision(text); ok {
+			t.Fatalf("unexpected valid decision for %q", text)
+		}
+	}
+	stop, _, ok := parseLoopDecision(
+		`<packetcode-loop-decision>{"version":1,"decision":"continue"}</packetcode-loop-decision>`,
+	)
+	if !ok || stop {
+		t.Fatalf("continue decision should be valid without stopping")
+	}
+}

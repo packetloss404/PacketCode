@@ -3,6 +3,7 @@ package app
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // mentionQueryValid matches a run of characters that are all inside the
@@ -26,15 +27,41 @@ var mentionQueryValid = regexp.MustCompile(`^[` + mentionCharClass + `]*$`)
 // start is the byte index of the "@" in textToCaret, so callers can splice
 // the accepted path back over [start, caret). query is the text after "@".
 func activeMentionToken(textToCaret string) (start int, query string, ok bool) {
+	start, _, query, ok = activeMentionTokenAtCursor(textToCaret, len(textToCaret))
+	return start, query, ok
+}
+
+// activeMentionTokenAtCursor is the caret-aware form used by the live input.
+// It finds the @token surrounding cursor, not merely the last token in the
+// whole buffer, and extends end through a path suffix to the right of the
+// caret. Accepting a completion can therefore replace the entire token while
+// preserving the rest of a multiline draft.
+func activeMentionTokenAtCursor(text string, cursor int) (start, end int, query string, ok bool) {
+	if cursor < 0 || cursor > len(text) {
+		return 0, 0, "", false
+	}
+	textToCaret := text[:cursor]
 	i := strings.LastIndexAny(textToCaret, " \t\n\r")
 	tokStart := i + 1
 	tok := textToCaret[tokStart:]
 	if !strings.HasPrefix(tok, "@") {
-		return 0, "", false
+		return 0, 0, "", false
 	}
-	query = tok[1:]
-	if !mentionQueryValid.MatchString(query) {
-		return 0, "", false
+	if !mentionQueryValid.MatchString(tok[1:]) {
+		return 0, 0, "", false
 	}
-	return tokStart, query, true
+
+	end = cursor
+	for end < len(text) {
+		r, size := utf8.DecodeRuneInString(text[end:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		if !mentionQueryValid.MatchString(string(r)) {
+			break
+		}
+		end += size
+	}
+	query = text[tokStart+1 : end]
+	return tokStart, end, query, true
 }

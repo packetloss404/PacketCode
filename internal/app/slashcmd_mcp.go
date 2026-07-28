@@ -1,16 +1,19 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/mcp"
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // tailLogLineCount is the number of trailing stderr log lines shown by
@@ -72,10 +75,46 @@ func (a *App) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 		a.conversation.AppendSystem(out)
 		return a, nil
+	case "restart":
+		if !mcpReportExists(a.mcp.Reports(), name) {
+			a.conversation.AppendSystem(fmt.Sprintf("mcp restart: no server named %s", name))
+			return a, nil
+		}
+		a.conversation.AppendSystem(fmt.Sprintf("mcp restart: reconnecting %s…", name))
+		manager := a.mcp
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			report, client, previous, err := manager.Restart(ctx, name)
+			return mcpRestartedMsg{
+				Name:     name,
+				Report:   report,
+				Client:   client,
+				Previous: previous,
+				Err:      err,
+			}
+		}
 	}
 	// Unreachable: parseMCPArgs rejects any other shape.
 	a.conversation.AppendSystem("mcp: unexpected subcommand")
 	return a, nil
+}
+
+func unregisterMCPClientTools(registry *tools.Registry, client *mcp.Client) {
+	if registry == nil || client == nil {
+		return
+	}
+	for _, serverTool := range client.Tools() {
+		alias := mcp.ToolAlias(client.Name(), serverTool.Name)
+		registered, ok := registry.Get(alias)
+		if !ok {
+			continue
+		}
+		adapter, ok := registered.(*mcp.McpTool)
+		if ok && adapter.ServerName() == client.Name() {
+			registry.Unregister(alias)
+		}
+	}
 }
 
 func mcpReportExists(reports []mcp.StartupReport, name string) bool {

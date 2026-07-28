@@ -18,6 +18,7 @@ func (a *App) handleClearCommand(_ []string) (tea.Model, tea.Cmd) {
 		fresh.SetVersion("v1")
 	}
 	a.conversation = fresh
-	// View() will size the viewport on the next render.
-	return a, nil
+	// Clear native terminal scrollback as well as the in-memory transcript.
+	// The live prompt/status region is repainted immediately by Bubble Tea.
+	return a, tea.ClearScreen
 }

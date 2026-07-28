@@ -20,6 +20,16 @@ Install without `sudo`:
 curl -fsSL https://raw.githubusercontent.com/packetloss404/packetcode/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
+Install the latest checksum-verified Windows release:
+
+```powershell
+& ([scriptblock]::Create((Invoke-WebRequest https://raw.githubusercontent.com/packetloss404/packetcode/main/install.ps1).Content))
+```
+
+The Windows installer defaults to
+`%LOCALAPPDATA%\Programs\PacketCode\bin` and does not silently modify `PATH`.
+PacketADE also checks that documented location.
+
 Build from source with Go 1.24.2 or newer:
 
 ```bash
@@ -35,7 +45,10 @@ go build -trimpath -ldflags "-s -w -X main.version=dev -X main.commit=$commit" -
 .\bin\packetcode.exe
 ```
 
-The first run asks for a provider, API key when required, and model, then writes `~/.packetcode/config.toml` with user-only permissions.
+The first run asks for a provider, API key when required, and model, then writes
+`~/.packetcode/config.toml` with user-only permissions. Set an absolute
+`PACKETCODE_HOME` to isolate all PacketCode configuration and state in another
+data directory.
 
 ## Providers
 
@@ -59,18 +72,19 @@ See [Providers and models](docs/providers.md) for authentication, model discover
 
 ## Terminal Workflow
 
-Type a prompt and press `Enter`; `Shift+Enter` inserts a newline. Finalized turns are committed to native terminal scrollback while the active response remains in a small live region.
+Type a prompt and press `Enter`; use `Ctrl+J`, `Alt+Enter`, or `\` then `Enter` for a portable newline. `Shift+Enter` also works in terminals that report it distinctly. Finalized turns are committed to native terminal scrollback while the active response remains in a small live region.
 
 | Key | Action |
 | --- | --- |
 | `Enter` | Send a prompt. |
-| `Shift+Enter` | Insert a newline. |
+| `Alt+Enter` / `\` then `Enter` | Insert a portable newline; `Ctrl+J` also does so while completion is closed. |
 | `Up` / `Down` | Recall prompt history at the first/last input line. |
 | `Shift+Tab` | Cycle Manual → Accept Edits → Auto → Plan, including during an active turn. |
 | `Left` on an empty idle prompt | Open Agent View. |
 | `Ctrl+P` | Open the provider picker. |
-| `Ctrl+M` | Open the model picker. |
-| `Ctrl+C` | Cancel the active turn or tool; press again while idle to quit. |
+| `/model` | Open the model picker; `Ctrl+M` also works when the terminal reports it distinctly. |
+| `Ctrl+C` | Cancel the active turn, clear a draft, or quit from an empty prompt. |
+| `Ctrl+D` | Quit from an empty prompt. |
 | `Ctrl+L` | Clear the visible transcript without deleting the session. |
 
 If a prompt is submitted during an active turn or compaction, packetcode queues it and runs it afterward. `/queue` lists queued prompts; `/queue drop <n>` and `/queue clear` manage them.
@@ -123,7 +137,10 @@ User workflows live in `~/.packetcode/workflows/*.toml`; project workflows live 
 /loop stop all
 ```
 
-Self-paced loops stop on `LOOP_DONE` or after 25 iterations. Interval loops run immediately, then on the requested interval; they queue rather than overlap an active foreground turn.
+Self-paced loops stop on a versioned `packetcode-loop-decision` block or the
+legacy `LOOP_DONE` sentinel, and always stop after 25 iterations. Interval
+loops run immediately, then on the requested interval; they queue rather than
+overlap an active foreground turn.
 
 See [Background agents](docs/feature-background-agents.md) and [Agent View](docs/feature-agent-view.md).
 
@@ -133,6 +150,7 @@ See [Background agents](docs/feature-background-agents.md) and [Agent View](docs
 | --- | --- |
 | `/provider [add [slug]\|slug]` | Open the provider picker, add/update a key, or switch. |
 | `/model [id]` | Open the model picker or switch models. |
+| `/effort [default\|low\|medium\|high\|xhigh\|max\|ultra]` | Show or set reasoning effort for models that expose it. |
 | `/spawn [--write] <prompt>` | Start a background agent. |
 | `/agents [id]` | Open Agent View or one transcript. |
 | `/jobs [id]` | List jobs or open one transcript. |
@@ -218,6 +236,10 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 
 ## Documentation
 
+- [User manual](docs/manual.md)
+- [Advanced guide](docs/advanced-guide.md)
+- [Terminal cheat sheet](docs/cheat-sheet.md)
+- [Offline HTML5 manual](docs/packetcode-manual.html)
 - [Getting started](docs/getting-started.md)
 - [Providers and models](docs/providers.md)
 - [Configuration reference](docs/configuration.md)

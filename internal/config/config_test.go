@@ -35,6 +35,10 @@ model = "gpt-4.1"
 api_key = "sk-test"
 default_model = "gpt-4.1"
 
+[providers.codex]
+default_model = "gpt-5.6-sol"
+reasoning_effort = "high"
+
 [providers.ollama]
 host = "http://localhost:11434"
 default_model = "qwen2.5-coder:14b"
@@ -80,6 +84,7 @@ command = "echo guard"
 	assert.Equal(t, "openai", cfg.Default.Provider)
 	assert.Equal(t, "gpt-4.1", cfg.Default.Model)
 	assert.Equal(t, "sk-test", cfg.Providers["openai"].APIKey)
+	assert.Equal(t, "high", cfg.Providers["codex"].ReasoningEffort)
 	assert.Equal(t, "http://localhost:11434", cfg.Providers["ollama"].Host)
 	assert.True(t, cfg.Behavior.TrustMode)
 	assert.Equal(t, 75, cfg.Behavior.AutoCompactThreshold)

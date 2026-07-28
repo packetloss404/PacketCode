@@ -53,6 +53,36 @@ type fakeProvider struct {
 	supportsTools bool
 }
 
+type effortProvider struct {
+	*fakeProvider
+	effort string
+}
+
+func (p *effortProvider) ReasoningEffort(string) string {
+	if p.effort == "" {
+		return "low"
+	}
+	return p.effort
+}
+
+func (p *effortProvider) ReasoningEfforts(string) []provider.ReasoningEffort {
+	return []provider.ReasoningEffort{{ID: "low"}, {ID: "high"}, {ID: "ultra"}}
+}
+
+func (p *effortProvider) SetReasoningEffort(_ string, effort string) error {
+	if effort == "default" || effort == "auto" || effort == "" {
+		p.effort = ""
+		return nil
+	}
+	for _, option := range p.ReasoningEfforts("") {
+		if option.ID == effort {
+			p.effort = effort
+			return nil
+		}
+	}
+	return errors.New("unsupported effort")
+}
+
 func (f *fakeProvider) Name() string                                  { return f.name }
 func (f *fakeProvider) Slug() string                                  { return f.slug }
 func (f *fakeProvider) BrandColor() lipgloss.Color                    { return lipgloss.Color("#000000") }
@@ -559,6 +589,34 @@ func TestApp_Model_Switch_SkipsValidationOnListError(t *testing.T) {
 	r.prov.listErr = errors.New("boom")
 	r.app.handleSlashCommand("model", []string{"gpt-definitely-fake"}, "/model gpt-definitely-fake")
 	convContains(t, r.app, "switched model: fake/gpt-definitely-fake")
+}
+
+func TestApp_EffortSetsAndResetsAdvertisedLevel(t *testing.T) {
+	r := newTestApp(t)
+	prov := &effortProvider{fakeProvider: r.prov}
+	reg := provider.NewRegistry()
+	reg.Register(prov)
+	if err := reg.SetActive("fake", "fake-model"); err != nil {
+		t.Fatalf("SetActive: %v", err)
+	}
+	r.app.deps.Registry = reg
+
+	r.app.handleSlashCommand("effort", []string{"ultra"}, "/effort ultra")
+	if got := prov.ReasoningEffort("fake-model"); got != "ultra" {
+		t.Fatalf("effort = %q, want ultra", got)
+	}
+	if got := r.cfg.Providers["fake"].ReasoningEffort; got != "ultra" {
+		t.Fatalf("persisted effort = %q, want ultra", got)
+	}
+	convContains(t, r.app, "reasoning effort: ultra")
+
+	r.app.handleSlashCommand("effort", []string{"default"}, "/effort default")
+	if got := prov.ReasoningEffort("fake-model"); got != "low" {
+		t.Fatalf("reset effort = %q, want low", got)
+	}
+	if got := r.cfg.Providers["fake"].ReasoningEffort; got != "" {
+		t.Fatalf("persisted reset effort = %q, want empty", got)
+	}
 }
 
 // ─── /sessions ─────────────────────────────────────────────────────────

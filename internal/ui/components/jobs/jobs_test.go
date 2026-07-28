@@ -173,3 +173,41 @@ func TestJobsPanel_ShowSessionRendersStickySessionHeader(t *testing.T) {
 	assert.Contains(t, out, "hello")
 	assert.Contains(t, out, "G newest")
 }
+
+func TestJobsPanel_RefreshJobFollowsOnlyFromBottom(t *testing.T) {
+	m := New()
+	m.Resize(80, 12)
+	msgs := make([]provider.Message, 0, 20)
+	for i := range 20 {
+		msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("line ", i+1)})
+	}
+	snap := fakeSnap()
+	m.Show(snap, msgs)
+	assert.True(t, m.vp.AtBottom())
+
+	msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, Content: "newest output"})
+	assert.True(t, m.RefreshJob(snap, msgs))
+	assert.True(t, m.vp.AtBottom(), "bottom-following viewer should stay at bottom")
+	assert.Contains(t, m.View(), "newest output")
+
+	m.vp.GotoTop()
+	before := m.vp.YOffset
+	msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, Content: "another update"})
+	assert.True(t, m.RefreshJob(snap, msgs))
+	assert.Equal(t, before, m.vp.YOffset, "refresh should not steal a reader's scroll position")
+}
+
+func TestJobsPanel_SanitizesTranscriptControlSequences(t *testing.T) {
+	m := New()
+	m.Resize(100, 20)
+	m.Show(fakeSnap(), []provider.Message{{
+		Role:    provider.RoleTool,
+		Name:    "execute_command",
+		Content: "safe\x1b[?1003h text\x1b]52;c;Y2xpcA==\x07done",
+	}})
+
+	out := m.View()
+	assert.Contains(t, out, "safe textdone")
+	assert.NotContains(t, out, "1003h")
+	assert.NotContains(t, out, "52;c")
+}

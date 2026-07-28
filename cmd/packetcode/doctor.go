@@ -21,13 +21,23 @@ import (
 )
 
 type doctorReport struct {
-	SchemaVersion int           `json:"schema_version"`
-	Status        string        `json:"status"`
-	Version       string        `json:"version"`
-	Commit        string        `json:"commit"`
-	Platform      string        `json:"platform"`
-	CWD           string        `json:"cwd"`
-	Checks        []doctorCheck `json:"checks"`
+	SchemaVersion   int                   `json:"schema_version"`
+	Status          string                `json:"status"`
+	Version         string                `json:"version"`
+	Commit          string                `json:"commit"`
+	Platform        string                `json:"platform"`
+	CWD             string                `json:"cwd"`
+	EffectiveHome   string                `json:"effective_home,omitempty"`
+	HomeSource      string                `json:"home_source,omitempty"`
+	ProviderSummary doctorProviderSummary `json:"provider_summary"`
+	Checks          []doctorCheck         `json:"checks"`
+}
+
+type doctorProviderSummary struct {
+	Configured int `json:"configured"`
+	Ready      int `json:"ready"`
+	Warning    int `json:"warning"`
+	Failed     int `json:"failed"`
 }
 
 type doctorCheck struct {
@@ -131,6 +141,7 @@ func filterDoctorReport(report doctorReport, filters []string) (doctorReport, er
 		}
 	}
 	out.Status = doctorOverallStatus(out.Checks)
+	out.ProviderSummary = summarizeDoctorProviders(out.Checks)
 	return out, nil
 }
 
@@ -158,6 +169,8 @@ func buildDoctorReport() doctorReport {
 	if homeErr != nil {
 		r.add("config.home", "config", doctorFail, "cannot resolve packetcode home", homeErr.Error(), "", "docs/configuration.md")
 	} else {
+		r.EffectiveHome = home
+		r.HomeSource = config.HomeSource()
 		status, detail := writableDirStatus(home)
 		r.add("config.home", "config", status, "packetcode home is writable", detail, "Fix filesystem permissions for "+home, "docs/configuration.md")
 	}
@@ -196,6 +209,7 @@ func buildDoctorReport() doctorReport {
 	addPermissionChecks(&r, cfg)
 	addAutomationChecks(&r, cfg)
 	r.Status = doctorOverallStatus(r.Checks)
+	r.ProviderSummary = summarizeDoctorProviders(r.Checks)
 	return r
 }
 
@@ -219,6 +233,17 @@ func renderDoctorReport(w io.Writer, r doctorReport) {
 	fmt.Fprintf(w, "version: %s (%s)\n", r.Version, r.Commit)
 	fmt.Fprintf(w, "platform: %s\n", r.Platform)
 	fmt.Fprintf(w, "cwd: %s\n", r.CWD)
+	if r.EffectiveHome != "" {
+		fmt.Fprintf(w, "home: %s (%s)\n", r.EffectiveHome, r.HomeSource)
+	}
+	fmt.Fprintf(
+		w,
+		"providers: %d configured, %d ready, %d warning, %d failed\n",
+		r.ProviderSummary.Configured,
+		r.ProviderSummary.Ready,
+		r.ProviderSummary.Warning,
+		r.ProviderSummary.Failed,
+	)
 	fmt.Fprintf(w, "status: %s\n", r.Status)
 
 	current := ""
@@ -424,7 +449,7 @@ func addDefaultProviderChecks(r *doctorReport, cfg *config.Config) {
 		}
 	}
 	if model == "" {
-		r.add("config.default_model", "config", doctorFail, "default model missing", active, "Run /model or set [default].model in ~/.packetcode/config.toml", "docs/configuration.md")
+		r.add("config.default_model", "config", doctorFail, "default model missing", active, "Run /model or set [default].model in "+doctorConfigPath(), "docs/configuration.md")
 		return
 	}
 	r.add("config.default_provider", "config", doctorOK, "default provider/model configured", active+" / "+model, "", "docs/configuration.md")
@@ -460,12 +485,43 @@ func providerCredentialSource(cfg *config.Config, slug string) (string, bool) {
 		return "env:" + envKey, true
 	}
 	if configured && pc.APIKey != "" {
-		return "config:~/.packetcode/config.toml", true
+		return "config:" + doctorConfigPath(), true
 	}
 	if configured || cfg.Default.Provider == slug {
 		return "missing", true
 	}
 	return "", false
+}
+
+func doctorConfigPath() string {
+	home, err := config.ResolveHomeDir()
+	if err != nil {
+		return "config.toml"
+	}
+	return filepath.Join(home, "config.toml")
+}
+
+func summarizeDoctorProviders(checks []doctorCheck) doctorProviderSummary {
+	var summary doctorProviderSummary
+	for _, check := range checks {
+		parts := strings.Split(check.ID, ".")
+		if check.Section != "providers" || len(parts) != 2 || parts[0] != "providers" {
+			continue
+		}
+		if parts[1] == "none" || parts[1] == "config" {
+			continue
+		}
+		summary.Configured++
+		switch check.Status {
+		case doctorOK:
+			summary.Ready++
+		case doctorWarn:
+			summary.Warning++
+		case doctorFail:
+			summary.Failed++
+		}
+	}
+	return summary
 }
 
 func validateProviderBaseURL(raw string) error {

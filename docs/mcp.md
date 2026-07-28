@@ -162,16 +162,20 @@ The display path reads only a bounded tail and redacts common secret
 patterns before rendering. Use this when a server fails the handshake;
 a lot of servers print diagnostics to stderr before exiting.
 
+**`/mcp restart <name>`** — close and reconnect one configured server,
+refreshing its registered tool adapters while leaving the rest of the fleet
+running. Restart uses the configuration loaded at PacketCode startup; restart
+PacketCode itself after changing `config.toml`.
+
 ---
 
 ## Known limits
 
 - **No hot-reload.** Add or change a `[mcp.<name>]` block and you need
   to restart packetcode for it to take effect.
-- **No `/mcp restart <name>`.** If a server
-  crashes mid-session, every call to its tools returns a friendly
-  "restart packetcode to reconnect" error; native tools and other
-  MCP servers keep working.
+- **No automatic reconnect.** If a server crashes mid-session, calls to its
+  tools return a friendly `/mcp restart <name>` recovery instruction; native
+  tools and other MCP servers keep working.
 - **stdio transport only.** HTTP+SSE, WebSocket, StreamableHTTP
   remotes are deferred.
 - **No MCP prompts, resources, sampling, elicitation, logging, or

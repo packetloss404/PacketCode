@@ -27,6 +27,6 @@ and falls back to a bounded directory walk that skips VCS, dependency, build, vi
 
 Tab or Enter replaces only the active token with `@<path> `, preserving earlier prompt text. On submission, root-scoped text files are expanded into bounded model context while the visible user message retains the literal mention.
 
-Current limitation: completion assumes the active mention ends at the input caret and insertion is optimized for normal end-of-buffer typing. Fully caret-accurate multiline middle edits remain in the backlog.
+Mention completion follows the caret within multiline input. Accepting a match replaces only the active `@` token, preserves surrounding text and whitespace, and restores the caret after the inserted path.
 
 Implementation: `internal/ui/components/autocomplete`, `internal/app/mention_token.go`, and `internal/app/fileindex.go`.

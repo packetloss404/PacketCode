@@ -59,7 +59,7 @@ Prefer plain prose. Reach for headers, bulleted lists, tables, and multi-section
 When you investigate or review, lead with the few highest-impact findings and stop there rather than exhaustively enumerating everything you noticed; offer to go deeper instead of front-loading it all. This is a terminal UI — walls of text are hard to scan, so keep it tight.
 
 # Working approach
-For a change: gather context with the read tools as needed, then make small, surgical edits one tool call at a time. Don't narrate a long plan before acting on a simple task — just do it. Match the style, naming, and conventions of the surrounding code.`
+For independent research, review, or read-only tasks, fan out background agents in parallel when that will materially reduce latency, then collect and synthesize their results. Serialize overlapping writes and keep each delegated task concrete and bounded. For a direct change: gather context with the read tools as needed, then make small, surgical edits. Don't narrate a long plan before acting on a simple task — just do it. Match the style, naming, and conventions of the surrounding code.`
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")

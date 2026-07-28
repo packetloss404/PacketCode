@@ -2,6 +2,19 @@
 
 packetcode reads `~/.packetcode/config.toml`. The file is written atomically with user-only permissions.
 
+Set `PACKETCODE_HOME` to an absolute directory to relocate the complete
+PacketCode data home, including configuration, sessions, background-job state,
+worktrees, commands, themes, logs, and cost tallies. It is a PacketCode-specific
+data override and does not replace the process `HOME`.
+
+```powershell
+$env:PACKETCODE_HOME = "D:\PacketCodeData"
+packetcode doctor --json
+```
+
+`doctor` reports both `effective_home` and `home_source`, so launchers can verify
+that the requested isolation is actually active.
+
 ## Full Example
 
 ```toml
@@ -11,6 +24,7 @@ model = "gpt-5.6-sol"
 
 [providers.codex]
 default_model = "gpt-5.6-sol"
+reasoning_effort = "high" # optional; low, medium, high, xhigh, max, or ultra
 
 [providers.anthropic]
 api_key = "sk-ant-..."

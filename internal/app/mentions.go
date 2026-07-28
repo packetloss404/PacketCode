@@ -122,7 +122,7 @@ func readMention(raw, root string) (rel, content string, ok bool) {
 	if truncated {
 		text += "\n… [truncated]"
 	}
-	return relToRoot, text, true
+	return filepath.ToSlash(relToRoot), text, true
 }
 
 // isBinary reports whether data looks non-text (contains a NUL in the first

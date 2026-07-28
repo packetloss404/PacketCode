@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
@@ -130,7 +131,15 @@ func (m Model) View() string {
 		width = 80
 	}
 	if m.customLine != "" {
-		return theme.StyleTopBar.Width(width).Render(m.customLine)
+		// A statusline is a single-row anchor. Bound external/custom output too
+		// so one long value cannot wrap and make the prompt jump vertically.
+		line := strings.SplitN(m.customLine, "\n", 2)[0]
+		contentWidth := width - 4
+		if contentWidth < 1 {
+			contentWidth = 1
+		}
+		line = ansi.Truncate(line, contentWidth, "…")
+		return theme.StyleTopBar.Width(width).Render(line)
 	}
 
 	brand := theme.LabelBadge("⚡ packetcode", theme.AccentPrimary)

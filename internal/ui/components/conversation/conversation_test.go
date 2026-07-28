@@ -169,6 +169,34 @@ func TestAppendToolOutput_TailBounded(t *testing.T) {
 	assert.Contains(t, m.pending.LiveOutput, "TAILMARKER")
 }
 
+func TestToolOutputCannotEmitTerminalControlSequences(t *testing.T) {
+	m := New()
+	m.Resize(100, 40)
+	m.AppendToolCallWithID("execute_command", `{"command":"unsafe"}`, "call-1")
+	m.AppendToolOutput("call-1", "safe\x1b[?10")
+	m.AppendToolOutput("call-1", "03htext\x1b]52;c;Y2xpcA==\x07done")
+
+	out := stripANSI(m.PendingView())
+	assert.Contains(t, out, "safetextdone")
+	assert.NotContains(t, out, "1003h")
+	assert.NotContains(t, out, "52;c")
+
+	m.CompleteToolCall("execute_command", tools.ToolResult{Content: "ok\x1b[?1003h still safe"})
+	assert.NotContains(t, stripANSI(m.View()), "1003h")
+}
+
+func TestLiveToolOutputNormalizesCarriageReturnProgress(t *testing.T) {
+	m := New()
+	m.Resize(100, 40)
+	m.AppendToolCallWithID("execute_command", `{"command":"progress"}`, "call-1")
+	m.AppendToolOutput("call-1", "10%\r")
+	m.AppendToolOutput("call-1", "20%\r\n")
+
+	out := stripANSI(m.PendingView())
+	assert.NotContains(t, out, "10%")
+	assert.Contains(t, out, "20%")
+}
+
 // TestTryRenderDiff_NoMarkerReturnsFalse covers the "result has no
 // diff header" fast path.
 func TestTryRenderDiff_NoMarkerReturnsFalse(t *testing.T) {

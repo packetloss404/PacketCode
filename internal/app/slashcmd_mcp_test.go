@@ -51,10 +51,10 @@ func TestParseSlashCommand_MCP(t *testing.T) {
 			t.Fatalf("parseMCPArgs tools = %q %q %v", sub, name, err)
 		}
 	})
-	t.Run("restart defers", func(t *testing.T) {
-		_, _, err := parseMCPArgs([]string{"restart", "foo"})
-		if err == nil {
-			t.Fatalf("expected error for /mcp restart (Round 8)")
+	t.Run("restart with name", func(t *testing.T) {
+		sub, name, err := parseMCPArgs([]string{"restart", "foo"})
+		if err != nil || sub != "restart" || name != "foo" {
+			t.Fatalf("parseMCPArgs restart = %q %q %v", sub, name, err)
 		}
 	})
 	t.Run("unknown sub", func(t *testing.T) {
@@ -258,7 +258,7 @@ func TestReadLastLines_BoundsLargeLogs(t *testing.T) {
 // command without reading the spec.
 func TestSlashHelp_IncludesMCP(t *testing.T) {
 	got := renderHelp()
-	for _, want := range []string{"/mcp", "/mcp status <name>", "/mcp tools <name>", "/mcp logs <name>"} {
+	for _, want := range []string{"/mcp", "/mcp status <name>", "/mcp tools <name>", "/mcp logs <name>", "/mcp restart <name>"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help missing %q; got:\n%s", want, got)
 		}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/ui/terminaltext"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
@@ -83,6 +84,29 @@ func (m *Model) Hide() { m.visible = false }
 // Visible reports whether the panel is currently on-screen. Used by
 // the App to gate overlay precedence and message routing.
 func (m Model) Visible() bool { return m.visible }
+
+// JobID returns the job shown by the live transcript panel. Session mode has
+// no job id and returns an empty string.
+func (m Model) JobID() string {
+	if m.mode != "job" {
+		return ""
+	}
+	return m.snap.ID
+}
+
+// RefreshJob replaces a visible job transcript without stealing the user's
+// scroll position. A viewer already following the bottom keeps following;
+// someone reading earlier output stays where they are.
+func (m *Model) RefreshJob(snap jobs.Snapshot, msgs []provider.Message) bool {
+	if !m.visible || m.mode != "job" || m.snap.ID != snap.ID {
+		return false
+	}
+	follow := m.vp.AtBottom()
+	m.snap = snap
+	m.msgs = append([]provider.Message(nil), msgs...)
+	m.refreshContent(follow)
+	return true
+}
 
 // Resize updates the outer frame dimensions. Called by App.resize when
 // the terminal is resized. The inner viewport sizes itself against
@@ -249,6 +273,10 @@ func (m Model) renderFooter() string {
 // refresh re-renders the transcript into the inner viewport. Called
 // from Show and Resize.
 func (m *Model) refresh() {
+	m.refreshContent(true)
+}
+
+func (m *Model) refreshContent(followBottom bool) {
 	if m.vp.Width <= 0 {
 		return
 	}
@@ -274,7 +302,9 @@ func (m *Model) refresh() {
 		b.WriteString(theme.StyleDim.Render("(no messages yet)"))
 	}
 	m.vp.SetContent(b.String())
-	m.vp.GotoBottom()
+	if followBottom {
+		m.vp.GotoBottom()
+	}
 }
 
 // renderMessage formats a single provider.Message for the modal body.
@@ -284,9 +314,9 @@ func (m *Model) refresh() {
 func renderMessage(msg provider.Message, width int) string {
 	switch msg.Role {
 	case provider.RoleUser:
-		return renderBubble("user", theme.AccentPrimary, msg.Content, theme.StyleUserMessage, width)
+		return renderBubble("user", theme.AccentPrimary, terminaltext.Clean(msg.Content), theme.StyleUserMessage, width)
 	case provider.RoleAssistant:
-		content := strings.TrimSpace(msg.Content)
+		content := strings.TrimSpace(terminaltext.Clean(msg.Content))
 		if content == "" && len(msg.ToolCalls) > 0 {
 			names := make([]string, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
@@ -303,17 +333,17 @@ func renderMessage(msg provider.Message, width int) string {
 			name = "tool"
 		}
 		head := theme.StyleDim.Render(fmt.Sprintf("[tool:%s]", name))
-		body := strings.TrimSpace(msg.Content)
+		body := strings.TrimSpace(terminaltext.Clean(msg.Content))
 		if body == "" {
 			return head
 		}
 		return head + "\n" + theme.StyleDim.Render(body)
 	case provider.RoleSystem:
-		return theme.StyleSystemMessage.Render(msg.Content)
+		return theme.StyleSystemMessage.Render(terminaltext.Clean(msg.Content))
 	}
 	// Unknown role: render the content as secondary text so we never
 	// drop it silently.
-	return theme.StyleSecondary.Render(msg.Content)
+	return theme.StyleSecondary.Render(terminaltext.Clean(msg.Content))
 }
 
 // renderBubble mirrors conversation.renderBubble so the transcript

@@ -27,6 +27,7 @@ import (
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/diff"
 	"github.com/packetcode/packetcode/internal/ui/components/welcome"
+	"github.com/packetcode/packetcode/internal/ui/terminaltext"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 
@@ -74,6 +75,7 @@ type Message struct {
 	// at which point LiveOutput is discarded so the committed result is the
 	// single rendered copy (no duplication).
 	LiveOutput string
+	liveSafe   *terminaltext.Sanitizer
 }
 
 // maxLiveOutput bounds the streamed-preview buffer held in the pending
@@ -254,10 +256,11 @@ func (m *Model) AppendToolOutput(callID, chunk string) bool {
 		// strictly by id.
 		m.pending.ToolCallID = callID
 	}
-	m.pending.LiveOutput += chunk
-	if len(m.pending.LiveOutput) > maxLiveOutput {
-		m.pending.LiveOutput = m.pending.LiveOutput[len(m.pending.LiveOutput)-maxLiveOutput:]
+	if m.pending.liveSafe == nil {
+		m.pending.liveSafe = terminaltext.New(maxLiveOutput)
 	}
+	m.pending.liveSafe.Append(chunk)
+	m.pending.LiveOutput = m.pending.liveSafe.String()
 	return true
 }
 
@@ -268,7 +271,7 @@ func (m *Model) CompleteToolCall(toolName string, res tools.ToolResult) {
 	if m.pending == nil || m.pending.Kind != KindToolCall || m.pending.ToolName != toolName {
 		return
 	}
-	m.pending.ToolResult = res.Content
+	m.pending.ToolResult = terminaltext.Clean(res.Content)
 	m.pending.IsError = res.IsError
 	// Drop the streamed preview: the committed ToolResult is the single
 	// authoritative copy. renderToolCall prefers ToolResult over
@@ -375,16 +378,16 @@ func renderMessage(msg Message, width int) string {
 	case KindUser:
 		// Flat "❯ text" — no bordered box (Claude Code style).
 		if msg.Queued {
-			return flatBlock("❯", theme.TextDim, theme.StyleDim.Render(msg.Content+"  (queued)"), width)
+			return flatBlock("❯", theme.TextDim, theme.StyleDim.Render(terminaltext.Clean(msg.Content)+"  (queued)"), width)
 		}
-		return flatBlock("❯", theme.AccentPrimary, theme.StylePrimary.Render(msg.Content), width)
+		return flatBlock("❯", theme.AccentPrimary, theme.StylePrimary.Render(terminaltext.Clean(msg.Content)), width)
 	case KindAgent:
 		out := ""
 		if strings.TrimSpace(msg.Reasoning) != "" {
-			out = flatBlock("✻", theme.TextDim, theme.StyleDim.Italic(true).Render("Thinking… "+strings.TrimRight(msg.Reasoning, "\n")), width)
+			out = flatBlock("✻", theme.TextDim, theme.StyleDim.Italic(true).Render("Thinking… "+strings.TrimRight(terminaltext.Clean(msg.Reasoning), "\n")), width)
 		}
 		if strings.TrimSpace(msg.Content) != "" {
-			answer := flatBlock("⏺", msg.Color, msg.Content, width)
+			answer := flatBlock("⏺", msg.Color, terminaltext.Clean(msg.Content), width)
 			if out != "" {
 				out += "\n" + answer
 			} else {
@@ -397,12 +400,12 @@ func renderMessage(msg Message, width int) string {
 			return ""
 		}
 		// Dim, prefixed, no box.
-		return flatBlock("·", theme.TextDim, theme.StyleDim.Render(msg.Content), width)
+		return flatBlock("·", theme.TextDim, theme.StyleDim.Render(terminaltext.Clean(msg.Content)), width)
 	case KindError:
 		if msg.Content == "" {
 			return ""
 		}
-		return flatBlock("⏺", theme.Error, theme.StyleError.Render(msg.Content), width)
+		return flatBlock("⏺", theme.Error, theme.StyleError.Render(terminaltext.Clean(msg.Content)), width)
 	case KindToolCall:
 		return renderToolCall(msg, width)
 	}
@@ -506,7 +509,7 @@ func toolDisplay(name, args string) string {
 	if detail == "" {
 		return display
 	}
-	return display + theme.StyleDim.Render("("+truncate(detail, 120)+")")
+	return terminaltext.Clean(display) + theme.StyleDim.Render("("+truncate(terminaltext.Clean(detail), 120)+")")
 }
 
 func renderToolResultBody(msg Message, width int) string {

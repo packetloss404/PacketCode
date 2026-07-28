@@ -160,16 +160,22 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent.AgentEvent, sess *session.Manager) {
 	var lastAssistantText strings.Builder
 	var inflightAssistant strings.Builder
+	var inflightReasoning strings.Builder
 	var artifacts []Artifact
 	var lastErr error
 	var sawDone bool
 
 	for ev := range events {
 		switch ev.Type {
+		case agent.EventReasoningDelta:
+			inflightReasoning.WriteString(ev.Text)
+			m.updateActivity(j, "thinking", summarise(inflightReasoning.String()), false, false)
 		case agent.EventTextDelta:
+			inflightReasoning.Reset()
 			inflightAssistant.WriteString(ev.Text)
 			m.updateActivity(j, "responding", inflightAssistant.String(), false, false)
 		case agent.EventToolCallProposed:
+			inflightReasoning.Reset()
 			needsApproval := j.AllowWrite
 			activity := "tool proposed"
 			if needsApproval {

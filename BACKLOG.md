@@ -14,12 +14,12 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 ## TUI and Interaction Parity
 
-- Add caret-accurate `@` completion and insertion for tokens edited in the middle of multiline input.
 - Add transcript search/filter and a compact jump-to-latest affordance.
 - Add queue reorder/edit controls; list, drop, and clear already ship.
 - Improve visibility when cancellation is draining a provider or child process that has not exited yet.
 - Add terminal-width golden coverage below 80 columns and for very tall approval/tool blocks.
 - Continue comparing lifecycle states against Claude Code while preserving packetcode provider colors and multi-provider controls.
+- Evaluate Bubble Tea v2 migration for enhanced keyboard reporting (including true Shift+Enter where supported) and synchronized-output rendering.
 
 ## Context and Cost Efficiency
 
@@ -33,7 +33,6 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 - Add workflow pipeline stages and adversarial verification/retry policies.
 - Add a workflow schema/version field, validation command, and example library.
-- Replace self-paced `/loop`'s `LOOP_DONE` convention with an optional structured stop decision while retaining a hard iteration cap.
 - Resume or reconcile active background jobs after process restart; current persistence records state and recovers abandoned jobs as cancelled.
 - Let background agents request user clarification through Agent View.
 - Add optional live sub-agent transcript streaming without injecting it into foreground model context.
@@ -41,7 +40,6 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 ## MCP and Extensions
 
-- Restart/reconnect individual MCP servers without restarting packetcode.
 - Support Streamable HTTP MCP transport with explicit network and credential policy.
 - Add MCP resources/prompts only after their context and trust model is defined.
 - Add a declarative pack manifest and install/list/enable workflow for prompt commands, MCP, hooks, themes, and workflows.
@@ -82,3 +80,22 @@ See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md).
 - Add audit events for live permission-mode changes and remembered approvals.
 - Keep Bypass Permissions explicit, visible, outside the normal Shift+Tab cycle, and subordinate to deny rules.
 - Treat remote/browser/desktop content as untrusted evidence rather than instructions.
+
+## PacketADE Integration and BridgeCode-Plus
+
+Approved 2026-07-27. The cross-repository source of truth is
+`D:\projects\PacketADE\dev\bridgemind\packetcode-bridgecode-loop.md` (PC1–PC10).
+The evidence audit and bounded follow-up ledger are
+[`docs/bridgecode-feature-truth-2026-07-27.md`](docs/bridgecode-feature-truth-2026-07-27.md)
+and
+[`docs/bridgecode-plus-hardening-loop-2026-07-27.md`](docs/bridgecode-plus-hardening-loop-2026-07-27.md).
+
+- Add a versioned workflow schema plus explicit, bounded verifier/retry stages.
+- Add honest abandoned-job reconcile/resubmit assistance without claiming the
+  previous process resumed.
+- Complete the signed clean-machine release matrix and packaged PacketADE
+  compatibility gates when published artifacts/runners exist.
+- Consume PacketAgent's versioned durable-handoff contract when that sibling
+  runtime publishes it; do not create a competing PacketCode daemon contract.
+- Preserve PacketCode as an independently installable product; durable execution
+  after its originating app closes belongs to PacketAgent.

@@ -45,3 +45,12 @@ type Provider interface {
 	// tool definitions and may warn the model that tools are unavailable.
 	SupportsTools(modelID string) bool
 }
+
+// ReasoningEffortController is an optional provider capability. The App uses
+// it for /effort without widening the base Provider contract for backends that
+// do not expose reasoning controls.
+type ReasoningEffortController interface {
+	ReasoningEffort(modelID string) string
+	ReasoningEfforts(modelID string) []ReasoningEffort
+	SetReasoningEffort(modelID, effort string) error
+}

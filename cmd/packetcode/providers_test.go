@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 func TestProviderFactoriesFromConfig_AddsCustomOpenAICompatibleProvider(t *testing.T) {
@@ -55,4 +56,17 @@ func TestProviderFactoriesFromConfig_DoesNotOverrideBuiltInSlug(t *testing.T) {
 	assert.Equal(t, "openai", prov.Slug())
 	assert.Equal(t, "OpenAI", prov.Name())
 	assert.True(t, providerRequiresAPIKey(cfg, "openai"))
+}
+
+func TestProviderFactoriesFromConfig_AppliesCodexReasoningEffort(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["codex"] = config.ProviderConfig{
+		DefaultModel:    "gpt-5.6-sol",
+		ReasoningEffort: "high",
+	}
+
+	prov := providerFactoriesFromConfig(cfg)["codex"]("")
+	controller, ok := prov.(provider.ReasoningEffortController)
+	require.True(t, ok)
+	assert.Equal(t, "high", controller.ReasoningEffort("gpt-5.6-sol"))
 }

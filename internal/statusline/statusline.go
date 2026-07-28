@@ -47,8 +47,9 @@ type ProviderInfo struct {
 }
 
 type ModelInfo struct {
-	ID          string `json:"id,omitempty"`
-	DisplayName string `json:"display_name,omitempty"`
+	ID              string `json:"id,omitempty"`
+	DisplayName     string `json:"display_name,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type ContextInfo struct {
@@ -81,9 +82,10 @@ func (m ModelInfo) MarshalJSON() ([]byte, error) {
 		display = m.ID
 	}
 	return json.Marshal(struct {
-		ID          string `json:"id,omitempty"`
-		DisplayName string `json:"display_name,omitempty"`
-	}{ID: m.ID, DisplayName: display})
+		ID              string `json:"id,omitempty"`
+		DisplayName     string `json:"display_name,omitempty"`
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	}{ID: m.ID, DisplayName: display, ReasoningEffort: m.ReasoningEffort})
 }
 
 // MarshalJSON adds the Claude Code `context_window_size` and `current_usage`

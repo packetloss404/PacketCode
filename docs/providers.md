@@ -49,6 +49,9 @@ in the picker, and `packetcode doctor` reports the credential source as the
   account can use — e.g. `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.5`.
   Each model is sent its Codex-default reasoning effort. If the cache is
   missing, a built-in fallback list is used.
+- `/effort` shows the active model's advertised reasoning levels;
+  `/effort high` (or `max`/`ultra` when offered) changes and persists the
+  level, while `/effort default` returns to the model's catalog default.
 - Cost is reported as `$0` because a subscription bills a flat rate rather than
   per token. Your ChatGPT plan's usage limits still apply.
 
@@ -113,7 +116,7 @@ converted to `_`; set `api_key_env` to use a different variable.
 | Open provider picker | `Ctrl+P` or `/provider` |
 | Add/update provider key | `Ctrl+P` then `Ctrl+A`, `/provider add`, or `/provider add <slug>` |
 | Switch directly | `/provider <slug>` |
-| Open model picker | `Ctrl+M` or `/model` |
+| Open model picker | `/model`; `Ctrl+M` when the terminal reports it distinctly |
 | Switch model directly | `/model <id>` |
 
 When switching providers, packetcode uses that provider's saved `default_model`. If no default model is saved, it falls back to the first model returned by the provider's model list. The chosen provider/model is persisted as the new default.

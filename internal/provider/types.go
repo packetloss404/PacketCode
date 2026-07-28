@@ -34,6 +34,12 @@ type Model struct {
 	OutputPer1M   float64
 }
 
+// ReasoningEffort describes one provider-advertised reasoning level.
+type ReasoningEffort struct {
+	ID          string
+	Description string
+}
+
 // Message is the unified chat message format. Tool calls and tool responses
 // share this struct: assistant messages may carry ToolCalls; tool messages
 // carry ToolCallID + Name + textual Content.

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -131,6 +132,16 @@ func TestTopbar_CustomLineOverridesBuiltInSegments(t *testing.T) {
 	out := m.View()
 	assert.Contains(t, out, "custom status")
 	assert.NotContains(t, out, "OpenAI")
+}
+
+func TestTopbar_CustomLineNeverWraps(t *testing.T) {
+	m := New()
+	m.SetWidth(40)
+	m.SetCustomLine("a very long custom statusline that must remain on one terminal row")
+
+	out := m.View()
+	assert.NotContains(t, out, "\n")
+	assert.LessOrEqual(t, lipgloss.Width(out), 40)
 }
 
 func TestTopbar_OperationShowsElapsedAndQueuedInputs(t *testing.T) {

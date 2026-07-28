@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,17 @@ const (
 // loopDoneSentinel, when present in a self-paced loop's final assistant message,
 // stops the loop. The body prompt is augmented to tell the model about it.
 const loopDoneSentinel = "LOOP_DONE"
+
+const (
+	loopDecisionOpen  = "<packetcode-loop-decision>"
+	loopDecisionClose = "</packetcode-loop-decision>"
+)
+
+type loopDecision struct {
+	Version  int    `json:"version"`
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
 
 // selfPacedMaxIters caps self-paced loops so a model that never emits the
 // sentinel can't run forever.
@@ -133,7 +145,7 @@ func (a *App) runLoopBody(ls *loopState) tea.Cmd {
 	turnText := body
 	if ls.mode == loopSelfPaced {
 		a.activeLoopID = ls.id
-		turnText = body + "\n\n[Loop iteration " + fmt.Sprint(ls.iterations) + ". If the task is complete and no further iterations are needed, end your reply with " + loopDoneSentinel + " on its own line.]"
+		turnText = body + "\n\n[Loop iteration " + fmt.Sprint(ls.iterations) + ". If the task is complete and no further iterations are needed, end your reply with " + loopDecisionOpen + `{"version":1,"decision":"stop","reason":"brief reason"}` + loopDecisionClose + ". The legacy " + loopDoneSentinel + " sentinel is also accepted.]"
 	}
 	_, teacmd := a.startTurn(turnText, true)
 	return teacmd
@@ -150,8 +162,15 @@ func (a *App) onLoopTurnDone() tea.Cmd {
 	if !ok || ls.stopped {
 		return nil
 	}
+	if stop, reason, ok := parseLoopDecision(a.lastAgentText); ok && stop {
+		if reason == "" {
+			reason = "model returned a structured stop decision"
+		}
+		a.finishLoop(ls, reason)
+		return nil
+	}
 	if strings.Contains(a.lastAgentText, loopDoneSentinel) {
-		a.finishLoop(ls, "model signaled done")
+		a.finishLoop(ls, "model emitted the legacy done sentinel")
 		return nil
 	}
 	if ls.maxIters > 0 && ls.iterations >= ls.maxIters {
@@ -159,6 +178,36 @@ func (a *App) onLoopTurnDone() tea.Cmd {
 		return nil
 	}
 	return a.runLoopBody(ls)
+}
+
+func parseLoopDecision(text string) (stop bool, reason string, ok bool) {
+	open := strings.LastIndex(text, loopDecisionOpen)
+	if open < 0 {
+		return false, "", false
+	}
+	payloadStart := open + len(loopDecisionOpen)
+	closeRel := strings.Index(text[payloadStart:], loopDecisionClose)
+	if closeRel < 0 {
+		return false, "", false
+	}
+	var decision loopDecision
+	if err := json.Unmarshal(
+		[]byte(strings.TrimSpace(text[payloadStart:payloadStart+closeRel])),
+		&decision,
+	); err != nil {
+		return false, "", false
+	}
+	if decision.Version != 1 {
+		return false, "", false
+	}
+	switch decision.Decision {
+	case "stop":
+		return true, strings.TrimSpace(decision.Reason), true
+	case "continue":
+		return false, strings.TrimSpace(decision.Reason), true
+	default:
+		return false, "", false
+	}
 }
 
 func (a *App) finishLoop(ls *loopState, reason string) {

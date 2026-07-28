@@ -124,3 +124,28 @@ func TestSummaryFor_OmitsForUnsupportedModel(t *testing.T) {
 		t.Fatalf("unknown summary = %q, want auto", got)
 	}
 }
+
+func TestReasoningEffortUsesAdvertisedOverrideAndReset(t *testing.T) {
+	p := New(writeAuth(t, "tok"))
+	if got, want := p.ReasoningEffort("gpt-5.6-sol"), "low"; got != want {
+		t.Fatalf("default effort = %q, want %q", got, want)
+	}
+	if got := len(p.ReasoningEfforts("gpt-5.6-sol")); got != 6 {
+		t.Fatalf("advertised efforts = %d, want 6", got)
+	}
+	if err := p.SetReasoningEffort("gpt-5.6-sol", "ultra"); err != nil {
+		t.Fatalf("set ultra: %v", err)
+	}
+	if got, want := p.ReasoningEffort("gpt-5.6-sol"), "ultra"; got != want {
+		t.Fatalf("overridden effort = %q, want %q", got, want)
+	}
+	if err := p.SetReasoningEffort("gpt-5.6-sol", "impossible"); err == nil {
+		t.Fatal("unsupported effort should fail")
+	}
+	if err := p.SetReasoningEffort("gpt-5.6-sol", "default"); err != nil {
+		t.Fatalf("reset effort: %v", err)
+	}
+	if got, want := p.ReasoningEffort("gpt-5.6-sol"), "low"; got != want {
+		t.Fatalf("reset effort = %q, want %q", got, want)
+	}
+}

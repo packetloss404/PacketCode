@@ -5,7 +5,7 @@ Provider and model selection use the shared `picker` component.
 ## Open and Use
 
 - `Ctrl+P`, `/provider`, or `/providers`: provider picker.
-- `Ctrl+M`, `/model`, or `/models`: active-provider model picker.
+- `/model` or `/models`: active-provider model picker. `Ctrl+M` also works when the terminal reports it distinctly instead of carriage return.
 - Type to filter; matching is case-insensitive and normalized.
 - Up/Down, Ctrl+N/P, and Ctrl+J/K move.
 - PageUp/PageDown move by half a page.

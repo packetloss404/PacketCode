@@ -1,12 +1,72 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestResolveHomeDir_DefaultAndAbsoluteOverride(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	t.Setenv(HomeEnv, "")
+
+	got, err := ResolveHomeDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(userHome, ".packetcode"), got)
+	assert.Equal(t, "default", HomeSource())
+
+	override := filepath.Join(t.TempDir(), "PacketCode State")
+	t.Setenv(HomeEnv, override)
+	got, err = ResolveHomeDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(override), got)
+	assert.Equal(t, "environment", HomeSource())
+}
+
+func TestResolveHomeDir_RejectsRelativeOverrideWithoutTouchingDefault(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	t.Setenv(HomeEnv, filepath.Join("relative", "packetcode"))
+
+	_, err := HomeDir()
+	require.ErrorContains(t, err, "must be an absolute path")
+	_, statErr := os.Stat(filepath.Join(userHome, ".packetcode"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestHomeDir_OverrideIsolatedFromLegacyDefault(t *testing.T) {
+	userHome := t.TempDir()
+	legacy := filepath.Join(userHome, ".packetcode")
+	require.NoError(t, os.MkdirAll(legacy, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy, "config.toml"), []byte("legacy"), 0o600))
+
+	override := filepath.Join(t.TempDir(), "isolated")
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	t.Setenv(HomeEnv, override)
+
+	got, err := HomeDir()
+	require.NoError(t, err)
+	assert.Equal(t, override, got)
+	_, err = os.Stat(filepath.Join(override, "config.toml"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	contents, err := os.ReadFile(filepath.Join(legacy, "config.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "legacy", string(contents))
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(override)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+	}
+}
 
 // TestThemePath_UnderHomeDir pins the returned theme path to
 // `<home>/.packetcode/theme.toml`. `t.Setenv` on both HOME and

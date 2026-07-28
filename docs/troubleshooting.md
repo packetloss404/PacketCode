@@ -26,7 +26,7 @@ The packetcode `gemini` provider uses Google's developer API directly and does n
 
 ## Model Switch Fails
 
-Use `/model` or Ctrl+M to load the active account's exact model IDs. Curated fallback catalogs keep some providers selectable when `/models` is unavailable, but the next request remains authoritative. Run `packetcode doctor --check providers` for credential/connectivity failures.
+Use `/model` to load the active account's exact model IDs (`Ctrl+M` is terminal-dependent). Curated fallback catalogs keep some providers selectable when `/models` is unavailable, but the next request remains authoritative. Run `packetcode doctor --check providers` for credential/connectivity failures.
 
 ## Ollama Is Unreachable or Slow
 
@@ -92,7 +92,10 @@ Use `/workflows` for live state and `/agents` for child jobs. `/workflows stop <
 
 ## MCP Server Does Not Start
 
-Run `/mcp`, `/mcp status <name>`, and `/mcp logs <name>`. Logs live at `~/.packetcode/mcp-<name>.log` and are displayed through a bounded redacted tail. Config changes or crashed servers currently require a packetcode restart.
+Run `/mcp`, `/mcp status <name>`, `/mcp logs <name>`, and
+`/mcp restart <name>`. Logs live at `~/.packetcode/mcp-<name>.log` and are displayed through
+a bounded redacted tail. Restart one crashed process in place; restart
+PacketCode after changing MCP configuration.
 
 ## Hooks or Statusline Fail
 

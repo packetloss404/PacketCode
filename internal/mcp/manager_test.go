@@ -200,6 +200,48 @@ func TestManager_StartAgainClosesPreviousClients(t *testing.T) {
 	assert.NotSame(t, first, second)
 }
 
+func TestManager_Restart_ReplacesOnlyNamedClient(t *testing.T) {
+	requireStub(t)
+	mgr := NewManager(Config{
+		Servers: []ServerConfig{
+			{Name: "one", Command: stubBinaryPath, Enabled: true, TimeoutSec: 5},
+			{Name: "two", Command: stubBinaryPath, Enabled: true, TimeoutSec: 5},
+		},
+		LogDir:     t.TempDir(),
+		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
+	})
+	defer mgr.Shutdown(2 * time.Second)
+	reports := mgr.Start(context.Background())
+	require.Equal(t, "running", reports[0].Status, reports[0].Err)
+	require.Equal(t, "running", reports[1].Status, reports[1].Err)
+	one, _ := mgr.Client("one")
+	two, _ := mgr.Client("two")
+
+	report, replacement, previous, err := mgr.Restart(context.Background(), "one")
+	require.NoError(t, err)
+	require.Equal(t, "running", report.Status)
+	require.Same(t, one, previous)
+	require.NotSame(t, one, replacement)
+	assert.False(t, one.IsAlive())
+	assert.True(t, replacement.IsAlive())
+	stillTwo, _ := mgr.Client("two")
+	assert.Same(t, two, stillTwo)
+	assert.True(t, two.IsAlive())
+}
+
+func TestManager_Restart_RejectsUnknownAndDisabledServers(t *testing.T) {
+	mgr := NewManager(Config{
+		Servers: []ServerConfig{{
+			Name: "off", Command: "unused", Enabled: false,
+		}},
+	})
+
+	_, _, _, err := mgr.Restart(context.Background(), "missing")
+	require.ErrorContains(t, err, "no configured server")
+	_, _, _, err = mgr.Restart(context.Background(), "off")
+	require.ErrorContains(t, err, "disabled")
+}
+
 // TestManager_Start_ParallelSpawn uses a short delay on each stub so we
 // can prove they spawn concurrently. With 4 stubs each at 200 ms delay,
 // serial would take ~800 ms; parallel should finish well under 600 ms.

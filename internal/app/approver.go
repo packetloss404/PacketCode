@@ -25,6 +25,7 @@ type uiApprover struct {
 	mu        sync.Mutex
 	autoTrust bool // when true, every Approve returns Approved without prompting
 	policy    *permissions.Policy
+	notify    func()
 	nextID    uint64
 	active    *approvalEnvelope
 }
@@ -116,6 +117,7 @@ func (u *uiApprover) decideOrPrompt(ctx context.Context, req agent.ApprovalReque
 
 	select {
 	case u.pendingCh <- env:
+		u.notifyPending()
 	case <-ctx.Done():
 		return agent.ApprovalDecision{Approved: false, Reason: "cancelled"}
 	}
@@ -129,8 +131,8 @@ func (u *uiApprover) decideOrPrompt(ctx context.Context, req agent.ApprovalReque
 }
 
 // Pending returns the next pending request without blocking. Returns
-// (zero, false) if the queue is empty. The App polls this from its
-// Update loop.
+// (zero, false) if the queue is empty. Approve notifies the App when work is
+// available, so this does not require an idle polling loop.
 func (u *uiApprover) Pending() (agent.ApprovalRequest, bool) {
 	u.mu.Lock()
 	if u.active != nil {
@@ -160,6 +162,21 @@ func (u *uiApprover) Pending() (agent.ApprovalRequest, bool) {
 		default:
 			return agent.ApprovalRequest{}, false
 		}
+	}
+}
+
+func (u *uiApprover) SetNotify(fn func()) {
+	u.mu.Lock()
+	u.notify = fn
+	u.mu.Unlock()
+}
+
+func (u *uiApprover) notifyPending() {
+	u.mu.Lock()
+	fn := u.notify
+	u.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
 }
 

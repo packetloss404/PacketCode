@@ -11,6 +11,7 @@ Slash commands are parsed and handled locally before a prompt reaches the model.
 | `/provider add [slug]` | Open provider picker/key entry. |
 | `/model` / `/models` | Open model picker. |
 | `/model <id>` | Switch model. |
+| `/effort [level]` | Show or set a model's reasoning effort; `default` resets it. |
 
 ## Sessions and Foreground Work
 

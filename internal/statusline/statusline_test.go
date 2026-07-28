@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -137,4 +138,32 @@ func TestRenderDefault_Format(t *testing.T) {
 	if line2 != want2 {
 		t.Fatalf("RenderDefault mismatch:\n got: %q\nwant: %q", line2, want2)
 	}
+}
+
+func TestRenderDefaultWidth_KeepsCriticalStateOnOneLine(t *testing.T) {
+	snap := Snapshot{
+		Project:       "packetcode",
+		GitBranch:     "feature/very-long-branch-name",
+		Provider:      ProviderInfo{DisplayName: "Codex (ChatGPT)"},
+		Model:         ModelInfo{ID: "gpt-5.6-sol"},
+		ContextWindow: ContextInfo{Used: 42000, Max: 272000, UsedPercentage: 15},
+		Jobs:          JobsInfo{Active: 2},
+		Operation:     OperationInfo{Active: true, Label: "thinking", ElapsedSeconds: 5},
+	}
+	line := RenderDefaultWidth(snap, 70)
+	assert.NotContains(t, line, "\n")
+	assert.LessOrEqual(t, runewidth.StringWidth(line), 70)
+	assert.Contains(t, line, "thinking")
+	assert.Contains(t, line, "2 agents")
+}
+
+func TestRenderDefault_ShowsReasoningEffort(t *testing.T) {
+	line := RenderDefault(Snapshot{
+		Provider: ProviderInfo{DisplayName: "Codex"},
+		Model: ModelInfo{
+			ID:              "gpt-5.6-sol",
+			ReasoningEffort: "high",
+		},
+	})
+	assert.Contains(t, line, "● high · /effort")
 }

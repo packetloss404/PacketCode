@@ -1,0 +1,1123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Offline user manual, advanced guide, and printable command reference for packetcode.">
+  <title>packetcode Manual &amp; Advanced Guide</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7f8;
+      --surface: #ffffff;
+      --surface-2: #eef2f3;
+      --ink: #162126;
+      --muted: #5b6a70;
+      --line: #d3dce0;
+      --brand: #126d61;
+      --brand-2: #0b5149;
+      --accent: #d96c32;
+      --code-bg: #132025;
+      --code-ink: #eaf5f2;
+      --note-bg: #e7f4f1;
+      --warn-bg: #fff1dd;
+      --limit-bg: #f1eafa;
+      --shadow: 0 14px 38px rgba(17, 37, 42, .09);
+      --radius: 12px;
+      --measure: 76ch;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1316;
+        --surface: #141d21;
+        --surface-2: #1b272c;
+        --ink: #e7efed;
+        --muted: #a6b6b7;
+        --line: #304047;
+        --brand: #67c8b6;
+        --brand-2: #99ded1;
+        --accent: #f4a36e;
+        --code-bg: #081013;
+        --code-ink: #e5f5f0;
+        --note-bg: #16302d;
+        --warn-bg: #38291b;
+        --limit-bg: #2c223a;
+        --shadow: 0 18px 46px rgba(0, 0, 0, .3);
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--brand); text-underline-offset: .16em; }
+    a:hover { color: var(--brand-2); }
+    .skip-link {
+      position: fixed;
+      z-index: 100;
+      top: .6rem;
+      left: .6rem;
+      padding: .6rem .85rem;
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 28rem),
+        linear-gradient(125deg, color-mix(in srgb, var(--surface) 90%, var(--brand)), var(--surface));
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -8rem -12rem auto;
+      width: 28rem;
+      height: 28rem;
+      border: 1px solid color-mix(in srgb, var(--brand) 32%, transparent);
+      border-radius: 50%;
+    }
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      width: min(1180px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: clamp(3rem, 7vw, 6.5rem) 0 clamp(2.5rem, 6vw, 5rem);
+    }
+    .eyebrow {
+      margin: 0 0 .8rem;
+      color: var(--brand);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 16ch;
+      margin: 0;
+      font-size: clamp(2.7rem, 8vw, 6rem);
+      line-height: .96;
+      letter-spacing: -.055em;
+    }
+    .deck {
+      max-width: 62ch;
+      margin: 1.4rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1.05rem, 2vw, 1.3rem);
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.6rem; }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2.7rem;
+      padding: .65rem 1rem;
+      border: 1px solid var(--brand);
+      border-radius: 999px;
+      background: var(--brand);
+      color: #fff;
+      font: inherit;
+      font-weight: 750;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .button.secondary { background: transparent; color: var(--brand); }
+    .button:hover { filter: brightness(.96); color: #fff; }
+    .button.secondary:hover { background: var(--surface-2); color: var(--brand-2); }
+    .badges { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.2rem; }
+    .badge {
+      padding: .25rem .65rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 80%, transparent);
+      color: var(--muted);
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 245px minmax(0, 1fr);
+      gap: clamp(2rem, 5vw, 5rem);
+      width: min(1180px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2.5rem 0 6rem;
+    }
+    aside { min-width: 0; }
+    .toc {
+      position: sticky;
+      top: 1rem;
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .toc summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 850;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .toc ol { margin: .8rem 0 0; padding: 0; list-style: none; counter-reset: toc; }
+    .toc li { counter-increment: toc; }
+    .toc a {
+      display: grid;
+      grid-template-columns: 1.6rem 1fr;
+      gap: .25rem;
+      padding: .35rem .15rem;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.35;
+      text-decoration: none;
+    }
+    .toc a::before { content: counter(toc, decimal-leading-zero); color: var(--brand); font: 700 .72rem/1.7 ui-monospace, monospace; }
+    .toc a:hover { color: var(--ink); }
+
+    main { min-width: 0; }
+    section { max-width: var(--measure); margin: 0 0 5rem; }
+    section + section { padding-top: 1rem; }
+    h2, h3, h4 { line-height: 1.2; text-wrap: balance; }
+    h2 {
+      margin: 0 0 1.25rem;
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      letter-spacing: -.035em;
+    }
+    h2 .section-no { display: block; margin-bottom: .35rem; color: var(--accent); font: 800 .75rem/1 ui-monospace, monospace; letter-spacing: .14em; }
+    h3 { margin: 2.2rem 0 .75rem; font-size: 1.35rem; letter-spacing: -.015em; }
+    h4 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
+    p { margin: .7rem 0 1rem; }
+    ul, ol { padding-left: 1.35rem; }
+    li + li { margin-top: .35rem; }
+    strong { font-weight: 800; }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }
+    kbd {
+      display: inline-block;
+      min-width: 1.55em;
+      padding: .08em .38em;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      font: 700 .82em/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-align: center;
+      white-space: nowrap;
+    }
+    :not(pre) > code {
+      padding: .1em .34em;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface-2);
+      font: .88em/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      position: relative;
+      max-width: 100%;
+      margin: 1rem 0 1.4rem;
+      padding: 1rem 1.1rem;
+      overflow: auto;
+      border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+      border-radius: 10px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: .86rem/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      box-shadow: inset 3px 0 0 var(--brand);
+      tab-size: 2;
+    }
+    pre code { font: inherit; white-space: pre; }
+    .table-wrap { width: 100%; margin: 1rem 0 1.5rem; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .92rem; }
+    th, td { padding: .65rem .75rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface-2); font-size: .77rem; letter-spacing: .04em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+
+    .callout {
+      margin: 1.25rem 0;
+      padding: 1rem 1.1rem;
+      border-left: 4px solid var(--brand);
+      border-radius: 0 10px 10px 0;
+      background: var(--note-bg);
+    }
+    .callout.warning { border-color: var(--accent); background: var(--warn-bg); }
+    .callout.limit { border-color: #8055b3; background: var(--limit-bg); }
+    .callout > :first-child { margin-top: 0; }
+    .callout > :last-child { margin-bottom: 0; }
+    .callout-title { display: block; margin-bottom: .25rem; font-size: .78rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .cards, .ref-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.2rem 0; }
+    .card { padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .card h3, .card h4 { margin-top: 0; }
+    .card > :last-child { margin-bottom: 0; }
+    .steps { counter-reset: steps; padding: 0; list-style: none; }
+    .steps > li { position: relative; padding: .1rem 0 1.25rem 3rem; counter-increment: steps; }
+    .steps > li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 0;
+      display: grid;
+      place-items: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: var(--brand);
+      color: #fff;
+      font-weight: 800;
+    }
+    .flow { border-left: 3px solid var(--line); padding-left: 1rem; color: var(--muted); }
+    .quick-banner {
+      padding: clamp(1.1rem, 3vw, 1.6rem);
+      border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--line));
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, var(--warn-bg), var(--surface));
+      box-shadow: var(--shadow);
+    }
+    .quick-banner h2 { font-size: 1.5rem; }
+    .quick-banner .button { margin-top: .35rem; }
+    .anchor-link { color: inherit; text-decoration: none; }
+    .anchor-link:hover::after { content: " #"; color: var(--brand); }
+    footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+    footer div { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 1.5rem 0 3rem; }
+
+    #quick-reference {
+      max-width: none;
+      padding: clamp(1.2rem, 3vw, 2rem);
+      border: 2px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    #quick-reference .ref-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #quick-reference h3 { padding-bottom: .35rem; border-bottom: 1px solid var(--line); }
+    .key-strip { padding: .9rem; border-radius: 8px; background: var(--surface-2); line-height: 2; }
+    .micro { color: var(--muted); font-size: .84rem; }
+
+    @media (max-width: 850px) {
+      .layout { display: block; padding-top: 1rem; }
+      aside { margin-bottom: 2.5rem; }
+      .toc { position: static; max-height: none; }
+      .toc ol { columns: 2; column-gap: 1rem; }
+      .toc li { break-inside: avoid; }
+    }
+    @media (max-width: 600px) {
+      .hero-inner, .layout, footer div { width: min(100% - 1.2rem, 1180px); }
+      .cards, .ref-grid, #quick-reference .ref-grid { grid-template-columns: 1fr; }
+      .toc ol { columns: 1; }
+      pre { margin-left: -.15rem; margin-right: -.15rem; font-size: .78rem; }
+      th, td { padding: .55rem; }
+    }
+
+    @media print {
+      :root { --bg: #fff; --surface: #fff; --surface-2: #f3f3f3; --ink: #000; --muted: #444; --line: #bbb; --brand: #07594f; --code-bg: #f4f4f4; --code-ink: #000; --note-bg: #edf6f4; --warn-bg: #fff4e4; --limit-bg: #f5effa; }
+      @page { size: auto; margin: 13mm; }
+      html { scroll-padding: 0; }
+      body { font-size: 10pt; line-height: 1.42; background: #fff; }
+      .hero { background: #fff; }
+      .hero-inner { padding: 1rem 0; }
+      .hero::after, .hero-actions, aside, .skip-link, footer { display: none !important; }
+      h1 { font-size: 30pt; }
+      .layout { display: block; width: 100%; padding: 0; }
+      section { max-width: none; margin: 0 0 1.8rem; break-before: page; }
+      main > section:first-child { break-before: auto; }
+      h2 { font-size: 20pt; }
+      h3 { font-size: 13pt; break-after: avoid; }
+      pre { white-space: pre-wrap; overflow: visible; color: #000; box-shadow: inset 2px 0 0 #07594f; }
+      table { font-size: 8.5pt; }
+      tr, pre, .callout, .card { break-inside: avoid; }
+      a { color: #000; text-decoration: none; }
+      a[href^="#"]::after { content: none; }
+      #quick-reference { break-before: page; padding: 5mm; box-shadow: none; }
+      #quick-reference h2 { font-size: 17pt; margin-bottom: 4mm; }
+      #quick-reference h3 { margin: 3mm 0 1.5mm; font-size: 10pt; }
+      #quick-reference p, #quick-reference li { font-size: 7.5pt; line-height: 1.25; }
+      #quick-reference pre { margin: 1.5mm 0; padding: 2.5mm; font-size: 7pt; line-height: 1.25; }
+      #quick-reference table { font-size: 6.8pt; line-height: 1.2; }
+      #quick-reference th, #quick-reference td { padding: 1.2mm 1.6mm; }
+      #quick-reference .ref-grid { grid-template-columns: 1fr 1fr; gap: 4mm; }
+      #quick-reference .key-strip { padding: 2.5mm; line-height: 1.55; }
+      body.print-cheat .hero, body.print-cheat aside, body.print-cheat main > section:not(#quick-reference), body.print-cheat footer { display: none !important; }
+      body.print-cheat .layout { display: block; }
+      body.print-cheat #quick-reference { display: block; break-before: auto; margin: 0; border: 0; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to manual</a>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Offline reference · current main branch</p>
+      <h1>packetcode manual</h1>
+      <p class="deck">A practical user manual, advanced operator's guide, and printable terminal cheat sheet for the keyboard-first, multi-provider coding agent.</p>
+      <div class="badges" aria-label="Manual topics">
+        <span class="badge">Codex subscription</span>
+        <span class="badge">Background agents</span>
+        <span class="badge">Permission policies</span>
+        <span class="badge">Workflows &amp; MCP</span>
+      </div>
+      <div class="hero-actions">
+        <a class="button" href="#quick-start">Start here</a>
+        <a class="button secondary" href="#quick-reference">Jump to cheat sheet</a>
+        <button class="button secondary" id="print-cheat" type="button">Print cheat sheet</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <nav class="toc" aria-label="Table of contents">
+        <details open>
+          <summary>Contents</summary>
+          <ol>
+            <li><a href="#quick-start">Install and start</a></li>
+            <li><a href="#daily-work">Daily terminal workflow</a></li>
+            <li><a href="#providers">Providers and models</a></li>
+            <li><a href="#permissions">Permissions and approvals</a></li>
+            <li><a href="#sessions">Sessions, context, cost</a></li>
+            <li><a href="#agents">Agents and worktrees</a></li>
+            <li><a href="#workflows">Workflows and loops</a></li>
+            <li><a href="#configuration">Configuration and state</a></li>
+            <li><a href="#integrations">MCP, hooks, statusline</a></li>
+            <li><a href="#architecture">Architecture and security</a></li>
+            <li><a href="#diagnostics">Diagnostics</a></li>
+            <li><a href="#advanced-patterns">Advanced patterns</a></li>
+            <li><a href="#quick-reference">Printable cheat sheet</a></li>
+          </ol>
+        </details>
+      </nav>
+    </aside>
+
+    <main id="main-content">
+      <section class="quick-banner" aria-labelledby="at-a-glance">
+        <h2 id="at-a-glance">At a glance</h2>
+        <p>Run packetcode from the project you want it to inspect. Type a request and press <kbd>Enter</kbd>. Use <kbd>Shift</kbd>+<kbd>Tab</kbd> to move from Manual to Accept Edits, Auto, or Plan. The footer always shows the effective policy.</p>
+        <pre><code>packetcode --provider codex --model gpt-5.6-sol
+/effort high
+/spawn audit the current diff
+/spawn --write fix the focused tests</code></pre>
+        <p><strong>Write agents use separate git worktrees.</strong> Their changes are not merged automatically, and their completed results do not enter foreground context until you inject or collect them.</p>
+        <a class="button" href="#quick-reference">Open printable commands</a>
+      </section>
+
+      <section id="quick-start" aria-labelledby="quick-start-title">
+        <h2 id="quick-start-title"><span class="section-no">01</span><a class="anchor-link" href="#quick-start">Install and start</a></h2>
+        <p>packetcode requires Go 1.24.2 or newer when building from source. Run it from the project directory you want it to work in; inside a Git repository it resolves the repository root as the native file-tool boundary.</p>
+
+        <h3 id="install-release">macOS or Linux release install</h3>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/packetloss404/packetcode/main/install.sh | bash</code></pre>
+        <p>Without <code>sudo</code>:</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/packetloss404/packetcode/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash</code></pre>
+
+        <h3 id="build-source">Build from source</h3>
+        <div class="cards">
+          <div class="card">
+            <h4>macOS / Linux</h4>
+            <pre><code>make build
+./bin/packetcode</code></pre>
+          </div>
+          <div class="card">
+            <h4>Windows PowerShell</h4>
+            <pre><code>$commit = git rev-parse --short HEAD
+go build -trimpath -ldflags "-s -w -X main.version=dev -X main.commit=$commit" -o bin/packetcode.exe ./cmd/packetcode
+.\bin\packetcode.exe</code></pre>
+          </div>
+        </div>
+
+        <h3 id="first-run">First-run setup</h3>
+        <ol class="steps">
+          <li>Choose a provider.</li>
+          <li>Enter an API key if that provider requires one.</li>
+          <li>Choose a model. The selection is stored in <code>~/.packetcode/config.toml</code> with mode <code>0600</code> on POSIX systems and best-effort user-only ACL hardening on Windows.</li>
+        </ol>
+
+        <p>For an OpenAI Codex-enabled ChatGPT plan, authenticate with the official Codex CLI:</p>
+        <pre><code>codex login
+packetcode --provider codex</code></pre>
+        <p>Choose <strong>Sign in with ChatGPT</strong>. The subscription provider reuses <code>$CODEX_HOME/auth.json</code>, or <code>~/.codex/auth.json</code> when <code>CODEX_HOME</code> is unset. No API key is pasted into packetcode.</p>
+
+        <h3 id="startup-options">Startup options</h3>
+        <pre><code>packetcode
+packetcode --provider codex
+packetcode --provider codex --model gpt-5.6-sol
+packetcode --resume &lt;session-id&gt;
+packetcode --permission-mode ask
+packetcode --permission-mode accept-edits
+packetcode --permission-mode auto
+packetcode --permission-mode read-only
+packetcode --trust
+packetcode --version
+packetcode doctor
+packetcode doctor --json</code></pre>
+        <p><code>--provider</code> and <code>--model</code> override the saved default for one launch. <code>--resume</code> opens a saved session. <code>--trust</code> starts in Bypass Permissions mode.</p>
+        <div class="callout limit">
+          <span class="callout-title">Current CLI limit</span>
+          <p>There is no non-interactive “prompt as a positional argument” mode. The only public subcommand is <code>doctor</code>; normal work happens in the TUI.</p>
+        </div>
+      </section>
+
+      <section id="daily-work" aria-labelledby="daily-work-title">
+        <h2 id="daily-work-title"><span class="section-no">02</span><a class="anchor-link" href="#daily-work">Daily terminal workflow</a></h2>
+        <p>Type a request at the bottom prompt and press <kbd>Enter</kbd>. Specific outcome-and-verification prompts work best:</p>
+        <pre><code>Add validation to the signup handler and run the focused tests.</code></pre>
+        <p>Completed turns move into normal terminal scrollback. The small live region is reserved for the current response, tool activity, prompt, context gauge, and permission mode.</p>
+
+        <h3 id="everyday-keys">Everyday keys</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Key</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>Send the prompt.</td></tr>
+              <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd> or <kbd>\</kbd> then <kbd>Enter</kbd></td><td>Insert a universal portable newline.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Insert a newline unless completion is open; in the completion popup it moves selection down.</td></tr>
+              <tr><td><kbd>\</kbd> then <kbd>Enter</kbd></td><td>Portable newline fallback.</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Insert a newline when the terminal reports it distinctly.</td></tr>
+              <tr><td><kbd>Up</kbd> / <kbd>Down</kbd></td><td>Recall history at the first or last visual input row.</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Cycle Manual → Accept Edits → Auto → Plan.</td></tr>
+              <tr><td><kbd>Left</kbd> on an empty idle prompt</td><td>Open Agent View.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <code>/model</code></td><td>Open the provider / model picker. <kbd>Ctrl</kbd>+<kbd>M</kbd> is terminal-dependent.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Cancel active work, clear a draft, or quit from an empty prompt.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Quit from an empty prompt.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>Clear visible output while keeping the saved session.</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Close the current popup, picker, or transcript view; in an approval it chooses No and rejects the action.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The input grows to multiple rows. <code>max_input_rows</code> controls its displayed height, not maximum prompt length. <kbd>Alt</kbd>+<kbd>Enter</kbd> and backslash-Enter are universal multiline choices. <kbd>Ctrl</kbd>+<kbd>J</kbd> inserts a newline only when completion is closed; while the popup is open it moves the selected completion down. Not every terminal distinguishes Shift+Enter.</p>
+
+        <h3 id="mentions-and-commands">File mentions and slash commands</h3>
+        <p>Type <code>@</code> at a token boundary to search project files:</p>
+        <pre><code>Compare @internal/app/app.go with @internal/jobs/manager.go and explain the handoff.</code></pre>
+        <p>The selected file is expanded into bounded, root-scoped context when the prompt is sent. Avoid repeatedly attaching the same large file because each expansion consumes context.</p>
+        <p>Type <code>/</code> for slash-command completion. Use arrows or <kbd>Ctrl</kbd>+<kbd>N</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd> to move, <kbd>Tab</kbd> to accept, and <kbd>Esc</kbd> to dismiss. Prefix a literal slash prompt with two slashes:</p>
+        <pre><code>//explain why this is not a command</code></pre>
+        <p>The model receives <code>/explain why this is not a command</code> as ordinary text.</p>
+
+        <h3 id="prompt-queue">Queue prompts while work is active</h3>
+        <p>Submitting during an active foreground turn or compaction queues the prompt instead of interrupting it:</p>
+        <pre><code>/queue
+/queue drop 2
+/queue clear</code></pre>
+        <p>Queued prompts run in order. The listing shows up to the first 20 with one-based indexes.</p>
+      </section>
+
+      <section id="providers" aria-labelledby="providers-title">
+        <h2 id="providers-title"><span class="section-no">03</span><a class="anchor-link" href="#providers">Providers, models, and reasoning</a></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Slug</th><th>Authentication</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>codex</code></td><td>Codex CLI ChatGPT login</td><td>Subscription path; no packetcode API key.</td></tr>
+              <tr><td><code>openai</code></td><td>OpenAI API key</td><td>OpenAI developer API billing.</td></tr>
+              <tr><td><code>anthropic</code></td><td>Anthropic API key</td><td>Anthropic Messages API.</td></tr>
+              <tr><td><code>gemini</code></td><td>Google API key</td><td>Does not reuse Gemini CLI login.</td></tr>
+              <tr><td><code>minimax</code>, <code>deepseek</code>, <code>grok</code>, <code>mistral</code></td><td>Provider API key</td><td>Hosted OpenAI-compatible APIs.</td></tr>
+              <tr><td><code>openrouter</code></td><td>OpenRouter API key</td><td>OpenRouter catalog and routing.</td></tr>
+              <tr><td><code>ollama</code></td><td>None</td><td>Requires a reachable Ollama daemon.</td></tr>
+              <tr><td>Custom slug</td><td>Optional/configured</td><td>OpenAI-compatible <code>/v1</code> endpoint.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="switch-provider">Add, switch, and discover</h3>
+        <pre><code>/provider
+/provider codex
+/provider add
+/provider add openai
+/model
+/model gpt-5.6-sol</code></pre>
+        <p><kbd>Ctrl</kbd>+<kbd>P</kbd> opens the provider picker; <code>/model</code> is the reliable model-picker path. <kbd>Ctrl</kbd>+<kbd>M</kbd> also opens the model picker only when the terminal reports it distinctly—ordinary terminals may encode it as carriage return. Press <kbd>Ctrl</kbd>+<kbd>A</kbd> on a provider row to set or update its key. Switching in the TUI persists the active provider and model as the default.</p>
+        <p>Environment variables override stored credentials. Built-ins use <code>PACKETCODE_&lt;SLUG&gt;_API_KEY</code>; custom slugs normalize non-alphanumeric characters to underscores unless <code>api_key_env</code> names another variable.</p>
+
+        <h3 id="codex-subscription">Codex subscription and <code>/effort</code></h3>
+        <p>The <code>codex</code> provider rereads its OAuth file for every request. If its access token expires, packetcode exchanges the stored refresh token and atomically updates the same file while preserving unrelated fields. API-key-only Codex auth is not accepted here; use the <code>openai</code> provider for API-key billing.</p>
+        <pre><code>/effort
+/effort low
+/effort medium
+/effort high
+/effort xhigh
+/effort max
+/effort ultra
+/effort default</code></pre>
+        <p>Bare <code>/effort</code> shows the effective and available levels. Packetcode validates the level against active model metadata and saves it under <code>[providers.codex]</code>. <code>default</code> or <code>auto</code> restores the catalog default. GPT-5.6 Sol/Terra/Luna currently advertise low through ultra; the static Sol fallback defaults to low.</p>
+        <div class="callout">
+          <span class="callout-title">Operating advice</span>
+          <p>Use lower effort for mechanical reads and edits; reserve high levels for architecture, subtle debugging, or synthesis. Effort cannot change while a foreground response is streaming.</p>
+        </div>
+
+        <h3 id="ollama">Local models with Ollama</h3>
+        <pre><code>ollama serve
+packetcode --provider ollama</code></pre>
+        <pre><code>/ollama status
+/ollama models
+/ollama ps
+/ollama pull qwen2.5-coder:14b
+/provider ollama
+/model qwen2.5-coder:14b</code></pre>
+        <p>Packetcode defaults to <code>http://localhost:11434</code>, auto-sizes context against model metadata, detects tool support, and keeps the model warm for 30 minutes. Override the host with <code>PACKETCODE_OLLAMA_HOST</code>, <code>OLLAMA_HOST</code>, or <code>[providers.ollama].host</code>. If <code>/ollama ps</code> shows CPU spill, reduce <code>num_ctx</code> or choose a smaller model.</p>
+
+        <h3 id="custom-provider">Custom OpenAI-compatible endpoint</h3>
+        <pre><code>[providers.localai]
+type = "openai_compatible"
+display_name = "LocalAI"
+base_url = "http://localhost:8080/v1"
+default_model = "coder-large"
+api_key_required = false
+
+[[providers.localai.models]]
+id = "coder-large"
+context_window = 32768
+supports_tools = true</code></pre>
+        <p>Static model rows are fallbacks when <code>/models</code> is absent or incomplete. Use HTTPS for hosted endpoints; use plain HTTP only on controlled local/private networks.</p>
+      </section>
+
+      <section id="permissions" aria-labelledby="permissions-title">
+        <h2 id="permissions-title"><span class="section-no">04</span><a class="anchor-link" href="#permissions">Permissions and approvals</a></h2>
+        <p>The permission policy decides whether a tool call is allowed, shown for approval, or denied. It is a decision layer, not an operating-system sandbox.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Footer mode</th><th>Config profile</th><th>Behavior</th></tr></thead>
+            <tbody>
+              <tr><td>Manual</td><td><code>ask</code> / <code>balanced</code></td><td>Reads/searches/lists run; edits, shell, MCP, and model-initiated <code>spawn_agent</code> ask.</td></tr>
+              <tr><td>Accept Edits</td><td><code>accept_edits</code></td><td>Native writes and patches run; shell, MCP, and model-initiated <code>spawn_agent</code> ask.</td></tr>
+              <tr><td>Auto</td><td><code>auto</code></td><td>Native edits and shell run; MCP, model-initiated <code>spawn_agent</code>, and explicitly gated tools ask.</td></tr>
+              <tr><td>Plan</td><td><code>read_only</code></td><td>Research runs; mutations are denied and the model receives a planning instruction.</td></tr>
+              <tr><td>Bypass Permissions</td><td><code>bypass</code></td><td>Tools run unless an explicit deny rule matches.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><kbd>Shift</kbd>+<kbd>Tab</kbd> cycles the first four modes, including during a turn. It affects subsequent tool calls and re-evaluates a visible approval, but cannot interrupt a command already running. Bypass is deliberately outside the cycle.</p>
+
+        <h3 id="permission-commands">Inspect and alter session policy</h3>
+        <pre><code>/permissions
+/permissions profiles
+/permissions profile ask
+/permissions profile accept-edits
+/permissions explain execute_command
+/permissions rule execute_command ask
+/permissions rule filesystem__* deny
+/plan on
+/plan off
+/trust on
+/trust off</code></pre>
+        <p>Session policy commands do not rewrite the saved configuration. The approval menu offers Yes, Yes and remember, and No. A remembered shell approval matches the exact command string; other remembered approvals use the tool name.</p>
+
+        <h3 id="permission-rules">Persistent policy rules</h3>
+        <pre><code>[permissions]
+profile = "accept_edits"
+
+[[permissions.rules]]
+tool = "execute_command"
+action = "deny"
+command_prefix = ["rm", "-rf"]
+reason = "refuse broad recursive deletes"
+
+[[permissions.rules]]
+tool = "filesystem__*"
+action = "ask"</code></pre>
+        <p>Rules can match exact tool names, suffix wildcards, <code>mcp:*</code>, all tools (<code>*</code>), exact command strings, or tokenized command prefixes. Evaluation runs from last to first, so the last matching rule wins. Explicit deny rules remain active in Bypass mode.</p>
+      </section>
+
+      <section id="sessions" aria-labelledby="sessions-title">
+        <h2 id="sessions-title"><span class="section-no">05</span><a class="anchor-link" href="#sessions">Sessions, context, cost, and recovery</a></h2>
+        <h3 id="session-management">Manage saved sessions</h3>
+        <pre><code>/sessions
+/sessions resume &lt;id-or-unique-prefix&gt;
+/sessions rename Fix authentication race
+/sessions delete &lt;id-or-prefix&gt; --yes</code></pre>
+        <p>Sessions are listed newest first. Resume and delete accept a full ID or unique prefix. Deletion is irreversible and requires <code>--yes</code>; deleting the active session first creates a replacement.</p>
+
+        <h3 id="context-model">Understand the counters</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Counter</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>Context occupancy</td><td>Estimated/current tokens in the next model-facing request. It can fall after compaction.</td></tr>
+              <tr><td>Session input/output</td><td>Cumulative provider-reported usage for one session.</td></tr>
+              <tr><td>Cost tally</td><td>Cumulative estimated USD from provider/model pricing and session totals.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The request estimate includes the system prompt, transcript, tool arguments/results, tool schemas, and pending additions such as expanded <code>@file</code> context. Unknown model windows cannot show a meaningful percentage.</p>
+
+        <h3 id="compaction">Compact long conversations</h3>
+        <pre><code>/compact
+/compact --keep 15</code></pre>
+        <p>Compaction makes a real request to the active model, records that request's usage, summarizes older history, and preserves the chosen recent tail plus complete tool-call/result groups. The default keeps 10 recent messages. Automatic compaction runs before an over-threshold turn when enough older history exists. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels an in-progress compaction.</p>
+        <p>Older oversized tool results may be shortened only in the model-facing copy; complete persisted transcript content remains available.</p>
+
+        <h3 id="cost-and-undo">Cost, clear, transcript, and undo</h3>
+        <pre><code>/cost
+/cost reset --yes
+/undo
+/transcript
+/clear</code></pre>
+        <p><code>/clear</code> and <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output but keep the session. <code>/undo</code> restores the latest session-scoped native write/patch backup; Git remains the durable rollback mechanism. Pricing is an estimate, and unknown/local/subscription-backed models may display <code>$0</code> even when provider plan limits apply.</p>
+      </section>
+
+      <section id="agents" aria-labelledby="agents-title">
+        <h2 id="agents-title"><span class="section-no">06</span><a class="anchor-link" href="#agents">Background agents and worktrees</a></h2>
+        <p>Each background agent is an independent job with its own session, context, provider/model, usage, cancellation, transcript, and result lifecycle.</p>
+
+        <h3 id="spawn-agents">Start bounded work</h3>
+        <pre><code>/spawn inspect the authentication flow for race conditions
+/spawn --provider gemini --model gemini-2.5-flash audit the API handlers
+/spawn --write implement the focused test fix</code></pre>
+        <p>Flags must precede the prompt. Read-only jobs inspect the foreground project root. Extra jobs queue after the configured concurrency limit. A user-entered <code>/spawn</code> starts directly; spawn approval applies to the model's <code>spawn_agent</code> tool. Tools used inside either child remain governed by the child's snapshotted policy.</p>
+
+        <h3 id="agent-view">Agent View</h3>
+        <p>Open <code>/agents</code>, press Left Arrow from an empty idle prompt, or open one transcript with <code>/agents &lt;id&gt;</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Key</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>N</kbd></td><td>Focus the new-agent composer.</td></tr>
+              <tr><td><kbd>Up</kbd>/<kbd>Down</kbd>, <kbd>J</kbd>/<kbd>K</kbd></td><td>Move between agents.</td></tr>
+              <tr><td><kbd>P</kbd></td><td>Peek at output.</td></tr>
+              <tr><td><kbd>Enter</kbd> or <kbd>O</kbd></td><td>Open the transcript.</td></tr>
+              <tr><td><kbd>C</kbd></td><td>Cancel an active agent.</td></tr>
+              <tr><td><kbd>I</kbd></td><td>Inject a terminal result into foreground context.</td></tr>
+              <tr><td><kbd>X</kbd> or <kbd>D</kbd></td><td>Ignore a completed result.</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Clear a draft, return to the list, or close Agent View.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Use <code>/jobs</code>, <code>/jobs &lt;id&gt;</code>, <code>/cancel &lt;id&gt;</code>, and <code>/cancel all</code> from chat. Live transcripts preserve your scroll position unless you were already at the bottom.</p>
+
+        <h3 id="result-lifecycle">Result lifecycle</h3>
+        <p>Completed results are not silently inserted into foreground context. The terminal completion notification marks a result seen; injecting adds a bounded handoff; explicit parent collection marks it consumed; ignoring marks it ignored. <code>collect_agent_results</code> is a read-only tool and is normally auto-allowed unless an explicit rule changes it to ask or deny. Artifact manifests summarize changed files, worktree metadata, commands/tests, searches, child jobs, bounded previews, and errors. Full logs and files stay in the transcript/worktree.</p>
+
+        <h3 id="write-worktrees">Write-capable jobs</h3>
+        <pre><code>~/.packetcode/worktrees/&lt;repo-key&gt;/&lt;job-id&gt;
+branch: packetcode-job-&lt;job-id&gt;
+base: current HEAD</code></pre>
+        <p>A write job requires Git and never edits the foreground checkout. Its base is committed <code>HEAD</code>; dirty foreground changes are not copied. Worktree creation fails closed.</p>
+        <pre><code># Inspect a completed job
+git -C &lt;worktree-path&gt; status --short
+git -C &lt;worktree-path&gt; diff
+git -C &lt;worktree-path&gt; log --oneline --decorate -5
+
+# If the agent created a commit, integrate it deliberately
+git cherry-pick &lt;commit&gt;</code></pre>
+        <div class="callout warning">
+          <span class="callout-title">No automatic merge</span>
+          <p>Packetcode does not commit, merge, copy uncommitted edits, remove worktrees, or delete branches automatically. Do not assume a completed job has made a commit. Assign disjoint files to parallel writers or serialize them.</p>
+        </div>
+
+        <h3 id="agent-limits">Limits and persistence</h3>
+        <p>Defaults are four concurrent jobs, nesting depth two, and 32 jobs per process run. Job snapshots persist under <code>~/.packetcode/jobs/</code>. Jobs active during an unclean exit recover as cancelled rather than resuming. Arbitrary sub-agent clarification questions and foreground streaming of sub-agent output are not implemented.</p>
+      </section>
+
+      <section id="workflows" aria-labelledby="workflows-title">
+        <h2 id="workflows-title"><span class="section-no">07</span><a class="anchor-link" href="#workflows">Workflows and loops</a></h2>
+        <p>Workflows orchestrate ordered phases over the same job manager. A <code>parallel</code> step creates one job per fan-out item and joins the results.</p>
+        <pre><code>/workflows
+/workflows list
+/workflows run review
+/workflows run review target="the staged diff"
+/workflows &lt;run-id&gt;
+/workflows stop &lt;run-id&gt;
+/workflows stop all</code></pre>
+        <p>A built-in <code>review</code> workflow is immediately available. User definitions live in <code>~/.packetcode/workflows/*.toml</code>; project definitions in <code>.packetcode/workflows/*.toml</code> take precedence.</p>
+        <pre><code>name = "focused-review"
+
+[inputs]
+target = "the current working tree"
+
+[[phases]]
+name = "analysis"
+
+[[phases.steps]]
+name = "review"
+mode = "parallel"
+bind = "review"
+fan_out = ["correctness", "security", "test gaps"]
+prompt = "Review {{.inputs.target}} for {{.item}}. Return evidence with file paths."
+
+[[phases]]
+name = "synthesis"
+
+[[phases.steps]]
+name = "synthesize"
+mode = "single"
+prompt = "Deduplicate and prioritize these findings:\n\n{{.steps.review}}"</code></pre>
+        <p>Optional step fields are <code>provider</code>, <code>model</code>, <code>system_prompt</code>, and <code>allow_write</code>. <code>continue_on_error = true</code> belongs on a phase. Each run has a 16-agent guard plus global limits; cancellation cascades to registered children.</p>
+
+        <h3 id="loops">Repeat foreground work</h3>
+        <pre><code>/loop Continue reviewing and fixing the focused tests until complete
+/loop 10m /workflows run review
+/loop list
+/loop stop &lt;loop-id&gt;
+/loop stop all</code></pre>
+        <p>Self-paced loops ask the model for a versioned <code>packetcode-loop-decision</code> JSON block, retain <code>LOOP_DONE</code> for compatibility, and stop after 25 iterations regardless. Interval loops run immediately and then on the interval (minimum one second). A tick during active foreground work queues rather than overlaps.</p>
+        <div class="callout limit">
+          <span class="callout-title">Current orchestration limits</span>
+          <p>Workflow pipelines and verifier/retry stages are not shipped. Loops are process-local schedulers, not durable daemons.</p>
+        </div>
+      </section>
+
+      <section id="configuration" aria-labelledby="configuration-title">
+        <h2 id="configuration-title"><span class="section-no">08</span><a class="anchor-link" href="#configuration">Configuration and state</a></h2>
+        <p>The main file is <code>~/.packetcode/config.toml</code>. This practical baseline keeps Codex in the foreground, limits background work, and preserves a deny floor:</p>
+        <pre><code>[default]
+provider = "codex"
+model = "gpt-5.6-sol"
+
+[providers.codex]
+default_model = "gpt-5.6-sol"
+reasoning_effort = "high"
+
+[providers.ollama]
+host = "http://localhost:11434"
+default_model = "qwen2.5-coder:14b"
+
+[behavior]
+trust_mode = false
+auto_compact_threshold = 80
+max_input_rows = 10
+provider_max_retries = 3
+provider_stall_timeout = 60
+background_max_concurrent = 4
+background_max_depth = 2
+background_max_total = 32
+background_default_provider = ""
+background_default_model = ""
+background_token_budget = 0
+workflow_token_budget = 0
+
+[permissions]
+profile = "ask"
+
+[[permissions.rules]]
+tool = "execute_command"
+action = "deny"
+command_prefix = ["rm", "-rf"]
+reason = "refuse broad recursive deletes"</code></pre>
+        <ul>
+          <li>Zero token budgets disable budget-based stopping.</li>
+          <li><code>provider_max_retries</code> is total attempts, including the first.</li>
+          <li><code>provider_stall_timeout</code> aborts a provider stream after that many silent seconds.</li>
+          <li>Empty background provider/model values inherit the foreground pair.</li>
+          <li>Per-job budgets are checked at provider/tool boundaries. Workflow budgets stop later steps; an in-flight parallel fan-out may finish above the boundary.</li>
+        </ul>
+
+        <h3 id="state-paths">State locations</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>~/.packetcode/config.toml</code></td><td>Providers, behavior, permissions, MCP, hooks, statusline.</td></tr>
+              <tr><td><code>~/.packetcode/sessions/</code></td><td>Foreground and background transcripts.</td></tr>
+              <tr><td><code>~/.packetcode/jobs/</code></td><td>Background snapshots and manifests.</td></tr>
+              <tr><td><code>~/.packetcode/worktrees/</code></td><td>Write-agent checkouts.</td></tr>
+              <tr><td><code>~/.packetcode/commands/</code></td><td>User Markdown commands.</td></tr>
+              <tr><td><code>~/.packetcode/workflows/</code></td><td>User workflow definitions.</td></tr>
+              <tr><td><code>~/.packetcode/theme.toml</code></td><td>Optional semantic colors.</td></tr>
+              <tr><td><code>~/.packetcode/cost-tally.json</code></td><td>Cumulative usage/cost high-water marks.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="custom-commands">Custom prompt commands</h3>
+        <p>Put Markdown commands at <code>~/.packetcode/commands/&lt;name&gt;.md</code> or <code>.packetcode/commands/&lt;name&gt;.md</code>. Project commands override user commands; built-ins cannot be replaced. The filename is the slash command, and <code>$ARGUMENTS</code> expands to trailing text.</p>
+        <pre><code>---
+description: Review an API surface
+---
+Review $ARGUMENTS for correctness, compatibility, and security. Return concrete findings.</code></pre>
+        <pre><code>/review-api internal/http</code></pre>
+      </section>
+
+      <section id="integrations" aria-labelledby="integrations-title">
+        <h2 id="integrations-title"><span class="section-no">09</span><a class="anchor-link" href="#integrations">MCP, hooks, and statusline</a></h2>
+        <h3 id="mcp">MCP servers</h3>
+        <p>Packetcode supports stdio MCP tools. At startup it launches enabled servers, performs <code>initialize</code>, sends <code>notifications/initialized</code>, loads <code>tools/list</code>, and registers names as <code>&lt;server&gt;__&lt;tool&gt;</code>.</p>
+        <pre><code>[mcp.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
+enabled = true
+timeout_sec = 20
+env_from = ["FILESYSTEM_SERVICE_TOKEN"]
+
+[mcp.filesystem.env]
+LOG_LEVEL = "warn"</code></pre>
+        <p>Only a small environment allowlist plus <code>env_from</code> names and explicit <code>env</code> values reach the child; explicit values win. The timeout applies to initialization, discovery, and calls.</p>
+        <pre><code>/mcp
+/mcp status filesystem
+/mcp tools filesystem
+/mcp logs filesystem</code></pre>
+        <p>MCP calls use normal permission rules; match all with <code>mcp:*</code> or a server with <code>filesystem__*</code>. Startup failures do not prevent the TUI from opening. Logs use a bounded, redacted tail.</p>
+        <div class="callout limit"><span class="callout-title">MCP limit</span><p>HTTP/SSE transports, prompts/resources, and live configuration reload are not supported. Use <code>/mcp restart &lt;name&gt;</code> after a process crash; restart PacketCode after changing configuration.</p></div>
+
+        <h3 id="hooks">Hooks</h3>
+        <p>Hooks execute configured shell text in the project root: PowerShell on Windows and <code>sh -c</code> elsewhere.</p>
+        <pre><code>[[hooks.user_prompt_submit]]
+command = "cat .packetcode-context 2&gt;/dev/null || true"
+timeout_sec = 2
+
+[[hooks.pre_tool_use]]
+matcher = "execute_command"
+command = "python scripts/guard-command.py"
+timeout_sec = 5
+
+[[hooks.post_tool_use]]
+matcher = "patch_file"
+command = "gofmt -w $(git diff --name-only -- '*.go') 2&gt;/dev/null || true"
+timeout_sec = 10</code></pre>
+        <ul>
+          <li><code>user_prompt_submit</code>: successful stdout becomes extra prompt context.</li>
+          <li><code>pre_tool_use</code>: non-zero exit blocks the tool call.</li>
+          <li><code>post_tool_use</code>: successful stdout is appended to the result; failures are reported in appended hook output.</li>
+        </ul>
+
+        <h3 id="statusline">Native and custom statusline</h3>
+        <p>The native line works without configuration and responsively prioritizes live operation, agents, provider/model, reasoning effort, context occupancy, project/branch, and cost.</p>
+        <pre><code>[statusline]
+command = "jq -r '\"\\(.provider.display_name) · \\(.model.id) · \\(.model.reasoning_effort) · \\(.context_window.used_percentage)%\"'"
+timeout_sec = 2</code></pre>
+        <p>The command receives JSON on stdin and may use packetcode-native fields or Claude Code-compatible aliases such as <code>cwd</code>, <code>model.display_name</code>, <code>context_window.context_window_size</code>, and <code>context_window.current_usage</code>. Hook and statusline stdout/stderr are capped at 64 KiB. A failed, empty, or timed-out statusline falls back to native output.</p>
+        <pre><code>/statusline
+/statusline refresh</code></pre>
+      </section>
+
+      <section id="architecture" aria-labelledby="architecture-title">
+        <h2 id="architecture-title"><span class="section-no">10</span><a class="anchor-link" href="#architecture">Architecture, terminal behavior, and security</a></h2>
+        <h3 id="mental-model">Mental model</h3>
+        <pre><code>terminal input
+    |
+    v
+Bubble Tea app ---- provider registry ---- active model stream
+    |                    |
+    |                    +---- OpenAI / Codex / Anthropic / ... / Ollama
+    |
+    +---- foreground agent ---- native tools ---- project root
+    |          |                  |
+    |          |                  +---- policy and approvals
+    |          +---- transcript, usage, backups
+    |
+    +---- jobs manager ---- independent background sessions/worktrees
+    +---- workflow engine ---- ordered phases and parallel fan-out
+    +---- MCP manager / hooks / optional statusline process</code></pre>
+        <p>The foreground agent owns visible conversation state. Background jobs own separate sessions. Provider streams and job callbacks enter the UI as messages; the terminal event loop remains the single owner of rendered state.</p>
+
+        <h3 id="terminal-safety">Terminal behavior</h3>
+        <p>Finalized output goes to terminal-native scrollback; only active work remains in the live region. Provider and tool text is sanitized before display: terminal control sequences, mouse-mode toggles, clipboard operations, unsafe control bytes, destructive carriage-return rewrites, and malformed split UTF-8 are removed or normalized.</p>
+        <div class="callout warning"><span class="callout-title">Display hardening is not command safety</span><p>Sanitization protects terminal state. It does not make the underlying shell command, hook, or MCP process safe.</p></div>
+
+        <h3 id="security-boundaries">Security boundaries</h3>
+        <ul>
+          <li>Native file tools canonicalize project paths and reject directory or symlink escapes.</li>
+          <li>Read tools bound output and avoid binary content where appropriate.</li>
+          <li>Permission policy gates invocation; an allowed process runs with your account's authority.</li>
+          <li><code>execute_command</code>, hooks, statusline commands, and MCP servers are not OS-sandboxed.</li>
+          <li>Worktrees isolate repository files, not network access, credentials, or arbitrary paths reachable by an allowed shell.</li>
+          <li>Custom model endpoints receive system instructions, conversation content, tool schemas, and tool results.</li>
+          <li><code>@file</code> expansion sends the selected file content to the active provider.</li>
+          <li>Explicit deny rules remain the floor in Bypass mode.</li>
+        </ul>
+        <p>Do not use <code>--trust</code> in unfamiliar repositories. Review <code>.packetcode/</code>, hooks, workflow definitions, and MCP commands first. Keep secrets in environment variables or provider stores; do not attach them with <code>@</code>.</p>
+      </section>
+
+      <section id="diagnostics" aria-labelledby="diagnostics-title">
+        <h2 id="diagnostics-title"><span class="section-no">11</span><a class="anchor-link" href="#diagnostics">Diagnostics and troubleshooting</a></h2>
+        <pre><code>packetcode doctor
+packetcode doctor --json
+packetcode doctor --check config
+packetcode doctor --check providers
+packetcode doctor --check permissions
+packetcode doctor --check project,state.worktrees</code></pre>
+        <p><code>--check</code> accepts a section or exact check ID, can be repeated, and can contain comma-separated values.</p>
+
+        <div class="cards">
+          <article class="card">
+            <h3>Codex unavailable</h3>
+            <p>Run <code>codex login</code> and select ChatGPT sign-in. Confirm the OAuth file is present; use <code>openai</code> for API-key mode.</p>
+          </article>
+          <article class="card">
+            <h3>Model switch fails</h3>
+            <p>Use <code>/model</code> for the exact account catalog, then run <code>packetcode doctor --check providers</code>. Fallback listing does not guarantee invocation access.</p>
+          </article>
+          <article class="card">
+            <h3>Unexpected allow or deny</h3>
+            <p>Run <code>/permissions</code> and <code>/permissions explain &lt;tool&gt;</code>. Return to Manual with <code>/permissions profile ask</code>.</p>
+          </article>
+          <article class="card">
+            <h3>Write job failed</h3>
+            <p>Run <code>git status</code>, <code>git worktree list</code>, and the project/worktree doctor checks. Failure closes safely without editing foreground files.</p>
+          </article>
+          <article class="card">
+            <h3>Job queued too long</h3>
+            <p>Open <code>/agents</code>, compare active work against <code>background_max_concurrent</code>, and cancel stale jobs with <code>/cancel</code>.</p>
+          </article>
+          <article class="card">
+            <h3>MCP or hook failure</h3>
+            <p>Use <code>/mcp status</code> and <code>/mcp logs</code>. Test hooks in the platform shell and restart packetcode after MCP changes.</p>
+          </article>
+          <article class="card">
+            <h3>Cannot scroll</h3>
+            <p>Use terminal scrolling, Shift+PageUp, or tmux copy mode. <code>/transcript</code> opens persisted conversation history.</p>
+          </article>
+          <article class="card">
+            <h3>Context grows quickly</h3>
+            <p>Use <code>/compact</code>, avoid repeated large mentions, inspect large tool/MCP results, and remember tool schemas are resent.</p>
+          </article>
+        </div>
+
+        <h3 id="safe-shutdown">Cancel and exit safely</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>C</kbd> cancels active foreground work, clears an idle draft, or exits at an empty idle prompt. <kbd>Ctrl</kbd>+<kbd>D</kbd>, <code>/exit</code>, and <code>/quit</code> also exit when appropriate. Stop scheduled/background work explicitly when you do not want it to continue through shutdown:</p>
+        <pre><code>/cancel all
+/workflows stop all
+/loop stop all</code></pre>
+      </section>
+
+      <section id="advanced-patterns" aria-labelledby="advanced-patterns-title">
+        <h2 id="advanced-patterns-title"><span class="section-no">12</span><a class="anchor-link" href="#advanced-patterns">Advanced operating patterns</a></h2>
+        <h3 id="fan-out-pattern">Research, synthesize, then write</h3>
+        <ol class="steps">
+          <li>Enter Plan mode and ask independent read-only agents for correctness, testing, and security/documentation evidence.</li>
+          <li>Continue your own inspection while they run; avoid anchoring every reviewer on one interpretation.</li>
+          <li>Peek or open transcripts, then inject only results that affect the decision.</li>
+          <li>Ask the foreground model for one reconciled design.</li>
+          <li>Switch to Accept Edits or Auto and implement in one checkout—or use disjoint write jobs.</li>
+          <li>Run a fresh read-only verification fan-out.</li>
+        </ol>
+        <pre><code>/plan on
+/spawn audit correctness; cite exact files and lines
+/spawn inspect cancellation, races, and cleanup paths
+/spawn compare docs and tests against shipped behavior</code></pre>
+
+        <h3 id="provider-specialization">Provider specialization</h3>
+        <p>The foreground and background providers may differ. Use a fast model for inventory, a deep reasoning model for invariants, and a long-context model for synthesis:</p>
+        <pre><code>/spawn --provider gemini --model gemini-2.5-flash inventory all call sites
+/spawn --provider codex --model gpt-5.6-sol reason about the concurrency invariant</code></pre>
+        <p>Each provider/model must be configured and valid. Job usage and cost remain separate after result injection.</p>
+
+        <h3 id="guarded-automation">Guarded automation and lean handoffs</h3>
+        <p>Combine an <code>accept_edits</code> base profile with exact command rules and a fail-closed pre-tool hook. Prefer a finite workflow over a loop when the fan-out shape is known. Ask agents for conclusions, evidence paths, commands run, and unresolved risks—not raw logs. Compact at phase boundaries rather than after every turn.</p>
+
+        <h3 id="shipped-limits">Shipped behavior versus current limits</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Shipped</th><th>Not yet shipped</th></tr></thead>
+            <tbody>
+              <tr><td>Agents</td><td>Bounded concurrent jobs, nesting, persistence, cancellation, live transcripts, result lifecycle.</td><td>Resume execution after restart; arbitrary clarification questions.</td></tr>
+              <tr><td>Write isolation</td><td>Dedicated worktree/branch from committed <code>HEAD</code>.</td><td>Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning.</td></tr>
+              <tr><td>Workflows</td><td>Sequential phases, single/parallel steps, fan-out join, cancellation, budgets.</td><td>Pipelines and verifier/retry stages.</td></tr>
+              <tr><td>Terminal</td><td>Native scrollback, bounded live region, sanitized output, multiline fallbacks.</td><td>Uniform true Shift+Enter across terminals.</td></tr>
+              <tr><td>MCP</td><td>Stdio discovery/calls, namespaced tools, policies, logs.</td><td>HTTP/SSE, prompts/resources, live reload/restart.</td></tr>
+              <tr><td>Reasoning</td><td>Catalog-driven Codex <code>/effort</code> and status display.</td><td>Universal reasoning control for every provider/model.</td></tr>
+              <tr><td>Security</td><td>Root-scoped native files, policy, worktrees, display hardening.</td><td>OS/container sandbox for allowed shell, hook, statusline, or MCP processes.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="quick-reference" aria-labelledby="quick-reference-title">
+        <h2 id="quick-reference-title"><span class="section-no">PRINTABLE</span><a class="anchor-link" href="#quick-reference">Terminal cheat sheet</a></h2>
+        <p class="micro">Use the “Print cheat sheet” button at the top to print only this section. Browser Print prints the complete manual with this reference on its own compact page.</p>
+
+        <div class="ref-grid">
+          <div>
+            <h3>Start from your shell</h3>
+            <pre><code>packetcode
+packetcode --provider codex
+packetcode --provider codex --model gpt-5.6-sol
+packetcode --provider ollama
+packetcode --resume &lt;session-id&gt;
+packetcode --permission-mode auto
+packetcode --trust
+packetcode doctor --check providers
+packetcode doctor --json</code></pre>
+            <p class="micro">Permission modes: <code>ask</code>, <code>accept-edits</code>, <code>auto</code>, <code>read-only</code>, <code>bypass</code>.</p>
+          </div>
+          <div>
+            <h3>Keys worth remembering</h3>
+            <p class="key-strip"><kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> / <kbd>\</kbd> then <kbd>Enter</kbd> universal newline · <kbd>Ctrl</kbd>+<kbd>J</kbd> newline (completion down while popup open) · <kbd>Shift</kbd>+<kbd>Tab</kbd> permissions · <kbd>Ctrl</kbd>+<kbd>P</kbd> provider · <code>/model</code> model picker (<kbd>Ctrl</kbd>+<kbd>M</kbd> terminal-dependent) · <kbd>Left</kbd> agents · <kbd>Ctrl</kbd>+<kbd>C</kbd> cancel/clear/quit · <kbd>Ctrl</kbd>+<kbd>D</kbd> quit · <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output · <kbd>Esc</kbd> rejects an approval.</p>
+          </div>
+        </div>
+
+        <h3>Task → command</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Intent</th><th>Command / example</th></tr></thead>
+            <tbody>
+              <tr><td>Provider and model</td><td><code>/provider</code>, <code>/provider codex</code>, <code>/provider add &lt;slug&gt;</code>, <code>/model</code>, <code>/model gpt-5.6-sol</code></td></tr>
+              <tr><td>Codex reasoning</td><td><code>/effort</code>, <code>/effort high</code>, <code>/effort max</code>, <code>/effort default</code></td></tr>
+              <tr><td>Permissions</td><td><code>/permissions</code>, <code>/permissions profiles</code>, <code>/permissions profile auto</code>, <code>/plan on</code>, <code>/trust on</code></td></tr>
+              <tr><td>Include a file</td><td><code>Review @internal/app/app.go and fix the focus bug</code></td></tr>
+              <tr><td>Read-only agent</td><td><code>/spawn audit the current diff</code></td></tr>
+              <tr><td>Chosen agent model</td><td><code>/spawn --provider codex --model gpt-5.6-sol audit auth</code></td></tr>
+              <tr><td>Isolated write agent</td><td><code>/spawn --write fix the focused tests</code></td></tr>
+              <tr><td>Agent control</td><td><code>/agents</code>, <code>/agents &lt;id&gt;</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td></tr>
+              <tr><td>Fan-out workflow</td><td><code>/workflows run review target="the staged diff"</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
+              <tr><td>Repeat work</td><td><code>/loop Continue until complete</code>, <code>/loop 10m /workflows run review</code>, <code>/loop list</code>, <code>/loop stop all</code></td></tr>
+              <tr><td>Pending prompts</td><td><code>/queue</code>, <code>/queue drop &lt;n&gt;</code>, <code>/queue clear</code></td></tr>
+              <tr><td>Sessions/context</td><td><code>/sessions</code>, <code>/sessions resume &lt;id&gt;</code>, <code>/sessions rename &lt;name&gt;</code>, <code>/compact --keep 10</code></td></tr>
+              <tr><td>Usage/recovery</td><td><code>/cost</code>, <code>/cost reset --yes</code>, <code>/undo</code>, <code>/transcript</code></td></tr>
+              <tr><td>Ollama</td><td><code>/ollama status</code>, <code>/ollama models</code>, <code>/ollama ps</code>, <code>/ollama pull &lt;model&gt;</code></td></tr>
+              <tr><td>MCP</td><td><code>/mcp</code>, <code>/mcp status &lt;name&gt;</code>, <code>/mcp tools &lt;name&gt;</code>, <code>/mcp logs &lt;name&gt;</code></td></tr>
+              <tr><td>Literal slash</td><td><code>//not-a-command</code> sends <code>/not-a-command</code> as the prompt.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Complete slash-command forms</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>/provider [add [slug]|slug]</code></td><td>Open picker, add/update a key, or switch.</td></tr>
+              <tr><td><code>/model [id]</code></td><td>Open picker or switch model.</td></tr>
+              <tr><td><code>/effort [default|low|medium|high|xhigh|max|ultra]</code></td><td>Show or set supported reasoning effort.</td></tr>
+              <tr><td><code>/spawn [--provider slug] [--model id] [--write] &lt;prompt&gt;</code></td><td>Start a background agent.</td></tr>
+              <tr><td><code>/agents [id]</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td><td>Inspect or cancel background work.</td></tr>
+              <tr><td><code>/workflows [run &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Run or inspect workflows.</td></tr>
+              <tr><td><code>/loop [interval] &lt;prompt|/command&gt;</code></td><td>Repeat work; use <code>list</code> or <code>stop</code>.</td></tr>
+              <tr><td><code>/queue [drop &lt;n&gt;|clear]</code></td><td>Manage queued foreground prompts.</td></tr>
+              <tr><td><code>/sessions</code>, <code>resume</code>, <code>rename</code>, <code>delete &lt;id&gt; --yes</code></td><td>Manage saved sessions.</td></tr>
+              <tr><td><code>/compact [--keep N]</code>, <code>/cost [reset [--yes]]</code>, <code>/undo</code></td><td>Manage context, usage, and latest native backup.</td></tr>
+              <tr><td><code>/plan [on|off]</code>, <code>/permissions ...</code>, <code>/trust [on|off]</code></td><td>Control session policy.</td></tr>
+              <tr><td><code>/ollama [status|models|ps|pull &lt;model&gt;]</code></td><td>Inspect or manage Ollama.</td></tr>
+              <tr><td><code>/mcp [status|tools|logs] [name]</code></td><td>Inspect MCP servers.</td></tr>
+              <tr><td><code>/statusline [refresh]</code>, <code>/transcript</code>, <code>/clear</code>, <code>/help</code></td><td>Inspect or control the interface.</td></tr>
+              <tr><td><code>/exit</code>, <code>/quit</code></td><td>Exit packetcode.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>Remember:</strong> write agents use separate worktrees and are not merged automatically. Completed agent results stay out of foreground context until injected or collected. Inside packetcode, <code>/help</code> is authoritative for the version you are running.</p>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div>packetcode manual · practical guide, advanced operations, and offline quick reference · documentation for the current <code>main</code> branch</div>
+  </footer>
+
+  <script>
+    (function () {
+      var button = document.getElementById('print-cheat');
+      if (!button) return;
+      function resetPrintMode() { document.body.classList.remove('print-cheat'); }
+      button.addEventListener('click', function () {
+        document.body.classList.add('print-cheat');
+        window.print();
+      });
+      window.addEventListener('afterprint', resetPrintMode);
+    }());
+  </script>
+</body>
+</html>

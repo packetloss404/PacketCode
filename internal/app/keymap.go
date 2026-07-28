@@ -5,9 +5,10 @@ package app
 var (
 	GlobalKeys = []KeyHelp{
 		{"Ctrl+P", "Open provider picker"},
-		{"Ctrl+M", "Open model picker"},
+		{"/model", "Open model picker (Ctrl+M also works when the terminal reports it distinctly)"},
 		{"Shift+Tab", "Cycle permission mode, including during an active turn (normal → accept edits → auto → plan)"},
-		{"Ctrl+C", "Cancel current generation; press twice to exit"},
+		{"Ctrl+C", "Cancel generation, clear a draft, or quit from an empty prompt"},
+		{"Ctrl+D", "Quit from an empty prompt"},
 		{"Ctrl+L", "Clear screen (keep session)"},
 		{"Esc", "Close jobs modal / approval / picker / autocomplete popup"},
 	}
@@ -22,7 +23,7 @@ var (
 	}
 	InputKeys = []KeyHelp{
 		{"Enter", "Send message"},
-		{"Shift+Enter", "Insert newline"},
+		{"Alt+Enter / \\ then Enter", "Insert newline (Ctrl+J also works while completion is closed)"},
 		{"↑/↓", "Recall previous / next prompt (when caret is at top/bottom)"},
 	}
 	// AutocompleteKeys documents the slash-command autocomplete popup's
@@ -65,6 +66,7 @@ var (
 		{"/providers", "Alias for /provider — open the provider picker"},
 		{"/model [id]", "List models or switch active"},
 		{"/models", "Alias for /model — open the model picker"},
+		{"/effort [level]", "Show or set model reasoning effort"},
 		{"/sessions", "List sessions"},
 		{"/sessions resume <id>", "Resume a session by full ID or 8-char prefix"},
 		{"/sessions rename <name>", "Rename the current session"},
@@ -87,6 +89,7 @@ var (
 		{"/mcp status <name>", "Show MCP server health details"},
 		{"/mcp tools <name>", "List tools exposed by an MCP server"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
+		{"/mcp restart <name>", "Reconnect one MCP server process"},
 		{"/ollama [status|models|ps|pull <model>]", "Local Ollama status, models, and management"},
 		{"/transcript", "Open the current session transcript"},
 		{"/exit", "Quit packetcode"},

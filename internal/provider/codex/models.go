@@ -18,10 +18,19 @@ const modelsCacheName = "models_cache.json"
 // staticFallbackCatalog is used when models_cache.json is missing or
 // unreadable. It reflects the ChatGPT-account Codex line-up known at build
 // time; the live cache supersedes it whenever present.
+var solReasoningEfforts = []provider.ReasoningEffort{
+	{ID: "low", Description: "Fast responses with lighter reasoning"},
+	{ID: "medium", Description: "Balances speed and reasoning depth for everyday tasks"},
+	{ID: "high", Description: "Greater reasoning depth for complex problems"},
+	{ID: "xhigh", Description: "Extra high reasoning depth for complex problems"},
+	{ID: "max", Description: "Maximum reasoning depth for the hardest problems"},
+	{ID: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+}
+
 var staticFallbackCatalog = []cachedModel{
-	{Slug: "gpt-5.6-sol", Display: "GPT-5.6-Sol", Context: 272_000, DefaultEffort: "low", Priority: 1, SummarySupported: true},
-	{Slug: "gpt-5.6-terra", Display: "GPT-5.6-Terra", Context: 272_000, DefaultEffort: "medium", Priority: 2, SummarySupported: true},
-	{Slug: "gpt-5.6-luna", Display: "GPT-5.6-Luna", Context: 272_000, DefaultEffort: "medium", Priority: 3, SummarySupported: true},
+	{Slug: "gpt-5.6-sol", Display: "GPT-5.6-Sol", Context: 272_000, DefaultEffort: "low", SupportedEfforts: solReasoningEfforts, Priority: 1, SummarySupported: true},
+	{Slug: "gpt-5.6-terra", Display: "GPT-5.6-Terra", Context: 272_000, DefaultEffort: "medium", SupportedEfforts: solReasoningEfforts, Priority: 2, SummarySupported: true},
+	{Slug: "gpt-5.6-luna", Display: "GPT-5.6-Luna", Context: 272_000, DefaultEffort: "medium", SupportedEfforts: solReasoningEfforts, Priority: 3, SummarySupported: true},
 	{Slug: "gpt-5.5", Display: "GPT-5.5", Context: 272_000, DefaultEffort: "medium", Priority: 7, SummarySupported: true},
 	{Slug: "gpt-5.4", Display: "GPT-5.4", Context: 272_000, DefaultEffort: "medium", Priority: 16, SummarySupported: true},
 	{Slug: "gpt-5.4-mini", Display: "GPT-5.4-mini", Context: 272_000, DefaultEffort: "medium", Priority: 23, SummarySupported: true},
@@ -29,11 +38,12 @@ var staticFallbackCatalog = []cachedModel{
 
 // cachedModel is the distilled view of one models_cache.json entry.
 type cachedModel struct {
-	Slug          string
-	Display       string
-	Context       int
-	DefaultEffort string
-	Priority      int
+	Slug             string
+	Display          string
+	Context          int
+	DefaultEffort    string
+	SupportedEfforts []provider.ReasoningEffort
+	Priority         int
 	// SummarySupported is whether the model accepts reasoning.summary. When
 	// false (only gpt-5.3-codex-spark today) sending it 400s, so we omit it.
 	// The gpt-5.6 family accepts it but ignores it (encrypted-only reasoning);
@@ -45,12 +55,16 @@ type cachedModel struct {
 // packetcode needs).
 type rawModelsCache struct {
 	Models []struct {
-		Slug          string `json:"slug"`
-		DisplayName   string `json:"display_name"`
-		ContextWindow int    `json:"context_window"`
-		Visibility    string `json:"visibility"`
-		Priority      int    `json:"priority"`
-		DefaultEffort string `json:"default_reasoning_level"`
+		Slug                     string `json:"slug"`
+		DisplayName              string `json:"display_name"`
+		ContextWindow            int    `json:"context_window"`
+		Visibility               string `json:"visibility"`
+		Priority                 int    `json:"priority"`
+		DefaultEffort            string `json:"default_reasoning_level"`
+		SupportedReasoningLevels []struct {
+			Effort      string `json:"effort"`
+			Description string `json:"description"`
+		} `json:"supported_reasoning_levels"`
 		// SupportsReasoningSummaryParameter is a pointer so we can tell an
 		// absent field (which means "supported" — the Codex CLI default) from
 		// an explicit false (unsupported, e.g. gpt-5.3-codex-spark).
@@ -95,9 +109,24 @@ func readModelsCache(authPath string) []cachedModel {
 			Display:          firstNonEmpty(m.DisplayName, m.Slug),
 			Context:          m.ContextWindow,
 			DefaultEffort:    m.DefaultEffort,
+			SupportedEfforts: reasoningEffortsFromCache(m.SupportedReasoningLevels),
 			Priority:         m.Priority,
 			SummarySupported: m.SupportsReasoningSummaryParameter == nil || *m.SupportsReasoningSummaryParameter,
 		})
+	}
+	return out
+}
+
+func reasoningEffortsFromCache(levels []struct {
+	Effort      string `json:"effort"`
+	Description string `json:"description"`
+}) []provider.ReasoningEffort {
+	out := make([]provider.ReasoningEffort, 0, len(levels))
+	for _, level := range levels {
+		if level.Effort == "" {
+			continue
+		}
+		out = append(out, provider.ReasoningEffort{ID: level.Effort, Description: level.Description})
 	}
 	return out
 }

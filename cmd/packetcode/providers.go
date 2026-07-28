@@ -30,7 +30,21 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		"mistral":    func(key string) provider.Provider { return mistral.New(key) },
 		"openrouter": func(key string) provider.Provider { return openrouter.New(key) },
 		"ollama":     func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
-		"codex":      func(_ string) provider.Provider { return codex.New(codexAuthPath(cfg)) },
+		"codex": func(_ string) provider.Provider {
+			p := codex.New(codexAuthPath(cfg))
+			if cfg != nil {
+				pc := cfg.Providers["codex"]
+				model := pc.DefaultModel
+				if model == "" && cfg.Default.Provider == "codex" {
+					model = cfg.Default.Model
+				}
+				if model == "" {
+					model = codex.DefaultModel
+				}
+				_ = p.SetReasoningEffort(model, pc.ReasoningEffort)
+			}
+			return p
+		},
 	}
 	if cfg == nil {
 		return factories

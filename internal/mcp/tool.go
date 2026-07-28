@@ -86,6 +86,9 @@ func RegisterTools(reg *tools.Registry, clients []*Client) []ToolRegistrationRep
 // Name returns the provider-safe public name for this MCP tool.
 func (t *McpTool) Name() string { return t.safeName }
 
+// ServerName identifies the owning server for safe dynamic deregistration.
+func (t *McpTool) ServerName() string { return t.serverName }
+
 // Description returns the server-supplied description (may be empty).
 func (t *McpTool) Description() string { return t.desc }
 
@@ -103,7 +106,7 @@ func (t *McpTool) Execute(ctx context.Context, params json.RawMessage) (tools.To
 	if !t.client.IsAlive() {
 		return tools.ToolResult{
 			IsError: true,
-			Content: fmt.Sprintf("MCP server %q has exited — restart packetcode to reconnect", t.serverName),
+			Content: fmt.Sprintf("MCP server %q has exited — run /mcp restart %s to reconnect", t.serverName, t.serverName),
 		}, nil
 	}
 
@@ -124,7 +127,7 @@ func (t *McpTool) Execute(ctx context.Context, params json.RawMessage) (tools.To
 		if errors.Is(err, ErrServerExited) {
 			return tools.ToolResult{
 				IsError: true,
-				Content: fmt.Sprintf("MCP server %q has exited — restart packetcode to reconnect", t.serverName),
+				Content: fmt.Sprintf("MCP server %q has exited — run /mcp restart %s to reconnect", t.serverName, t.serverName),
 			}, nil
 		}
 		if errors.Is(err, ErrToolCallTimeout) {
