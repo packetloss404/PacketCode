@@ -236,6 +236,7 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 
 ## Documentation
 
+- [Maintainer handoff](HANDOFF.md)
 - [User manual](docs/manual.md)
 - [Advanced guide](docs/advanced-guide.md)
 - [Terminal cheat sheet](docs/cheat-sheet.md)
@@ -255,6 +256,10 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 - [Packet Computers and Packet Control proposal](PACKETCOMPUTERS.md)
 
 ## Development
+
+Before resuming a maintenance session, read [HANDOFF.md](HANDOFF.md) for the
+current architecture map, verification baseline, interaction caveats, and
+recommended next work.
 
 ```bash
 make verify

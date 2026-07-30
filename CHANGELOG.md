@@ -24,6 +24,7 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Deterministic credential-free TUI lifecycle fixtures and a PTY/cell capture harness for packetcode/Claude comparisons at fixed terminal sizes.
 - Runtime `/effort` control for Codex models, including catalog-advertised levels, persistent configuration, and a compact footer indicator.
 - A practical user manual, advanced operator guide, printable terminal cheat sheet, and self-contained offline HTML5 manual.
+- A root-level maintainer handoff covering architecture, state and security boundaries, verification, interaction caveats, and prioritized next work.
 
 ### Changed
 
