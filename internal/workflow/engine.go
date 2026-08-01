@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/packetcode/packetcode/internal/jobs"
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 // DefaultWorkflowMaxAgents bounds how many agents a single run may spawn. It
@@ -132,7 +134,13 @@ func (e *Engine) Start(ctx context.Context, wf Workflow) (*Run, error) {
 	for _, ph := range wf.Phases {
 		pr := PhaseResult{Name: ph.Name}
 		for _, st := range ph.Steps {
-			pr.Steps = append(pr.Steps, StepResult{Step: st.Name, Mode: normalizeMode(st.Mode)})
+			verification := VerificationUnverified
+			if st.Verify != nil {
+				verification = VerificationPending
+			}
+			pr.Steps = append(pr.Steps, StepResult{
+				Step: st.Name, Mode: normalizeMode(st.Mode), Verification: verification,
+			})
 		}
 		run.phases = append(run.phases, pr)
 	}
@@ -177,7 +185,7 @@ outer:
 				}
 				break outer
 			}
-			sr := e.runStep(ctx, run, pi, si, st, wf.Inputs, steps, &spawned, maxAgents)
+			sr := e.runStep(ctx, run, pi, si, st, wf.Inputs, steps, &spawned, maxAgents, tokenBudget)
 
 			// Expose this step's summaries to later steps.
 			steps[st.BindKey()] = summariesOf(sr)
@@ -219,111 +227,363 @@ func workflowTokens(run *Run) int {
 	total := 0
 	for _, phase := range run.phases {
 		for _, step := range phase.Steps {
-			for _, result := range step.Agents {
-				total += result.InputTokens + result.OutputTokens
+			if len(step.Attempts) == 0 {
+				for _, result := range step.Agents {
+					total += result.InputTokens + result.OutputTokens
+				}
+				continue
+			}
+			for _, attempt := range step.Attempts {
+				for _, result := range attempt.Agents {
+					total += result.InputTokens + result.OutputTokens
+				}
+				if attempt.Verifier != nil {
+					total += attempt.Verifier.InputTokens + attempt.Verifier.OutputTokens
+				}
 			}
 		}
 	}
 	return total
 }
 
-func (e *Engine) runStep(ctx context.Context, run *Run, pi, si int, st Step, inputs, steps map[string]string, spawned *int, maxAgents int) StepResult {
+func (e *Engine) runStep(
+	ctx context.Context,
+	run *Run,
+	pi, si int,
+	st Step,
+	inputs, steps map[string]string,
+	spawned *int,
+	maxAgents, tokenBudget int,
+) StepResult {
 	mode := normalizeMode(st.Mode)
+	verification := VerificationUnverified
+	if st.Verify != nil {
+		verification = VerificationPending
+	}
+	sr := StepResult{Step: st.Name, Mode: mode, Verification: verification}
+	publish := func() { e.publishStep(run, pi, si, sr) }
 
-	// Determine the fan-out items. StepSingle is one item with an empty
-	// template item value.
+	maxAttempts := st.Retry.Max + 1
+	lastVerifyReason := ""
+	for attemptNumber := 1; attemptNumber <= maxAttempts; attemptNumber++ {
+		if err := workflowBudgetError(run, tokenBudget); err != nil {
+			sr.Err = err
+			if st.Verify != nil {
+				sr.Verification = VerificationFailed
+				sr.VerifyReason = err.Error()
+			}
+			publish()
+			return sr
+		}
+
+		progress := func(current AttemptResult) {
+			preview := cloneStepResult(sr)
+			preview.Attempts = append(preview.Attempts, cloneAttemptResult(current))
+			preview.Agents = append([]jobs.Result(nil), current.Agents...)
+			preview.JobIDs = append([]string(nil), current.JobIDs...)
+			e.publishStep(run, pi, si, preview)
+		}
+		attempt := e.runWorkAttempt(
+			ctx, run, st, inputs, steps, attemptNumber, lastVerifyReason,
+			spawned, maxAgents, progress,
+		)
+		sr.Attempts = append(sr.Attempts, attempt)
+		sr.Agents = append([]jobs.Result(nil), attempt.Agents...)
+		sr.JobIDs = append([]string(nil), attempt.JobIDs...)
+		if attempt.Err != nil {
+			sr.Err = attempt.Err
+			if st.Verify != nil {
+				sr.Verification = VerificationFailed
+				sr.VerifyReason = "work attempt failed before verification: " + attempt.Err.Error()
+			}
+			publish()
+			return sr
+		}
+
+		if st.Verify == nil {
+			sr.Verification = VerificationUnverified
+			publish()
+			return sr
+		}
+
+		// Work usage is now known. Refuse to launch a verifier when the work
+		// attempt already exhausted the approved aggregate budget.
+		if err := workflowBudgetError(run, tokenBudget); err != nil {
+			sr.Err = err
+			sr.Verification = VerificationFailed
+			sr.VerifyReason = err.Error()
+			publish()
+			return sr
+		}
+
+		workEvidence := verifierEvidenceOf(attempt.Agents)
+		if strings.TrimSpace(workEvidence) == "" {
+			workEvidence = "(the work agents returned no evidence)"
+		}
+		verifierResult, verifierID, verifierErr := e.runVerifier(
+			ctx, run, st, inputs, steps, workEvidence, attemptNumber,
+			spawned, maxAgents,
+			func(id string) {
+				sr.Attempts[len(sr.Attempts)-1].VerifierJobID = id
+				publish()
+			},
+		)
+		current := &sr.Attempts[len(sr.Attempts)-1]
+		current.VerifierJobID = verifierID
+		if verifierID != "" {
+			resultCopy := verifierResult
+			current.Verifier = &resultCopy
+		}
+
+		verdict := VerificationFailed
+		reason := ""
+		if verifierErr != nil {
+			reason = verifierErr.Error()
+		} else {
+			verdictText := e.verifierOutput(verifierResult)
+			parsed, parsedReason, parseErr := ParseVerdict(st.Verify.PassContract, verdictText)
+			verdict = parsed
+			reason = parsedReason
+			if parseErr != nil {
+				reason = parseErr.Error()
+			}
+		}
+		current.Verdict = verdict
+		current.Reason = reason
+		sr.Verification = verdict
+		sr.VerifyReason = reason
+		publish()
+
+		if verdict == VerificationPassed {
+			return sr
+		}
+		lastVerifyReason = firstNonEmpty(reason, "verifier returned fail")
+		if attemptNumber < maxAttempts {
+			sr.Verification = VerificationPending
+			sr.VerifyReason = fmt.Sprintf("attempt %d failed verification: %s; retrying", attemptNumber, lastVerifyReason)
+			publish()
+			continue
+		}
+
+		sr.Err = fmt.Errorf(
+			"step %q: verification failed after %d attempt(s): %s",
+			st.Name, attemptNumber, lastVerifyReason,
+		)
+		publish()
+		return sr
+	}
+
+	// maxAttempts is always at least one after validation; retain a defensive
+	// fail-closed terminal path for programmatic specs.
+	sr.Err = fmt.Errorf("step %q: no workflow attempt executed", st.Name)
+	publish()
+	return sr
+}
+
+func (e *Engine) runWorkAttempt(
+	ctx context.Context,
+	run *Run,
+	st Step,
+	inputs, steps map[string]string,
+	attemptNumber int,
+	previousVerifyReason string,
+	spawned *int,
+	maxAgents int,
+	onProgress func(AttemptResult),
+) AttemptResult {
+	mode := normalizeMode(st.Mode)
+	attempt := AttemptResult{Number: attemptNumber, Verdict: VerificationUnverified}
+
 	var items []string
 	if mode == StepParallel {
 		items = st.FanOut
 		if len(items) == 0 {
-			sr := StepResult{Step: st.Name, Mode: mode, Err: fmt.Errorf("step %q: parallel step has no fan-out items", st.Name)}
-			run.setStep(pi, si, sr)
-			e.emit(run)
-			return sr
+			attempt.Err = fmt.Errorf("step %q: parallel step has no fan-out items", st.Name)
+			return attempt
 		}
 	} else {
 		items = []string{""}
 	}
-
-	// Guard the per-run agent budget before spawning anything.
 	if *spawned+len(items) > maxAgents {
-		sr := StepResult{
-			Step: st.Name, Mode: mode,
-			Err: fmt.Errorf("workflow agent cap reached: step %q would spawn %d agents, exceeding the limit of %d", st.Name, len(items), maxAgents),
-		}
-		run.setStep(pi, si, sr)
-		e.emit(run)
-		return sr
+		attempt.Err = fmt.Errorf(
+			"workflow agent cap reached: step %q attempt %d would spawn %d agents, exceeding the limit of %d",
+			st.Name, attemptNumber, len(items), maxAgents,
+		)
+		return attempt
 	}
 
-	// Spawn one job per item.
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if err := ctx.Err(); err != nil {
-			results := e.cancelAndDrain(ids)
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: err}
-			run.setStep(pi, si, sr)
-			e.emit(run)
-			return sr
+			attempt.JobIDs = append([]string(nil), ids...)
+			attempt.Agents = e.cancelAndDrain(ids)
+			attempt.Err = err
+			return attempt
 		}
 		prompt, err := renderPrompt(st.Agent.Prompt, inputs, steps, item)
 		if err != nil {
-			results := e.cancelAndDrain(ids)
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: fmt.Errorf("step %q: render prompt: %w", st.Name, err)}
-			run.setStep(pi, si, sr)
-			e.emit(run)
-			return sr
+			attempt.JobIDs = append([]string(nil), ids...)
+			attempt.Agents = e.cancelAndDrain(ids)
+			attempt.Err = fmt.Errorf("step %q: render prompt: %w", st.Name, err)
+			return attempt
 		}
-		snap, serr := e.jobs.Spawn(jobs.SpawnRequest{
+		if attemptNumber > 1 {
+			prompt += fmt.Sprintf(
+				"\n\nThis is retry attempt %d. The previous verifier failed the work: %s\nAddress that evidence before returning a revised result.",
+				attemptNumber, previousVerifyReason,
+			)
+		}
+		snap, spawnErr := e.jobs.Spawn(jobs.SpawnRequest{
 			Prompt:       prompt,
 			Provider:     st.Agent.Provider,
 			Model:        st.Agent.Model,
 			SystemPrompt: st.Agent.SystemPrompt,
 			AllowWrite:   st.Agent.AllowWrite,
 		})
-		if serr != nil {
-			results := e.cancelAndDrain(ids)
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: fmt.Errorf("step %q: spawn failed: %s", st.Name, serr.Error())}
-			run.setStep(pi, si, sr)
-			e.emit(run)
-			return sr
+		if spawnErr != nil {
+			attempt.JobIDs = append([]string(nil), ids...)
+			attempt.Agents = e.cancelAndDrain(ids)
+			attempt.Err = fmt.Errorf("step %q: spawn failed: %s", st.Name, spawnErr.Error())
+			return attempt
 		}
 		ids = append(ids, snap.ID)
-		*spawned++
-		// Registration and Cancel use the same lock. If cancellation won the
-		// Spawn-to-registration race, cancel the newly created child now.
+		(*spawned)++
+		attempt.JobIDs = append([]string(nil), ids...)
 		if run.registerChild(snap.ID) {
-			results := e.cancelAndDrain(ids)
-			sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results, Err: context.Canceled}
-			run.setStep(pi, si, sr)
-			e.emit(run)
-			return sr
+			attempt.Agents = e.cancelAndDrain(ids)
+			attempt.Err = context.Canceled
+			return attempt
 		}
-		run.setStep(pi, si, StepResult{Step: st.Name, Mode: mode, JobIDs: append([]string(nil), ids...)})
-		e.emit(run)
+		if onProgress != nil {
+			onProgress(attempt)
+		}
 	}
 
-	// Join all agents concurrently (mirrors jobs spawner_adapter.CollectResults).
-	results := e.waitAll(ctx, ids)
-
-	sr := StepResult{Step: st.Name, Mode: mode, JobIDs: ids, Agents: results}
-	// A failed or cancelled agent fails the step.
-	for _, r := range results {
-		if r.State == jobs.StateFailed {
-			sr.Err = fmt.Errorf("step %q: agent %s failed: %s", st.Name, r.JobID, firstNonEmpty(r.Error, r.Reason, "unknown error"))
+	attempt.Agents = e.waitAll(ctx, ids)
+	attempt.JobIDs = append([]string(nil), ids...)
+	for _, result := range attempt.Agents {
+		if result.State == jobs.StateFailed {
+			attempt.Err = fmt.Errorf("step %q: agent %s failed: %s", st.Name, result.JobID, firstNonEmpty(result.Error, result.Reason, "unknown error"))
 			break
 		}
-		if r.State == jobs.StateCancelled {
-			sr.Err = fmt.Errorf("step %q: agent %s cancelled", st.Name, r.JobID)
+		if result.State == jobs.StateCancelled {
+			attempt.Err = fmt.Errorf("step %q: agent %s cancelled", st.Name, result.JobID)
 			break
 		}
 	}
-	if sr.Err == nil && len(results) != len(ids) {
-		sr.Err = fmt.Errorf("step %q: %d of %d agents did not report a result", st.Name, len(ids)-len(results), len(ids))
+	if attempt.Err == nil && len(attempt.Agents) != len(ids) {
+		attempt.Err = fmt.Errorf("step %q: %d of %d agents did not report a result", st.Name, len(ids)-len(attempt.Agents), len(ids))
 	}
-	run.setStep(pi, si, sr)
+	if onProgress != nil {
+		onProgress(attempt)
+	}
+	return attempt
+}
+
+func (e *Engine) runVerifier(
+	ctx context.Context,
+	run *Run,
+	st Step,
+	inputs, steps map[string]string,
+	workSummary string,
+	attemptNumber int,
+	spawned *int,
+	maxAgents int,
+	onStarted func(string),
+) (jobs.Result, string, error) {
+	if st.Verify == nil {
+		return jobs.Result{}, "", fmt.Errorf("step %q: verifier is not configured", st.Name)
+	}
+	if *spawned+1 > maxAgents {
+		return jobs.Result{}, "", fmt.Errorf(
+			"workflow agent cap reached: verifier for step %q attempt %d would exceed the limit of %d",
+			st.Name, attemptNumber, maxAgents,
+		)
+	}
+	prompt, err := renderVerifyPrompt(st.Verify.Prompt, inputs, steps, workSummary, attemptNumber)
+	if err != nil {
+		return jobs.Result{}, "", fmt.Errorf("step %q: render verifier prompt: %w", st.Name, err)
+	}
+	prompt += fmt.Sprintf("\n\nCompleted work for attempt %d:\n%s\n\n%s", attemptNumber, workSummary, verifierContractInstruction(st.Verify.PassContract))
+	snap, spawnErr := e.jobs.Spawn(jobs.SpawnRequest{
+		Prompt:       prompt,
+		Provider:     st.Verify.Provider,
+		Model:        st.Verify.Model,
+		SystemPrompt: st.Verify.SystemPrompt,
+		AllowWrite:   false,
+	})
+	if spawnErr != nil {
+		return jobs.Result{}, "", fmt.Errorf("step %q: verifier spawn failed: %s", st.Name, spawnErr.Error())
+	}
+	(*spawned)++
+	if run.registerChild(snap.ID) {
+		e.cancelAndDrain([]string{snap.ID})
+		return jobs.Result{}, snap.ID, context.Canceled
+	}
+	if onStarted != nil {
+		onStarted(snap.ID)
+	}
+	results := e.waitAll(ctx, []string{snap.ID})
+	if len(results) != 1 {
+		return jobs.Result{}, snap.ID, fmt.Errorf("step %q: verifier did not report a result", st.Name)
+	}
+	result := results[0]
+	if result.State == jobs.StateFailed {
+		return result, snap.ID, fmt.Errorf("step %q: verifier failed: %s", st.Name, firstNonEmpty(result.Error, result.Reason, "unknown error"))
+	}
+	if result.State == jobs.StateCancelled {
+		return result, snap.ID, fmt.Errorf("step %q: verifier cancelled", st.Name)
+	}
+	return result, snap.ID, nil
+}
+
+func (e *Engine) verifierOutput(result jobs.Result) string {
+	if transcript, ok := e.jobs.Transcript(result.JobID); ok {
+		for i := len(transcript) - 1; i >= 0; i-- {
+			if transcript[i].Role == provider.RoleAssistant && strings.TrimSpace(transcript[i].Content) != "" {
+				return transcript[i].Content
+			}
+		}
+	}
+	return result.Summary
+}
+
+func workflowBudgetError(run *Run, tokenBudget int) error {
+	if tokenBudget <= 0 {
+		return nil
+	}
+	used := workflowTokens(run)
+	if used < tokenBudget {
+		return nil
+	}
+	return fmt.Errorf("workflow token budget exhausted: used %d tokens (budget %d)", used, tokenBudget)
+}
+
+func (e *Engine) publishStep(run *Run, pi, si int, sr StepResult) {
+	run.setStep(pi, si, cloneStepResult(sr))
 	e.emit(run)
-	return sr
+}
+
+func cloneStepResult(sr StepResult) StepResult {
+	out := sr
+	out.Agents = append([]jobs.Result(nil), sr.Agents...)
+	out.JobIDs = append([]string(nil), sr.JobIDs...)
+	out.Attempts = make([]AttemptResult, len(sr.Attempts))
+	for i := range sr.Attempts {
+		out.Attempts[i] = cloneAttemptResult(sr.Attempts[i])
+	}
+	return out
+}
+
+func cloneAttemptResult(attempt AttemptResult) AttemptResult {
+	out := attempt
+	out.Agents = append([]jobs.Result(nil), attempt.Agents...)
+	out.JobIDs = append([]string(nil), attempt.JobIDs...)
+	if attempt.Verifier != nil {
+		verifier := *attempt.Verifier
+		out.Verifier = &verifier
+	}
+	return out
 }
 
 // waitAll waits for every job id concurrently and returns their results in
@@ -505,23 +765,44 @@ func (e *Engine) snapshot(run *Run) RunSnapshot {
 	for _, ph := range run.phases {
 		ps := PhaseSnapshot{Name: ph.Name}
 		for _, st := range ph.Steps {
-			ss := StepSnapshot{Name: st.Step, Mode: st.Mode}
+			ss := StepSnapshot{
+				Name:         st.Step,
+				Mode:         st.Mode,
+				Attempts:     len(st.Attempts),
+				Verification: st.Verification,
+				VerifyReason: st.VerifyReason,
+			}
 			if st.Err != nil {
 				ss.Err = st.Err.Error()
 			}
-			for _, jid := range st.JobIDs {
-				as := AgentSnapshot{JobID: jid}
-				if snap, ok := e.jobs.Get(jid); ok {
-					as.Job = snap
-					as.HasJob = true
+			if len(st.Attempts) == 0 {
+				for _, jid := range st.JobIDs {
+					ss.Agents = append(ss.Agents, e.agentSnapshot(jid, "work", 1))
 				}
-				ss.Agents = append(ss.Agents, as)
+			} else {
+				for _, attempt := range st.Attempts {
+					for _, jid := range attempt.JobIDs {
+						ss.Agents = append(ss.Agents, e.agentSnapshot(jid, "work", attempt.Number))
+					}
+					if attempt.VerifierJobID != "" {
+						ss.Agents = append(ss.Agents, e.agentSnapshot(attempt.VerifierJobID, "verifier", attempt.Number))
+					}
+				}
 			}
 			ps.Steps = append(ps.Steps, ss)
 		}
 		rs.Phases = append(rs.Phases, ps)
 	}
 	return rs
+}
+
+func (e *Engine) agentSnapshot(jobID, role string, attempt int) AgentSnapshot {
+	as := AgentSnapshot{JobID: jobID, Role: role, Attempt: attempt}
+	if snap, ok := e.jobs.Get(jobID); ok {
+		as.Job = snap
+		as.HasJob = true
+	}
+	return as
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -637,8 +918,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// validate performs light structural validation of a workflow spec.
-func validate(wf Workflow) error {
+// Validate performs structural and template validation without spawning any
+// agents. SchemaVersion zero is accepted only for programmatically-created
+// workflows retained for Go API compatibility; TOML files must declare the
+// current version in Loader.loadTOMLWorkflow.
+func Validate(wf Workflow) error {
+	if wf.SchemaVersion != 0 && wf.SchemaVersion != CurrentSchemaVersion {
+		return fmt.Errorf("workflow: unsupported schema_version %d (current: %d)", wf.SchemaVersion, CurrentSchemaVersion)
+	}
 	if wf.Name == "" {
 		return fmt.Errorf("workflow: missing name")
 	}
@@ -653,10 +940,45 @@ func validate(wf Workflow) error {
 			if st.Name == "" {
 				return fmt.Errorf("workflow %q: phase %q has an unnamed step", wf.Name, ph.Name)
 			}
+			if st.Mode != "" && st.Mode != StepSingle && st.Mode != StepParallel {
+				return fmt.Errorf("workflow %q: step %q has unsupported mode %q", wf.Name, st.Name, st.Mode)
+			}
 			if normalizeMode(st.Mode) == StepParallel && len(st.FanOut) == 0 {
 				return fmt.Errorf("workflow %q: parallel step %q has no fan-out items", wf.Name, st.Name)
+			}
+			if _, err := renderPrompt(st.Agent.Prompt, wf.Inputs, nil, "item"); err != nil {
+				return fmt.Errorf("workflow %q: step %q prompt template: %w", wf.Name, st.Name, err)
+			}
+			if st.Retry.Max < 0 {
+				return fmt.Errorf("workflow %q: step %q retry.max must be >= 0", wf.Name, st.Name)
+			}
+			if st.Verify == nil {
+				if st.Retry.Max > 0 {
+					return fmt.Errorf("workflow %q: step %q retry.max requires a verify block", wf.Name, st.Name)
+				}
+				continue
+			}
+			if strings.TrimSpace(st.Verify.Prompt) == "" {
+				return fmt.Errorf("workflow %q: step %q verify.prompt is required", wf.Name, st.Name)
+			}
+			if strings.TrimSpace(st.Verify.Provider) == "" {
+				return fmt.Errorf("workflow %q: step %q verify.provider is required", wf.Name, st.Name)
+			}
+			if strings.TrimSpace(st.Verify.Model) == "" {
+				return fmt.Errorf("workflow %q: step %q verify.model is required", wf.Name, st.Name)
+			}
+			if st.Verify.PassContract != PassContractV1 {
+				return fmt.Errorf(
+					"workflow %q: step %q unsupported verify.pass_contract %q (supported: %s)",
+					wf.Name, st.Name, st.Verify.PassContract, PassContractV1,
+				)
+			}
+			if _, err := renderVerifyPrompt(st.Verify.Prompt, wf.Inputs, nil, "result", 1); err != nil {
+				return fmt.Errorf("workflow %q: step %q verifier prompt template: %w", wf.Name, st.Name, err)
 			}
 		}
 	}
 	return nil
 }
+
+func validate(wf Workflow) error { return Validate(wf) }

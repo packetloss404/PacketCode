@@ -5,10 +5,11 @@
 // jobs.Manager and joining their results. The engine adds no agent-execution
 // machinery of its own: every agent is an ordinary background job.
 //
-// Phase 2 scope: sequential phases, single-agent steps, and parallel fan-out
-// steps, plus a live view. Pipelines (multi-stage chains) and adversarial
-// verification are deferred to a later phase; the Step type declares the
-// (currently unused) Stages/Verify fields as clean extension points.
+// Workflows support sequential phases, single-agent steps, parallel fan-out,
+// and optional fail-closed verification with bounded retries. Every retry and
+// verifier is an ordinary background job, so the existing job limits,
+// permissions, token accounting, cancellation, and transcript surfaces remain
+// authoritative.
 package workflow
 
 import (
@@ -28,6 +29,18 @@ const (
 	StepParallel StepMode = "parallel"
 )
 
+const (
+	// CurrentSchemaVersion is the only workflow TOML schema Packetcode accepts.
+	// A file with a newer version is refused rather than best-effort decoded.
+	CurrentSchemaVersion  = 1
+	CurrentVerdictVersion = 1
+
+	// PassContractV1 names the structured verdict contract supported by the
+	// verifier. The model must return the tagged JSON object documented in
+	// docs/workflows.md; missing or malformed verdicts fail closed.
+	PassContractV1 = "packetcode-workflow-verdict-v1"
+)
+
 // AgentSpec describes a single agent invocation. Prompt is a text/template
 // rendered against the workflow inputs, prior bound step summaries, and (for
 // fan-out) the current {{.item}}. Provider/Model/SystemPrompt are optional
@@ -40,6 +53,23 @@ type AgentSpec struct {
 	AllowWrite   bool
 }
 
+// VerifySpec declares the independent agent that decides whether a completed
+// step attempt passes. Provider and Model are required in versioned TOML so a
+// verifier never silently changes when the foreground provider changes.
+type VerifySpec struct {
+	Prompt       string
+	Provider     string
+	Model        string
+	SystemPrompt string
+	PassContract string
+}
+
+// RetrySpec bounds how many additional work attempts may run after a verifier
+// failure. Max=0 means the initial attempt only.
+type RetrySpec struct {
+	Max int
+}
+
 // Step is one unit of work within a Phase.
 type Step struct {
 	Name   string
@@ -48,11 +78,11 @@ type Step struct {
 	FanOut []string // items for StepParallel; each renders {{.item}}
 	Bind   string   // name to bind this step's summaries under (default: Name)
 
-	// Stages and Verify are declared for later phases (pipelines +
-	// adversarial verify) and are unused in Phase 2. They are safe to set
-	// in a spec but the engine ignores them.
-	Stages []string
-	Verify bool
+	// Verify is optional. A missing verifier leaves the step explicitly
+	// unverified; it is never rendered as passed. Retry applies only when a
+	// verifier is present.
+	Verify *VerifySpec
+	Retry  RetrySpec
 }
 
 // BindKey returns the name under which this step's summaries are exposed to
@@ -75,20 +105,47 @@ type Phase struct {
 
 // Workflow is a named, reusable orchestration spec.
 type Workflow struct {
-	Name   string
-	Inputs map[string]string
-	Phases []Phase
+	SchemaVersion int
+	Name          string
+	Inputs        map[string]string
+	Phases        []Phase
+}
+
+// VerificationState is the user-visible verification outcome for a step.
+type VerificationState string
+
+const (
+	VerificationUnverified VerificationState = "unverified"
+	VerificationPending    VerificationState = "pending"
+	VerificationPassed     VerificationState = "passed"
+	VerificationFailed     VerificationState = "failed"
+)
+
+// AttemptResult records one work attempt and its optional verifier. Agents are
+// the work jobs; Verifier is kept separate so the live view can label it.
+type AttemptResult struct {
+	Number        int
+	Agents        []jobs.Result
+	JobIDs        []string
+	Verifier      *jobs.Result
+	VerifierJobID string
+	Verdict       VerificationState
+	Reason        string
+	Err           error
 }
 
 // StepResult is the terminal outcome of a Step: the joined agent results
 // (one per fan-out item, or a single element for StepSingle) plus any error
 // that failed the step.
 type StepResult struct {
-	Step   string
-	Mode   StepMode
-	Agents []jobs.Result
-	JobIDs []string
-	Err    error
+	Step         string
+	Mode         StepMode
+	Agents       []jobs.Result // work agents from the final attempt
+	JobIDs       []string      // work job ids from the final attempt
+	Attempts     []AttemptResult
+	Verification VerificationState
+	VerifyReason string
+	Err          error
 }
 
 // PhaseResult holds the StepResults for one phase.
@@ -127,18 +184,23 @@ func (s RunState) IsTerminal() bool {
 // agent-view rendering; Err, when non-empty, is a spawn error recorded before
 // any job existed.
 type AgentSnapshot struct {
-	JobID  string
-	Job    jobs.Snapshot
-	HasJob bool
-	Err    string
+	JobID   string
+	Job     jobs.Snapshot
+	HasJob  bool
+	Err     string
+	Role    string // "work" or "verifier"
+	Attempt int
 }
 
 // StepSnapshot is a UI-safe projection of a Step.
 type StepSnapshot struct {
-	Name   string
-	Mode   StepMode
-	Agents []AgentSnapshot
-	Err    string
+	Name         string
+	Mode         StepMode
+	Agents       []AgentSnapshot
+	Attempts     int
+	Verification VerificationState
+	VerifyReason string
+	Err          string
 }
 
 // PhaseSnapshot is a UI-safe projection of a Phase.

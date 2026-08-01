@@ -1,9 +1,9 @@
 # Packetcode Maintainer Handoff
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 
-Handoff baseline: `main` at `2195400` (`Document maintainer handoff`), plus the
-2026-07-31 pass below.
+Handoff baseline: `main` at `ac758fe` (`Add job resubmit and the Packet
+Computers registry`), plus the 2026-08-01 PCH3 pass below.
 
 This file is the quickest way to resume Packetcode work without reconstructing
 the repository's recent history. Read it together with [README.md](README.md),
@@ -55,11 +55,20 @@ The 2026-07-31 pass added:
   stored status is never shown as a live probe. See
   [docs/packet-computers-loop.md](docs/packet-computers-loop.md) and
   [docs/feature-packet-computers.md](docs/feature-packet-computers.md).
-- **PCH3 and PCH5 specified, not implemented.** Acceptance conditions are
-  written into the hardening loop; PCH3 is the next implementation item.
+- **PCH5 specified, not implemented.** It is the next PacketCode hardening
+  item and defines the trust contract required before Streamable HTTP MCP.
 - **Packet Control split to PacketADE.** Phases 1–2 are implemented there
   (`D:\projects\PacketADE\dev\packet-control-loop.md`). No packetcode work is
   scheduled; if it ever lands here it must consume that manifest schema.
+
+The 2026-08-01 pass added:
+
+- **PCH3 — versioned workflow verifier/retry.** Workflow TOML requires
+  `schema_version = 1`; `/workflows validate <name>` checks a definition
+  without execution. Optional read-only step verifiers use a fail-closed
+  `packetcode-workflow-verdict-v1` block and hard retry caps. Every work and
+  verifier attempt consumes the same agent and token budgets. See
+  [docs/workflows.md](docs/workflows.md).
 
 ## Start Here
 
@@ -123,6 +132,8 @@ Inside Packetcode:
 - [docs/feature-background-agents.md](docs/feature-background-agents.md) and
   [docs/feature-agent-view.md](docs/feature-agent-view.md): job orchestration
   and result lifecycle.
+- [docs/workflows.md](docs/workflows.md): versioned workflow schema, verifier
+  contract, retries, budgets, and offline validation.
 - [docs/feature-packet-computers.md](docs/feature-packet-computers.md): the
   computer registry as it actually ships, and an explicit list of what does
   not work yet.
@@ -148,7 +159,7 @@ The primary runtime wiring is in `cmd/packetcode/main.go`. Important packages:
 | Native tools | `internal/tools` | Root-scoped filesystem/search/shell tools and provider definitions. |
 | Permissions | `internal/permissions` | Profiles, matching rules, allow/ask/deny decisions, and remembered approvals. |
 | Background jobs | `internal/jobs` | Job lifecycle, isolated sessions, write worktrees, transcripts, artifacts, persistence, and nested agents. |
-| Workflows | `internal/workflow` | Ordered phases, parallel fan-out, cancellation, bindings, and token boundaries. |
+| Workflows | `internal/workflow` | Versioned schema, ordered phases, parallel fan-out, fail-closed verification, bounded retries, cancellation, bindings, and token boundaries. |
 | MCP | `internal/mcp` | Stdio server startup, discovery, namespaced adapters, calls, logs, and restart. |
 | Persistence | `internal/session`, `internal/config`, `internal/cost` | Sessions, backups, user paths/configuration, and usage/cost tallies. |
 | TUI components | `internal/ui/components` | Conversation, input, topbar, approvals, pickers, Agent View, workflow view, and transcripts. |
@@ -248,8 +259,9 @@ steps are:
    session resume, approvals, agents, workflows, and MCP.
 4. Improve cancellation-drain visibility and add transcript search/jump-to-
    latest.
-5. Add workflow pipeline stages, adversarial verification/retry policies, and
-   a versioned workflow schema.
+5. Design PCH5's Streamable HTTP MCP trust contract before enabling that
+   transport; independently, add explicit workflow pipeline stages and a
+   broader versioned example library.
 6. Add safe worktree apply/merge assistance and explicit cleanup commands.
 7. Continue context/cost work: provider-native counting where stable, bounded
    model-facing output caps, cached-input telemetry, and opaque Codex reasoning

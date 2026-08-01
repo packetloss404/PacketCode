@@ -122,11 +122,15 @@ Use `/permissions` to inspect or change the session policy. See [Security and pe
 ```text
 /workflows run review
 /workflows run review target="the staged diff"
+/workflows validate review
 /workflows list
 /workflows stop all
 ```
 
 User workflows live in `~/.packetcode/workflows/*.toml`; project workflows live in `.packetcode/workflows/*.toml` and take precedence.
+Workflow TOML is schema-versioned. Optional step verifiers use a fail-closed
+structured verdict and bounded retries; verifier jobs and retries count toward
+the same agent and token budgets. See [Workflows](docs/workflows.md).
 
 `/loop` repeats normal prompts or slash commands:
 
@@ -158,7 +162,7 @@ See [Background agents](docs/feature-background-agents.md) and [Agent View](docs
 | `/cancel <id\|all>` | Cancel background jobs. |
 | `/computers` | List registered Packet Computers (registry-only; no daemon yet). |
 | `/computers status <name>` | Show one computer's stored record. |
-| `/workflows [run <name>\|list\|stop [id\|all]\|<id>]` | Run and inspect workflows. |
+| `/workflows [run <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, and inspect workflows. |
 | `/loop [interval] <prompt\|/command>` | Repeat work; use `list` or `stop`. |
 | `/plan [on\|off]` | Toggle read-only planning mode. |
 | `/queue [drop <n>\|clear]` | Inspect or manage queued prompts. |
@@ -250,6 +254,7 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 - [Security and permissions](docs/security.md)
 - [Background agents](docs/feature-background-agents.md)
 - [Agent View](docs/feature-agent-view.md)
+- [Workflows and verification](docs/workflows.md)
 - [Code intelligence](docs/code-intelligence.md)
 - [MCP servers](docs/mcp.md)
 - [Hooks and statusline](docs/hooks-and-statusline.md)

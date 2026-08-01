@@ -1,6 +1,7 @@
 # PacketCode Feature Truth — BridgeCode-Plus Audit
 
 Date: 2026-07-27
+Updated: 2026-08-01
 
 This is an implementation audit, not a parity claim. BridgeCode is no longer an
 active BridgeSpace integration; it is useful only as a historical terminal-agent
@@ -28,7 +29,7 @@ Status values:
 | Background work recovery | Partial | `internal/jobs/` persists snapshots, transcripts, results, artifacts, and worktree metadata; abandoned active jobs recover explicitly as cancelled. | PacketCode does not claim its TUI process survives closure. Restart/resubmit assistance is still useful; durable continuation belongs to PacketAgent. |
 | Permissions and denial floors | Present | `internal/permissions/`, live Shift+Tab policy tests, approval tests, read-only Plan mode, explicit Bypass mode, and deny-rule precedence. | Allowed shell/MCP programs are not an OS or container sandbox. |
 | Read-only and write sub-agents | Present | `spawn_agent`, nested limits, read-only default, write opt-in, isolated worktrees, artifact manifests, cancellation, and collection have focused tests. | No automatic merge/conflict resolution and no arbitrary clarification prompt from a child. |
-| Reusable commands and workflows | Present | User/project Markdown commands plus sequential/parallel workflow phases, bindings, joins, cancellation, views, and token/agent bounds. | Adversarial verifier/retry stages and schema/version validation remain open. |
+| Reusable commands and workflows | Present | User/project Markdown commands plus versioned workflow TOML, offline validation, sequential/parallel phases, bindings, joins, fail-closed step verifiers, bounded retries, cancellation, views, and token/agent bounds. | Explicit pipeline stages beyond ordered phases/steps and a broader example library remain open. |
 | Bounded repeat loops | Present | `/loop` supports interval and self-paced modes, a hard 25-iteration cap, non-overlap, kill controls, and a versioned structured stop decision with legacy compatibility. | Loops are intentionally process-local, not a daemon or PacketAgent substitute. |
 | MCP lifecycle and policy | Present | Stdio startup/handshake/discovery/calls, aliases, approval policy, bounded redacted logs, crash isolation, doctor checks, and `/mcp restart <name>` are covered by tests. | Live config reload, Streamable HTTP, prompts, and resources remain open behind explicit trust/context design. |
 | Context and compaction | Present | Full request occupancy accounting, automatic/manual compaction, complete tool-pair preservation, bounded model-facing tool results, and persisted full transcripts have focused tests. | Provider-native exact token counting is not universal. |
@@ -60,17 +61,19 @@ structured-loop hardening changes.
    manual stop remain authoritative.
 2. **Closed now — MCP process recovery.** One crashed server can be restarted
    without restarting PacketCode or disturbing the rest of the MCP fleet.
-3. **Next — workflow verifier/retry policy.** Add a versioned workflow schema
-   and explicit bounded verifier stages rather than interpreting arbitrary
-   prose as pass/fail.
-4. **Next — abandoned-job restart assistance.** Preserve the honest
-   cancelled-on-restart state, then offer explicit resubmit/reconcile actions
-   from the saved request and worktree evidence. Do not call this durable
-   always-on execution.
-5. **Release gate — signed clean-machine upgrades.** Exercise published stable
+3. **Closed 2026-08-01 — workflow verifier/retry policy.** Versioned workflow
+   TOML, offline validation, fail-closed structured verdicts, bounded retries,
+   and complete agent/token accounting now ship as PCH3.
+4. **Closed 2026-07-31 — abandoned-job restart assistance.** Explicit
+   resubmit starts a new job and links it to the preserved abandoned record;
+   PacketCode never labels that as resumed execution.
+5. **Next — Streamable HTTP MCP trust contract.** Define network targets,
+   credentials, redirects, origins, output provenance, and approval scopes
+   before enabling the transport.
+6. **Release gate — signed clean-machine upgrades.** Exercise published stable
    and preview assets on Windows/macOS/Linux, including checksum failure and
    rollback. This cannot be proven from a source checkout alone.
-6. **Sibling-product gate — durable handoff.** Consume PacketAgent's eventual
+7. **Sibling-product gate — durable handoff.** Consume PacketAgent's eventual
    versioned contract; do not author a divergent PacketCode-only Worker schema.
 
 ## Non-goals

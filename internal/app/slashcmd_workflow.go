@@ -14,10 +14,14 @@ import (
 //
 //	/workflows                 open the live run view
 //	/workflows list            list saved specs and active runs
+//	/workflows validate <name> validate a spec without executing it
 //	/workflows run <name>      start a workflow by name
 //	/workflows stop [id|all]   cancel a run (or every run)
 //	/workflows <id>            open the view focused on a run
 func (a *App) handleWorkflowCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 0 && strings.EqualFold(args[0], "validate") {
+		return a.handleWorkflowValidate(args[1:])
+	}
 	if a.workflow == nil {
 		a.conversation.AppendSystem("workflows: engine is disabled (no workflow.Engine wired)")
 		return a, nil
@@ -39,6 +43,35 @@ func (a *App) handleWorkflowCommand(args []string) (tea.Model, tea.Cmd) {
 		// Treat a bare argument as a run id to open in the view.
 		return a.handleWorkflowOpen(args[0])
 	}
+}
+
+func (a *App) handleWorkflowValidate(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		a.conversation.AppendSystem("workflows validate: missing name")
+		return a, nil
+	}
+	wf, err := a.workflowLoader.Load(args[0])
+	if err != nil {
+		a.conversation.AppendSystem("workflows validate: " + err.Error())
+		return a, nil
+	}
+	steps := 0
+	verified := 0
+	retries := 0
+	for _, phase := range wf.Phases {
+		for _, step := range phase.Steps {
+			steps++
+			if step.Verify != nil {
+				verified++
+				retries += step.Retry.Max
+			}
+		}
+	}
+	a.conversation.AppendSystem(fmt.Sprintf(
+		"workflows validate: %s is valid (schema v%d, %d phases, %d steps, %d verified, %d unverified, retry cap %d)",
+		wf.Name, wf.SchemaVersion, len(wf.Phases), steps, verified, steps-verified, retries,
+	))
+	return a, nil
 }
 
 func (a *App) handleWorkflowList() (tea.Model, tea.Cmd) {

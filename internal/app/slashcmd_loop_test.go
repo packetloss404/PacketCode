@@ -1,10 +1,42 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/workflow"
 )
+
+func TestWorkflowValidateCommand_DoesNotRequireExecutionEngine(t *testing.T) {
+	r := newTestApp(t)
+	wfDir := filepath.Join(r.tmp, ".packetcode", "workflows")
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const spec = `schema_version = 1
+name = "checked"
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "work"
+prompt = "do work"
+`
+	if err := os.WriteFile(filepath.Join(wfDir, "checked.toml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.app.workflowLoader = workflow.NewLoader(r.tmp)
+	r.app.workflow = nil
+
+	_, cmd := r.app.handleWorkflowCommand([]string{"validate", "checked"})
+	if cmd != nil {
+		t.Fatal("validation should not start asynchronous work")
+	}
+	convContains(t, r.app, "checked is valid (schema v1")
+	convContains(t, r.app, "1 unverified")
+}
 
 func TestParseWorkflowInputOverridesQuotedValues(t *testing.T) {
 	got := parseInputOverrides([]string{`target="the`, `staged`, `diff"`, `note='two`, `words'`, "plain=value"})

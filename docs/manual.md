@@ -441,6 +441,7 @@ Workflows arrange sequential phases and parallel fan-out over the background job
 ```text
 /workflows
 /workflows list
+/workflows validate review
 /workflows run review
 /workflows run review target="the staged diff"
 /workflows <run-id>
@@ -455,6 +456,7 @@ A built-in `review` workflow is available immediately. User definitions live in 
 A compact custom example:
 
 ```toml
+schema_version = 1
 name = "focused-review"
 
 [inputs]
@@ -480,6 +482,32 @@ prompt = "Synthesize these findings:\n\n{{.steps.review}}"
 ```
 
 Optional step fields include `provider`, `model`, `system_prompt`, and `allow_write`. A phase may set `continue_on_error = true`.
+
+Every workflow file must declare `schema_version = 1`. Validate a definition
+before it spends tokens:
+
+```text
+/workflows validate focused-review
+```
+
+For a fail-closed verifier and up to two additional attempts, add this beneath
+the step it verifies:
+
+```toml
+[phases.steps.verify]
+prompt = "Check attempt {{.attempt}}. Candidate:\n{{.result}}"
+provider = "codex"
+model = "gpt-5.6-sol"
+pass_contract = "packetcode-workflow-verdict-v1"
+
+[phases.steps.retry]
+max = 2
+```
+
+Missing or malformed verdicts fail; they never count as success. A step with
+no verifier is shown as **unverified**, not passed. Every verifier and retry
+counts toward the workflow's agent and token budgets. See
+[Workflows](workflows.md) for the complete schema and verdict contract.
 
 ### Repeating work with loops
 
@@ -774,7 +802,7 @@ Before destructive or broad work, a safe rhythm is:
 | `/agents [id]` | Open Agent View or an agent transcript. |
 | `/jobs [id]` | List jobs or open a job transcript. |
 | `/cancel <id\|all>` | Cancel background work. |
-| `/workflows [run <name>\|list\|stop [id\|all]\|<id>]` | Run or inspect workflows. |
+| `/workflows [run <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, or inspect workflows. |
 | `/loop [interval] <prompt\|/command>` | Repeat work; use `list` or `stop [id\|all]`. |
 | `/queue [drop <n>\|clear]` | Inspect or manage queued foreground prompts. |
 | `/sessions` | List sessions. |

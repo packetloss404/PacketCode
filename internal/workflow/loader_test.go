@@ -16,6 +16,7 @@ func TestLoader_BuiltinReview(t *testing.T) {
 
 	wf, ok := l.Get("review")
 	require.True(t, ok)
+	require.Equal(t, CurrentSchemaVersion, wf.SchemaVersion)
 	require.Equal(t, "review", wf.Name)
 	require.Len(t, wf.Phases, 2)
 
@@ -42,6 +43,7 @@ func TestLoader_ProjectTOMLOverridesAndLoads(t *testing.T) {
 	require.NoError(t, os.MkdirAll(wfDir, 0o755))
 
 	toml := `
+schema_version = 1
 name = "custom"
 
 [inputs]
@@ -108,6 +110,7 @@ func TestLoader_NameDefaultsToFilename(t *testing.T) {
 	wfDir := filepath.Join(dir, ".packetcode", "workflows")
 	require.NoError(t, os.MkdirAll(wfDir, 0o755))
 	toml := `
+schema_version = 1
 [[phases]]
 name = "only"
   [[phases.steps]]
@@ -120,4 +123,74 @@ name = "only"
 	wf, ok := l.Get("noname")
 	require.True(t, ok)
 	require.Equal(t, "noname", wf.Name)
+}
+
+func TestLoader_PCH3SchemaFixtures(t *testing.T) {
+	t.Run("valid verifier", func(t *testing.T) {
+		wf, err := loadTOMLWorkflow(filepath.Join("testdata", "valid-verifier.toml"))
+		require.NoError(t, err)
+		require.Equal(t, CurrentSchemaVersion, wf.SchemaVersion)
+		step := wf.Phases[0].Steps[0]
+		require.NotNil(t, step.Verify)
+		require.Equal(t, PassContractV1, step.Verify.PassContract)
+		require.Equal(t, 2, step.Retry.Max)
+	})
+
+	t.Run("missing verifier remains explicitly unverified", func(t *testing.T) {
+		wf, err := loadTOMLWorkflow(filepath.Join("testdata", "unverified.toml"))
+		require.NoError(t, err)
+		require.Nil(t, wf.Phases[0].Steps[0].Verify)
+	})
+
+	t.Run("unknown newer version is refused", func(t *testing.T) {
+		_, err := loadTOMLWorkflow(filepath.Join("testdata", "future-version.toml"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unsupported schema_version 2")
+	})
+}
+
+func TestLoader_RequiresVersionAndRejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.toml")
+	require.NoError(t, os.WriteFile(missing, []byte(`
+name = "missing"
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "s"
+prompt = "hi"
+`), 0o644))
+	_, err := loadTOMLWorkflow(missing)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing schema_version")
+
+	unknown := filepath.Join(dir, "unknown.toml")
+	require.NoError(t, os.WriteFile(unknown, []byte(`
+schema_version = 1
+name = "unknown"
+mystery = true
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "s"
+prompt = "hi"
+`), 0o644))
+	_, err = loadTOMLWorkflow(unknown)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown field")
+
+	badMode := filepath.Join(dir, "bad-mode.toml")
+	require.NoError(t, os.WriteFile(badMode, []byte(`
+schema_version = 1
+name = "bad-mode"
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "s"
+mode = "concurrent-ish"
+prompt = "hi"
+`), 0o644))
+	_, err = loadTOMLWorkflow(badMode)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported mode")
 }

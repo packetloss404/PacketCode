@@ -90,3 +90,30 @@ func TestWorkflowView_CancelRunEmitsCancelMsg(t *testing.T) {
 		t.Fatalf("expected wf-1, got %s", cancel.RunID)
 	}
 }
+
+func TestStepHeaderText_ShowsVerificationAndRetries(t *testing.T) {
+	got := stepHeaderText(workflow.StepSnapshot{
+		Name:         "synthesize",
+		Mode:         workflow.StepSingle,
+		Attempts:     2,
+		Verification: workflow.VerificationPassed,
+	})
+	if got != "synthesize [single · passed · 2 attempts]" {
+		t.Fatalf("stepHeaderText = %q", got)
+	}
+}
+
+func TestWorkflowView_LabelsVerifierRows(t *testing.T) {
+	runs := sampleRuns()
+	runs[0].Phases[0].Steps[0].Agents = []workflow.AgentSnapshot{{
+		JobID:   "verify-1",
+		Role:    "verifier",
+		Attempt: 2,
+	}}
+	m := New()
+	m.Resize(100, 24)
+	m.Show(runs)
+	if len(m.rows) < 4 || m.rows[3].text != "verifier a2 · " {
+		t.Fatalf("verifier row label missing: %+v", m.rows)
+	}
+}

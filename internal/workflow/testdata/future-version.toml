@@ -1,0 +1,9 @@
+schema_version = 2
+name = "future"
+
+[[phases]]
+name = "work"
+
+[[phases.steps]]
+name = "work"
+prompt = "Do the work"

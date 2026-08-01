@@ -6,6 +6,10 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Versioned workflow schema and `/workflows validate <name>`, plus explicit
+  read-only step verifiers, fail-closed structured verdicts, hard retry caps,
+  verifier-feedback retries, and agent/token accounting across every attempt
+  (PCH3).
 - `/jobs resubmit [id]` re-runs a background job abandoned by a previous app
   exit. It starts a **new** job from the saved prompt and never claims the old
   process resumed: the abandoned job keeps its cancelled state, reason, and

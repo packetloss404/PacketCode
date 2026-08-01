@@ -117,9 +117,10 @@ func tomlNamesIn(dir string) []string {
 // ─────────────────────────────────────────────────────────────────────────
 
 type tomlWorkflow struct {
-	Name   string            `toml:"name"`
-	Inputs map[string]string `toml:"inputs"`
-	Phases []tomlPhase       `toml:"phases"`
+	SchemaVersion int               `toml:"schema_version"`
+	Name          string            `toml:"name"`
+	Inputs        map[string]string `toml:"inputs"`
+	Phases        []tomlPhase       `toml:"phases"`
 }
 
 type tomlPhase struct {
@@ -130,15 +131,29 @@ type tomlPhase struct {
 
 // tomlStep flattens the AgentSpec fields onto the step for spec ergonomics.
 type tomlStep struct {
-	Name         string   `toml:"name"`
-	Mode         string   `toml:"mode"`
-	Bind         string   `toml:"bind"`
-	FanOut       []string `toml:"fan_out"`
-	Prompt       string   `toml:"prompt"`
-	Provider     string   `toml:"provider"`
-	Model        string   `toml:"model"`
-	SystemPrompt string   `toml:"system_prompt"`
-	AllowWrite   bool     `toml:"allow_write"`
+	Name         string      `toml:"name"`
+	Mode         string      `toml:"mode"`
+	Bind         string      `toml:"bind"`
+	FanOut       []string    `toml:"fan_out"`
+	Prompt       string      `toml:"prompt"`
+	Provider     string      `toml:"provider"`
+	Model        string      `toml:"model"`
+	SystemPrompt string      `toml:"system_prompt"`
+	AllowWrite   bool        `toml:"allow_write"`
+	Verify       *tomlVerify `toml:"verify"`
+	Retry        tomlRetry   `toml:"retry"`
+}
+
+type tomlVerify struct {
+	Prompt       string `toml:"prompt"`
+	Provider     string `toml:"provider"`
+	Model        string `toml:"model"`
+	SystemPrompt string `toml:"system_prompt"`
+	PassContract string `toml:"pass_contract"`
+}
+
+type tomlRetry struct {
+	Max int `toml:"max"`
 }
 
 func loadTOMLWorkflow(path string) (Workflow, error) {
@@ -147,20 +162,38 @@ func loadTOMLWorkflow(path string) (Workflow, error) {
 		return Workflow{}, err
 	}
 	var tw tomlWorkflow
-	if err := toml.Unmarshal(data, &tw); err != nil {
+	metadata, err := toml.Decode(string(data), &tw)
+	if err != nil {
 		return Workflow{}, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+	}
+	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, key := range undecoded {
+			keys = append(keys, key.String())
+		}
+		return Workflow{}, fmt.Errorf("parse %s: unknown field(s): %s", filepath.Base(path), strings.Join(keys, ", "))
+	}
+	if tw.SchemaVersion == 0 {
+		return Workflow{}, fmt.Errorf("parse %s: missing schema_version (current: %d)", filepath.Base(path), CurrentSchemaVersion)
+	}
+	if tw.SchemaVersion != CurrentSchemaVersion {
+		return Workflow{}, fmt.Errorf("parse %s: unsupported schema_version %d (current: %d)", filepath.Base(path), tw.SchemaVersion, CurrentSchemaVersion)
 	}
 	if tw.Name == "" {
 		// Default the name to the filename stem so `run <file>` works.
 		tw.Name = strings.TrimSuffix(filepath.Base(path), ".toml")
 	}
-	wf := Workflow{Name: tw.Name, Inputs: tw.Inputs}
+	wf := Workflow{SchemaVersion: tw.SchemaVersion, Name: tw.Name, Inputs: tw.Inputs}
 	for _, tp := range tw.Phases {
 		ph := Phase{Name: tp.Name, ContinueOnError: tp.ContinueOnError}
 		for _, ts := range tp.Steps {
-			ph.Steps = append(ph.Steps, Step{
+			mode, modeErr := parseMode(ts.Mode)
+			if modeErr != nil {
+				return Workflow{}, fmt.Errorf("parse %s: step %q: %w", filepath.Base(path), ts.Name, modeErr)
+			}
+			step := Step{
 				Name:   ts.Name,
-				Mode:   parseMode(ts.Mode),
+				Mode:   mode,
 				Bind:   ts.Bind,
 				FanOut: ts.FanOut,
 				Agent: AgentSpec{
@@ -170,7 +203,18 @@ func loadTOMLWorkflow(path string) (Workflow, error) {
 					SystemPrompt: ts.SystemPrompt,
 					AllowWrite:   ts.AllowWrite,
 				},
-			})
+				Retry: RetrySpec{Max: ts.Retry.Max},
+			}
+			if ts.Verify != nil {
+				step.Verify = &VerifySpec{
+					Prompt:       ts.Verify.Prompt,
+					Provider:     ts.Verify.Provider,
+					Model:        ts.Verify.Model,
+					SystemPrompt: ts.Verify.SystemPrompt,
+					PassContract: ts.Verify.PassContract,
+				}
+			}
+			ph.Steps = append(ph.Steps, step)
 		}
 		wf.Phases = append(wf.Phases, ph)
 	}
@@ -180,12 +224,14 @@ func loadTOMLWorkflow(path string) (Workflow, error) {
 	return wf, nil
 }
 
-func parseMode(s string) StepMode {
+func parseMode(s string) (StepMode, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "parallel", "fanout", "fan-out", "fan_out":
-		return StepParallel
+		return StepParallel, nil
+	case "", "single":
+		return StepSingle, nil
 	default:
-		return StepSingle
+		return "", fmt.Errorf("unsupported mode %q", s)
 	}
 }
 
@@ -206,7 +252,8 @@ func builtinWorkflows() map[string]Workflow {
 // with no config files: /workflows run review.
 func reviewWorkflow() Workflow {
 	return Workflow{
-		Name: "review",
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "review",
 		Inputs: map[string]string{
 			"target": "the current working tree changes",
 		},

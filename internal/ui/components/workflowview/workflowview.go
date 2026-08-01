@@ -266,6 +266,12 @@ func (m *Model) rebuildRows() {
 					m.rows = append(m.rows, row{kind: rowError, runID: run.ID, text: st.Err, depth: 3})
 				}
 				for _, ag := range st.Agents {
+					role := ""
+					if ag.Role == "verifier" {
+						role = fmt.Sprintf("verifier a%d · ", ag.Attempt)
+					} else if ag.Attempt > 1 {
+						role = fmt.Sprintf("work a%d · ", ag.Attempt)
+					}
 					m.rows = append(m.rows, row{
 						kind:     rowAgent,
 						runID:    run.ID,
@@ -274,6 +280,7 @@ func (m *Model) rebuildRows() {
 						job:      ag.Job,
 						hasJob:   ag.HasJob,
 						depth:    3,
+						text:     role,
 					})
 				}
 			}
@@ -298,7 +305,15 @@ func stepHeaderText(st workflow.StepSnapshot) string {
 	if mode == "" {
 		mode = "single"
 	}
-	return fmt.Sprintf("%s [%s]", st.Name, mode)
+	verification := string(st.Verification)
+	if verification == "" {
+		verification = string(workflow.VerificationUnverified)
+	}
+	meta := []string{mode, verification}
+	if st.Attempts > 1 {
+		meta = append(meta, fmt.Sprintf("%d attempts", st.Attempts))
+	}
+	return fmt.Sprintf("%s [%s]", st.Name, strings.Join(meta, " · "))
 }
 
 func isSelectable(r row) bool { return r.kind == rowRun || r.kind == rowAgent }
@@ -485,7 +500,7 @@ func (m Model) renderAgentRow(r row, selected bool, w int) string {
 	}
 	indent := "      "
 	if !r.hasJob {
-		line := cursor + indent + theme.StyleDim.Render("agent "+padOrTrunc(shortID(r.jobID), 8)+" (pending)")
+		line := cursor + indent + theme.StyleDim.Render(r.text+"agent "+padOrTrunc(shortID(r.jobID), 8)+" (pending)")
 		return truncate(line, w)
 	}
 	j := r.job
@@ -502,7 +517,8 @@ func (m Model) renderAgentRow(r row, selected bool, w int) string {
 	if msgW < 8 {
 		msgW = 8
 	}
-	msg := truncate(strings.TrimSpace(jobMessage(j)), msgW)
+	role := rRoleLabel(r)
+	msg := truncate(strings.TrimSpace(role+jobMessage(j)), msgW)
 
 	line := cursor + indent + strings.Join([]string{
 		id,
@@ -517,6 +533,13 @@ func (m Model) renderAgentRow(r row, selected bool, w int) string {
 		line = lipgloss.NewStyle().Background(theme.BaseSurfaceBright).Render(line)
 	}
 	return line
+}
+
+func rRoleLabel(r row) string {
+	// Role/attempt live on AgentSnapshot, but rows intentionally contain only
+	// rendering data. rebuildRows prefixes them into text for pending rows and
+	// stores the same prefix in this lightweight field.
+	return r.text
 }
 
 func indentDim(s string, w int) string {

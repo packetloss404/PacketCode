@@ -82,7 +82,7 @@ var (
 		{"/cost", "Show cost breakdown (reset --yes to clear)"},
 		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
 		{"/loop [interval] <prompt|/cmd>", "Repeat a prompt/command (interval or self-paced); /loop list, /loop stop"},
-		{"/workflows [run <name>|list|stop [id|all]|<id>]", "Run and monitor multi-agent workflows"},
+		{"/workflows [run <name>|validate <name>|list|stop [id|all]|<id>]", "Run, validate, and monitor multi-agent workflows"},
 		{"/trust [on|off]", "Toggle 'bypass permissions' (auto-approve all tools; not in the Shift+Tab cycle)"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},

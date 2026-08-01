@@ -43,6 +43,7 @@ Slash commands are parsed and handled locally before a prompt reaches the model.
 | `/computers status <name>` | Show one computer's stored record. |
 | `/workflows` | Open Workflow View. |
 | `/workflows run <name> [key=value...]` | Start a workflow. |
+| `/workflows validate <name>` | Validate schema and templates without starting agents. |
 | `/workflows list` | List definitions/runs. |
 | `/workflows stop [id\|all]` | Cancel workflows. |
 | `/loop [interval] <prompt\|/command>` | Start a repeating loop. |

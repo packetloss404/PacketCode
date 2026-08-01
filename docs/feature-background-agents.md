@@ -79,6 +79,7 @@ Full logs, diffs, and files remain in the job transcript/worktree rather than be
 ```text
 /workflows
 /workflows list
+/workflows validate focused-review
 /workflows run review
 /workflows run review target="the staged diff"
 /workflows stop <run-id>
@@ -90,6 +91,7 @@ Definitions load in precedence order: built-in, user (`~/.packetcode/workflows/*
 Example:
 
 ```toml
+schema_version = 1
 name = "focused-review"
 
 [inputs]
@@ -116,9 +118,16 @@ prompt = "Synthesize these findings:\n\n{{.steps.review}}"
 
 Optional step fields are `provider`, `model`, `system_prompt`, and `allow_write`. `continue_on_error = true` belongs on a phase. Runs have a default 16-agent guard plus the global job limits. `workflow_token_budget` prevents later steps from starting after completed child usage reaches the configured boundary; a fan-out already running may finish above it.
 
+Version 1 workflows may attach a read-only `[phases.steps.verify]` agent and a
+hard `[phases.steps.retry]` cap. Missing or malformed structured verdicts fail
+closed, and every work/verifier attempt consumes the same agent and token
+budgets. Steps without verifiers remain unverified. See
+[Workflows](workflows.md) for the complete schema.
+
 Cancellation is cascading and race-safe: registered children are cancelled, sibling fan-out jobs are stopped after a failure, and terminal results are drained with bounded waits.
 
-Pipelines and adversarial verification/retry are not implemented yet; see [BACKLOG](../BACKLOG.md).
+Explicit pipeline stages beyond the current ordered phases/steps remain in the
+[BACKLOG](../BACKLOG.md).
 
 ## Loops
 
@@ -139,5 +148,5 @@ Loop bodies can spawn agents or invoke workflows.
 - Active jobs do not resume after packetcode restarts.
 - Sub-agent transcript output is not streamed into foreground conversation.
 - Background agents cannot yet ask arbitrary user clarification questions.
-- Workflow pipelines and verifier/retry stages are deferred.
+- Explicit workflow pipeline stages beyond ordered phases/steps are deferred.
 - Worktree merge/apply and cleanup remain explicit git operations.

@@ -322,6 +322,7 @@ Workflows give repeated orchestration a declarative shape. Phases execute in ord
 
 ```text
 /workflows list
+/workflows validate focused-review
 /workflows run review
 /workflows run review target="the staged diff"
 /workflows <run-id>
@@ -332,6 +333,7 @@ Workflows give repeated orchestration a declarative shape. Phases execute in ord
 Example `.packetcode/workflows/focused-review.toml`:
 
 ```toml
+schema_version = 1
 name = "focused-review"
 
 [inputs]
@@ -354,9 +356,31 @@ name = "synthesis"
 name = "synthesize"
 mode = "single"
 prompt = "Deduplicate and prioritize these findings:\n\n{{.steps.review}}"
+
+[phases.steps.verify]
+prompt = "Verify attempt {{.attempt}} against the requested review. Candidate:\n{{.result}}"
+provider = "codex"
+model = "gpt-5.6-sol"
+pass_contract = "packetcode-workflow-verdict-v1"
+
+[phases.steps.retry]
+max = 2
 ```
 
-Optional step fields are `provider`, `model`, `system_prompt`, and `allow_write`. `continue_on_error = true` is a phase option. A run has a 16-agent guard in addition to global job limits. Cancellation cascades to registered children.
+Every workflow TOML file declares `schema_version = 1`; missing, newer, or
+unknown schema fields fail validation. Optional work-step fields are
+`provider`, `model`, `system_prompt`, and `allow_write`.
+`continue_on_error = true` is a phase option.
+
+The verifier is a separate read-only job. It must emit the versioned
+`packetcode-workflow-verdict-v1` block with an exact `pass` or `fail` verdict;
+missing, malformed, or unknown verdicts fail closed. `retry.max` counts
+additional attempts and defaults to zero. Verifier feedback is appended to a
+retry, and every work/verifier attempt counts toward both the 16-agent guard
+and aggregate token budget. The explicitly selected verifier provider receives
+bounded work summaries and artifact previews. A step without `[verify]` is explicitly
+**unverified**. See [Workflows](workflows.md) for the schema, contract, and
+boundary behavior. Cancellation cascades to all registered children.
 
 Loops repeat a foreground prompt or slash command:
 
@@ -374,7 +398,9 @@ when the model never returns a valid stop decision. Interval loops run
 immediately and then on the interval. A tick during foreground activity is
 queued; loops do not overlap the active foreground turn.
 
-**Limits:** workflow pipelines and verifier/retry stages are not shipped. A loop is process-local scheduling, not a durable daemon.
+**Limits:** explicit pipeline stages beyond ordered phases/steps are not
+shipped. Verification and retries are process-local orchestration, and a loop
+is process-local schedulingâ€”not a durable daemon.
 
 ## 10. Context, Compaction, and Cost
 
@@ -631,7 +657,7 @@ Ask agents for conclusions, evidence paths, commands run, and unresolved risksâ€
 | --- | --- | --- |
 | Agents | Bounded concurrent jobs, nested depth, persistence, cancellation, live transcripts, result lifecycle. | Resuming active execution after restart; arbitrary clarification questions. |
 | Write isolation | Dedicated worktree and branch from committed `HEAD`. | Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning. |
-| Workflows | Sequential phases, single/parallel steps, fan-out join, cancellation, budgets. | Pipelines and verifier/retry stages. |
+| Workflows | Versioned schema, offline validation, sequential phases, single/parallel steps, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets. | Explicit pipeline stages and a broader versioned example library. |
 | Terminal | Native scrollback, bounded live region, sanitized output, multiline fallbacks. | Uniform true Shift+Enter reporting across terminals. |
 | MCP | Stdio startup/discovery/calls, namespaced tools, policies, logs, per-server restart. | Live config reload and network transports. |
 | Reasoning | Codex catalog-driven `/effort` controls and status display. | A universal reasoning control for every provider/model. |

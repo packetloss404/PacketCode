@@ -26,8 +26,9 @@ import (
 // worker turns into StateFailed). When holdOpen is set it blocks until the
 // context is cancelled, so tests can exercise cancellation.
 type fakeProvider struct {
-	holdOpen bool
-	spawns   int32
+	holdOpen     bool
+	spawns       int32
+	verifierRuns int32
 }
 
 func (f *fakeProvider) Name() string                                  { return "fake" }
@@ -56,6 +57,25 @@ func (f *fakeProvider) ChatCompletion(ctx context.Context, req provider.ChatRequ
 			<-ctx.Done()
 			return
 		}
+		if strings.Contains(prompt, "VERIFY_") {
+			run := atomic.AddInt32(&f.verifierRuns, 1)
+			text := "verifier response without a verdict"
+			switch {
+			case strings.Contains(prompt, "VERIFY_PASS"):
+				text = `<packetcode-workflow-verdict>{"version":1,"verdict":"pass","reason":"evidence accepted"}</packetcode-workflow-verdict>`
+			case strings.Contains(prompt, "VERIFY_FAIL_ONCE") && run > 1:
+				text = `<packetcode-workflow-verdict>{"version":1,"verdict":"pass","reason":"retry fixed it"}</packetcode-workflow-verdict>`
+			case strings.Contains(prompt, "VERIFY_FAIL_ONCE"):
+				text = `<packetcode-workflow-verdict>{"version":1,"verdict":"fail","reason":"needs revision"}</packetcode-workflow-verdict>`
+			case strings.Contains(prompt, "VERIFY_FAIL"):
+				text = `<packetcode-workflow-verdict>{"version":1,"verdict":"fail","reason":"still wrong"}</packetcode-workflow-verdict>`
+			case strings.Contains(prompt, "VERIFY_MALFORMED"):
+				text = `<packetcode-workflow-verdict>not-json</packetcode-workflow-verdict>`
+			}
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: text}
+			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 5, OutputTokens: 2}}
+			return
+		}
 		if strings.Contains(prompt, "FAIL") {
 			ch <- provider.StreamEvent{Type: provider.EventError, Error: errors.New("scripted failure")}
 			return
@@ -64,6 +84,21 @@ func (f *fakeProvider) ChatCompletion(ctx context.Context, req provider.ChatRequ
 		ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 5, OutputTokens: 2}}
 	}()
 	return ch, nil
+}
+
+func verifiedStep(verifierPrompt string, retryMax int) Step {
+	return Step{
+		Name:  "work",
+		Mode:  StepSingle,
+		Agent: AgentSpec{Prompt: "perform work"},
+		Verify: &VerifySpec{
+			Prompt:       verifierPrompt,
+			Provider:     "fake",
+			Model:        "fake-model",
+			PassContract: PassContractV1,
+		},
+		Retry: RetrySpec{Max: retryMax},
+	}
 }
 
 func lastUserContent(req provider.ChatRequest) string {
@@ -395,6 +430,160 @@ func TestEngine_TokenBudgetStopsBeforeLaterStep(t *testing.T) {
 	require.Len(t, snap.Phases[0].Steps[0].Agents, 1)
 	require.Empty(t, snap.Phases[0].Steps[1].Agents)
 	require.EqualValues(t, 1, atomic.LoadInt32(&prov.spawns))
+}
+
+func TestEngine_VerifierPassesWithStructuredVerdict(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "verified",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_PASS {{.result}}", 1)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunCompleted, 5*time.Second)
+	step := snap.Phases[0].Steps[0]
+	require.Equal(t, VerificationPassed, step.Verification)
+	require.Equal(t, 1, step.Attempts)
+	require.Len(t, step.Agents, 2)
+	require.Equal(t, "work", step.Agents[0].Role)
+	require.Equal(t, "verifier", step.Agents[1].Role)
+	require.EqualValues(t, 2, atomic.LoadInt32(&prov.spawns))
+}
+
+func TestEngine_VerifierFailureRetriesAndPasses(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "retry-pass",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_FAIL_ONCE", 2)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunCompleted, 5*time.Second)
+	step := snap.Phases[0].Steps[0]
+	require.Equal(t, VerificationPassed, step.Verification)
+	require.Equal(t, 2, step.Attempts)
+	require.Len(t, step.Agents, 4, "work and verifier for both attempts")
+	require.EqualValues(t, 4, atomic.LoadInt32(&prov.spawns))
+	var retryPrompt string
+	for _, agent := range step.Agents {
+		if agent.Role == "work" && agent.Attempt == 2 {
+			retryPrompt = agent.Job.Prompt
+		}
+	}
+	require.Contains(t, retryPrompt, "needs revision")
+}
+
+func TestEngine_VerifierMalformedVerdictFailsClosed(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "malformed",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_MALFORMED", 0)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	step := snap.Phases[0].Steps[0]
+	require.Equal(t, VerificationFailed, step.Verification)
+	require.Contains(t, step.VerifyReason, "malformed")
+	require.Contains(t, snap.Err, "verification failed")
+}
+
+func TestEngine_VerifierMissingVerdictFailsClosed(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "missing-verdict",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_MISSING", 0)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Equal(t, VerificationFailed, snap.Phases[0].Steps[0].Verification)
+	require.Contains(t, snap.Phases[0].Steps[0].VerifyReason, "missing")
+}
+
+func TestEngine_RetryCapIsHard(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "retry-cap",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_FAIL", 2)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Equal(t, 3, snap.Phases[0].Steps[0].Attempts)
+	require.Contains(t, snap.Err, "after 3 attempt(s)")
+	require.EqualValues(t, 6, atomic.LoadInt32(&prov.spawns))
+}
+
+func TestEngine_TokenBudgetCountsVerifierAndStopsRetry(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	e.SetTokenBudget(14) // one work agent + one verifier at 7 tokens each
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "verified-budget",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_FAIL", 2)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Contains(t, snap.Err, "workflow token budget exhausted")
+	require.Equal(t, 1, snap.Phases[0].Steps[0].Attempts)
+	require.EqualValues(t, 2, atomic.LoadInt32(&prov.spawns), "retry work must not spawn after verifier consumes budget")
+}
+
+func TestEngine_AgentCapCountsVerifierAndRetryJobs(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	e.SetMaxAgents(3)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "verified-agent-cap",
+		Phases:        []Phase{{Name: "p", Steps: []Step{verifiedStep("VERIFY_FAIL_ONCE", 2)}}},
+	}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunFailed, 5*time.Second)
+	require.Contains(t, snap.Err, "workflow agent cap reached")
+	require.EqualValues(t, 3, atomic.LoadInt32(&prov.spawns), "work, verifier, and retry work consume the full cap")
+}
+
+func TestEngine_MissingVerifierIsExplicitlyUnverified(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{Name: "plain", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "work", Agent: AgentSpec{Prompt: "work"},
+	}}}}}
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	snap := waitRun(t, e, run.ID, RunCompleted, 5*time.Second)
+	require.Equal(t, VerificationUnverified, snap.Phases[0].Steps[0].Verification)
 }
 
 // Test: Subscribe receives run updates including a terminal transition.

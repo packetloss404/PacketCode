@@ -1,0 +1,22 @@
+schema_version = 1
+name = "verified-review"
+
+[inputs]
+target = "the staged diff"
+
+[[phases]]
+name = "review"
+
+[[phases.steps]]
+name = "review"
+mode = "single"
+prompt = "Review {{.inputs.target}}"
+
+[phases.steps.verify]
+prompt = "Check attempt {{.attempt}} against the request. Result: {{.result}}"
+provider = "fake"
+model = "fake-model"
+pass_contract = "packetcode-workflow-verdict-v1"
+
+[phases.steps.retry]
+max = 2

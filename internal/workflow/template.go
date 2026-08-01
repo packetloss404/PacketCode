@@ -2,9 +2,14 @@ package workflow
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"text/template"
+
+	"github.com/packetcode/packetcode/internal/jobs"
 )
+
+const maxVerifierEvidenceRunes = 32_000
 
 // renderPrompt renders an AgentSpec prompt through text/template. Templates
 // may reference:
@@ -17,14 +22,28 @@ import (
 // that references an absent input or step degrades gracefully rather than
 // erroring at render time.
 func renderPrompt(tmpl string, inputs, steps map[string]string, item string) (string, error) {
-	t, err := template.New("prompt").Option("missingkey=zero").Parse(tmpl)
-	if err != nil {
-		return "", err
-	}
-	data := map[string]any{
+	return renderTemplate(tmpl, map[string]any{
 		"inputs": nonNil(inputs),
 		"steps":  nonNil(steps),
 		"item":   item,
+	})
+}
+
+// renderVerifyPrompt adds the completed work summary and one-based attempt
+// number to the ordinary workflow template context.
+func renderVerifyPrompt(tmpl string, inputs, steps map[string]string, result string, attempt int) (string, error) {
+	return renderTemplate(tmpl, map[string]any{
+		"inputs":  nonNil(inputs),
+		"steps":   nonNil(steps),
+		"result":  result,
+		"attempt": attempt,
+	})
+}
+
+func renderTemplate(tmpl string, data map[string]any) (string, error) {
+	t, err := template.New("prompt").Option("missingkey=zero").Parse(tmpl)
+	if err != nil {
+		return "", err
 	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, data); err != nil {
@@ -49,6 +68,34 @@ func summariesOf(sr StepResult) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// verifierEvidenceOf builds bounded, model-facing evidence for a verifier from
+// terminal work results. It includes summaries and artifact previews (diffs,
+// test commands, and other captured evidence) so verification is not limited
+// to the work agent's self-report.
+func verifierEvidenceOf(results []jobs.Result) string {
+	var b strings.Builder
+	for i, result := range results {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "Work job %s (%s/%s, state=%s):\n%s", result.JobID, result.Provider, result.Model, result.State, strings.TrimSpace(result.Summary))
+		if result.WorktreePath != "" {
+			b.WriteString("\nWorktree: " + result.WorktreePath)
+		}
+		for _, artifact := range result.Artifacts {
+			fmt.Fprintf(&b, "\n\nArtifact %s [%s]: %s", artifact.ID, artifact.Kind, strings.TrimSpace(artifact.Summary))
+			if preview := strings.TrimSpace(artifact.Preview); preview != "" {
+				b.WriteString("\n" + preview)
+			}
+		}
+	}
+	runes := []rune(strings.TrimSpace(b.String()))
+	if len(runes) <= maxVerifierEvidenceRunes {
+		return string(runes)
+	}
+	return string(runes[:maxVerifierEvidenceRunes]) + "\n\n[verifier evidence truncated by Packetcode]"
 }
 
 func nonNil(m map[string]string) map[string]string {

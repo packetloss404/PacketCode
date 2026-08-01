@@ -31,8 +31,9 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 ## Agents, Loops, and Workflows
 
-- Add workflow pipeline stages and adversarial verification/retry policies.
-- Add a workflow schema/version field, validation command, and example library.
+- Add explicit workflow pipeline stages beyond the current ordered
+  phases/steps and step-level verifier/retry contract.
+- Add a broader versioned example workflow library.
 - Resume or reconcile active background jobs after process restart. Abandoned jobs are recovered as cancelled and can now be explicitly re-run via `/jobs resubmit` (PCH4, 2026-07-31), which starts a new job and never claims the old process resumed. True reconnect-and-continue requires the daemon and lands as PCMP9.
 - Let background agents request user clarification through Agent View.
 - Add optional live sub-agent transcript streaming without injecting it into foreground model context.
@@ -101,7 +102,6 @@ The evidence audit and bounded follow-up ledger are
 and
 [`docs/bridgecode-plus-hardening-loop-2026-07-27.md`](docs/bridgecode-plus-hardening-loop-2026-07-27.md).
 
-- Add a versioned workflow schema plus explicit, bounded verifier/retry stages.
 - Add honest abandoned-job reconcile/resubmit assistance without claiming the
   previous process resumed.
 - Complete the signed clean-machine release matrix and packaged PacketADE

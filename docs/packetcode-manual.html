@@ -729,13 +729,15 @@ git cherry-pick &lt;commit&gt;</code></pre>
         <p>Workflows orchestrate ordered phases over the same job manager. A <code>parallel</code> step creates one job per fan-out item and joins the results.</p>
         <pre><code>/workflows
 /workflows list
+/workflows validate focused-review
 /workflows run review
 /workflows run review target="the staged diff"
 /workflows &lt;run-id&gt;
 /workflows stop &lt;run-id&gt;
 /workflows stop all</code></pre>
         <p>A built-in <code>review</code> workflow is immediately available. User definitions live in <code>~/.packetcode/workflows/*.toml</code>; project definitions in <code>.packetcode/workflows/*.toml</code> take precedence.</p>
-        <pre><code>name = "focused-review"
+        <pre><code>schema_version = 1
+name = "focused-review"
 
 [inputs]
 target = "the current working tree"
@@ -756,8 +758,18 @@ name = "synthesis"
 [[phases.steps]]
 name = "synthesize"
 mode = "single"
-prompt = "Deduplicate and prioritize these findings:\n\n{{.steps.review}}"</code></pre>
-        <p>Optional step fields are <code>provider</code>, <code>model</code>, <code>system_prompt</code>, and <code>allow_write</code>. <code>continue_on_error = true</code> belongs on a phase. Each run has a 16-agent guard plus global limits; cancellation cascades to registered children.</p>
+prompt = "Deduplicate and prioritize these findings:\n\n{{.steps.review}}"
+
+[phases.steps.verify]
+prompt = "Verify attempt {{.attempt}}. Candidate:\n{{.result}}"
+provider = "codex"
+model = "gpt-5.6-sol"
+pass_contract = "packetcode-workflow-verdict-v1"
+
+[phases.steps.retry]
+max = 2</code></pre>
+        <p>Every file declares <code>schema_version = 1</code>. <code>/workflows validate &lt;name&gt;</code> checks schema and templates without starting agents. Optional work-step fields are <code>provider</code>, <code>model</code>, <code>system_prompt</code>, and <code>allow_write</code>; <code>continue_on_error = true</code> belongs on a phase.</p>
+        <p>A verifier is a separate read-only job. It receives bounded work summaries and artifact previews, so selecting a different verifier provider sends that evidence to that service. It must return the <code>packetcode-workflow-verdict-v1</code> block with an exact <code>pass</code> or <code>fail</code>; missing or malformed verdicts fail closed. <code>retry.max</code> counts additional attempts. Verifiers and retries count toward the same 16-agent guard, global limits, and token budget. Steps without verifiers remain explicitly <strong>unverified</strong>.</p>
 
         <h3 id="loops">Repeat foreground work</h3>
         <pre><code>/loop Continue reviewing and fixing the focused tests until complete
@@ -768,7 +780,7 @@ prompt = "Deduplicate and prioritize these findings:\n\n{{.steps.review}}"</code
         <p>Self-paced loops ask the model for a versioned <code>packetcode-loop-decision</code> JSON block, retain <code>LOOP_DONE</code> for compatibility, and stop after 25 iterations regardless. Interval loops run immediately and then on the interval (minimum one second). A tick during active foreground work queues rather than overlaps.</p>
         <div class="callout limit">
           <span class="callout-title">Current orchestration limits</span>
-          <p>Workflow pipelines and verifier/retry stages are not shipped. Loops are process-local schedulers, not durable daemons.</p>
+          <p>Explicit multi-stage pipelines beyond ordered phases/steps are not shipped. Workflow verification and bounded retries are process-local orchestration; loops are also process-local schedulers, not durable daemons.</p>
         </div>
       </section>
 
@@ -1018,7 +1030,7 @@ packetcode doctor --check project,state.worktrees</code></pre>
             <tbody>
               <tr><td>Agents</td><td>Bounded concurrent jobs, nesting, persistence, cancellation, live transcripts, result lifecycle.</td><td>Resume execution after restart; arbitrary clarification questions.</td></tr>
               <tr><td>Write isolation</td><td>Dedicated worktree/branch from committed <code>HEAD</code>.</td><td>Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning.</td></tr>
-              <tr><td>Workflows</td><td>Sequential phases, single/parallel steps, fan-out join, cancellation, budgets.</td><td>Pipelines and verifier/retry stages.</td></tr>
+              <tr><td>Workflows</td><td>Versioned schema, offline validation, sequential phases, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets.</td><td>Explicit pipeline stages and a broader example library.</td></tr>
               <tr><td>Terminal</td><td>Native scrollback, bounded live region, sanitized output, multiline fallbacks.</td><td>Uniform true Shift+Enter across terminals.</td></tr>
               <tr><td>MCP</td><td>Stdio discovery/calls, namespaced tools, policies, logs.</td><td>HTTP/SSE, prompts/resources, live reload/restart.</td></tr>
               <tr><td>Reasoning</td><td>Catalog-driven Codex <code>/effort</code> and status display.</td><td>Universal reasoning control for every provider/model.</td></tr>
@@ -1066,7 +1078,7 @@ packetcode doctor --json</code></pre>
               <tr><td>Isolated write agent</td><td><code>/spawn --write fix the focused tests</code></td></tr>
               <tr><td>Agent control</td><td><code>/agents</code>, <code>/agents &lt;id&gt;</code>, <code>/jobs [id]</code>, <code>/jobs resubmit [id]</code>, <code>/cancel &lt;id|all&gt;</code></td></tr>
               <tr><td>Computers</td><td><code>/computers</code>, <code>/computers status &lt;name&gt;</code> (registry-only)</td></tr>
-              <tr><td>Fan-out workflow</td><td><code>/workflows run review target="the staged diff"</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
+              <tr><td>Workflow</td><td><code>/workflows validate &lt;name&gt;</code>, <code>/workflows run review target="the staged diff"</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
               <tr><td>Repeat work</td><td><code>/loop Continue until complete</code>, <code>/loop 10m /workflows run review</code>, <code>/loop list</code>, <code>/loop stop all</code></td></tr>
               <tr><td>Pending prompts</td><td><code>/queue</code>, <code>/queue drop &lt;n&gt;</code>, <code>/queue clear</code></td></tr>
               <tr><td>Sessions/context</td><td><code>/sessions</code>, <code>/sessions resume &lt;id&gt;</code>, <code>/sessions rename &lt;name&gt;</code>, <code>/compact --keep 10</code></td></tr>
@@ -1090,7 +1102,7 @@ packetcode doctor --json</code></pre>
               <tr><td><code>/agents [id]</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td><td>Inspect or cancel background work.</td></tr>
               <tr><td><code>/jobs resubmit [id]</code></td><td>Re-run a job abandoned by a previous app exit (new job; the original is not resumed).</td></tr>
               <tr><td><code>/computers [status &lt;name&gt;]</code></td><td>List or inspect registered Packet Computers. Registry-only &mdash; no daemon, nothing connects yet.</td></tr>
-              <tr><td><code>/workflows [run &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Run or inspect workflows.</td></tr>
+              <tr><td><code>/workflows [run &lt;name&gt;|validate &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Validate, run, or inspect workflows.</td></tr>
               <tr><td><code>/loop [interval] &lt;prompt|/command&gt;</code></td><td>Repeat work; use <code>list</code> or <code>stop</code>.</td></tr>
               <tr><td><code>/queue [drop &lt;n&gt;|clear]</code></td><td>Manage queued foreground prompts.</td></tr>
               <tr><td><code>/sessions</code>, <code>resume</code>, <code>rename</code>, <code>delete &lt;id&gt; --yes</code></td><td>Manage saved sessions.</td></tr>
