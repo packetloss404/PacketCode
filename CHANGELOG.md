@@ -6,6 +6,16 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- `/jobs resubmit [id]` re-runs a background job abandoned by a previous app
+  exit. It starts a **new** job from the saved prompt and never claims the old
+  process resumed: the abandoned job keeps its cancelled state, reason, and
+  evidence, and the two records link both ways. Allowed once per job; oversize
+  saved prompts are refused rather than truncated (PCH4).
+- Packet Computers registry (Milestone A): versioned
+  `~/.packetcode/computers/registry.json` with conservative policy defaults,
+  plus read-only `/computers` and `/computers status <name>`. Registry-only —
+  there is no daemon, nothing connects, and a stored status is never presented
+  as a live probe (PCMP1/PCMP2).
 - OpenAI Codex ChatGPT-subscription provider backed by the official Codex CLI OAuth store and Responses API, including catalog-driven reasoning effort/summary behavior.
 - DeepSeek, Grok (xAI), and Mistral built-in providers, plus refreshed OpenAI, Anthropic, MiniMax M3, Ollama, and Codex model metadata.
 - First-class native Ollama support with zero-config `localhost:11434`, remote-host overrides, bounded automatic `num_ctx`, `/api/show` capability discovery, keep-alive, model pull/status/PS commands, warmup, timing telemetry, and Apple Silicon memory recommendations.

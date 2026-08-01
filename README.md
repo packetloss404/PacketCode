@@ -154,7 +154,10 @@ See [Background agents](docs/feature-background-agents.md) and [Agent View](docs
 | `/spawn [--write] <prompt>` | Start a background agent. |
 | `/agents [id]` | Open Agent View or one transcript. |
 | `/jobs [id]` | List jobs or open one transcript. |
+| `/jobs resubmit [id]` | Re-run a job abandoned by a previous app exit (new job; the original is not resumed). |
 | `/cancel <id\|all>` | Cancel background jobs. |
+| `/computers` | List registered Packet Computers (registry-only; no daemon yet). |
+| `/computers status <name>` | Show one computer's stored record. |
 | `/workflows [run <name>\|list\|stop [id\|all]\|<id>]` | Run and inspect workflows. |
 | `/loop [interval] <prompt\|/command>` | Repeat work; use `list` or `stop`. |
 | `/plan [on\|off]` | Toggle read-only planning mode. |
@@ -252,8 +255,12 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 - [Hooks and statusline](docs/hooks-and-statusline.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [TUI parity harness](docs/tui-parity-harness.md)
+- [Packet Computers registry](docs/feature-packet-computers.md)
 - [Backlog](BACKLOG.md)
-- [Packet Computers and Packet Control proposal](PACKETCOMPUTERS.md)
+- [Packet Computers and Packet Control proposal](PACKETCOMPUTERS.md) — product
+  definition and the full six-phase arc. Packet Control is implemented in
+  PacketADE, not here; Packet Computers Phases 1–2 are tracked in
+  [docs/packet-computers-loop.md](docs/packet-computers-loop.md).
 
 ## Development
 

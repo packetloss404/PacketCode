@@ -43,6 +43,9 @@ type persistedJob struct {
 	WorktreeBranch string     `json:"worktree_branch,omitempty"`
 	WorktreeBase   string     `json:"worktree_base,omitempty"`
 	WorktreeNote   string     `json:"worktree_note,omitempty"`
+	Recovered      bool       `json:"recovered,omitempty"`
+	ResubmitOf     string     `json:"resubmit_of,omitempty"`
+	ResubmittedAs  string     `json:"resubmitted_as,omitempty"`
 }
 
 func toPersisted(j *Job) persistedJob {
@@ -77,6 +80,9 @@ func toPersisted(j *Job) persistedJob {
 		WorktreeBranch: j.WorktreeBranch,
 		WorktreeBase:   j.WorktreeBase,
 		WorktreeNote:   j.WorktreeNote,
+		Recovered:      j.Recovered,
+		ResubmitOf:     j.ResubmitOf,
+		ResubmittedAs:  j.ResubmittedAs,
 	}
 }
 
@@ -147,6 +153,9 @@ func fromPersisted(p persistedJob) *Job {
 		WorktreeBranch: p.WorktreeBranch,
 		WorktreeBase:   p.WorktreeBase,
 		WorktreeNote:   p.WorktreeNote,
+		Recovered:      p.Recovered,
+		ResubmitOf:     p.ResubmitOf,
+		ResubmittedAs:  p.ResubmittedAs,
 	}
 }
 
@@ -250,6 +259,7 @@ func loadPersistedJobs(jobsDir string) ([]*Job, []*Job, error) {
 		j := fromPersisted(p)
 		if state == StateQueued || state == StateRunning {
 			j.State = StateCancelled
+			j.Recovered = true
 			j.Reason = "previous app exit"
 			if j.FinishedAt.IsZero() {
 				j.FinishedAt = time.Now().UTC()

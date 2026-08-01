@@ -1903,6 +1903,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleAgentsCommand(args)
 	case "jobs":
 		return a.handleJobsCommand(args)
+	case "computers":
+		return a.handleComputersCommand(args)
 	case "cancel":
 		return a.handleCancelCommand(args)
 	case "provider", "providers":
@@ -2028,7 +2030,44 @@ func (a *App) handleJobsCommand(args []string) (tea.Model, tea.Cmd) {
 		a.conversation.AppendSystem(renderJobsTable(a.jobs.List()))
 		return a, nil
 	}
+	if args[0] == "resubmit" {
+		return a.handleJobsResubmit(args[1:])
+	}
 	return a.openJobTranscript(args[0], "job")
+}
+
+// handleJobsResubmit re-runs a job abandoned by a previous app exit. The
+// original is never resumed — it keeps its cancelled state and evidence,
+// and a separate job is spawned from its saved prompt.
+func (a *App) handleJobsResubmit(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		pending := a.jobs.RecoveredResubmittable()
+		if len(pending) == 0 {
+			a.conversation.AppendSystem("jobs resubmit: no abandoned jobs are waiting to be resubmitted")
+			return a, nil
+		}
+		var b strings.Builder
+		b.WriteString("jobs resubmit: usage /jobs resubmit <id>\nabandoned jobs available to re-run:\n")
+		for _, s := range pending {
+			prompt := s.Prompt
+			if len(prompt) > 60 {
+				prompt = prompt[:57] + "..."
+			}
+			fmt.Fprintf(&b, "  %-5s %s\n", trunc(s.ID, 5), prompt)
+		}
+		a.conversation.AppendSystem(strings.TrimRight(b.String(), "\n"))
+		return a, nil
+	}
+	snap, err := a.jobs.Resubmit(args[0])
+	if err != nil {
+		a.conversation.AppendSystem(fmt.Sprintf("jobs resubmit: %s", err.Reason))
+		return a, nil
+	}
+	a.conversation.AppendSystem(fmt.Sprintf(
+		"jobs resubmit: started %s as a new run from %s's saved prompt — %s was not resumed and keeps its own record",
+		snap.ID, snap.ResubmitOf, snap.ResubmitOf,
+	))
+	return a, nil
 }
 
 func (a *App) handleAgentsCommand(args []string) (tea.Model, tea.Cmd) {
@@ -2253,8 +2292,26 @@ func renderJobsTable(snaps []jobs.Snapshot) string {
 		if digest := jobs.ArtifactDigest(s.Artifacts); digest != "" {
 			fmt.Fprintf(&b, "      artifacts: %s\n", digest)
 		}
+		if line := reconcileSummary(s); line != "" {
+			fmt.Fprintf(&b, "      %s\n", line)
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// reconcileSummary describes a job's abandoned/resubmitted lineage. It is
+// deliberately explicit that nothing resumed: the previous process exited
+// and the work was never continued, only re-run as a separate job.
+func reconcileSummary(s jobs.Snapshot) string {
+	switch {
+	case s.ResubmitOf != "":
+		return fmt.Sprintf("resubmitted from abandoned job %s (new run, not a resumption)", s.ResubmitOf)
+	case s.Recovered && s.ResubmittedAs != "":
+		return fmt.Sprintf("abandoned at previous app exit; resubmitted as %s", s.ResubmittedAs)
+	case s.Recovered:
+		return fmt.Sprintf("abandoned at previous app exit; /jobs resubmit %s starts a new run from the saved prompt", s.ID)
+	}
+	return ""
 }
 
 // trunc returns s truncated to n runes (not bytes), adding nothing — just

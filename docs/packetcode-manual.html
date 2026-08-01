@@ -698,6 +698,7 @@ action = "ask"</code></pre>
           </table>
         </div>
         <p>Use <code>/jobs</code>, <code>/jobs &lt;id&gt;</code>, <code>/cancel &lt;id&gt;</code>, and <code>/cancel all</code> from chat. Live transcripts preserve your scroll position unless you were already at the bottom.</p>
+        <p><code>/jobs resubmit</code> lists jobs abandoned by a previous app exit and <code>/jobs resubmit &lt;id&gt;</code> re-runs one. This starts a <strong>new</strong> job from the saved prompt &mdash; nothing is resumed. The original keeps its cancelled state and all of its evidence, and the two records link both ways. One resubmit per job; a saved prompt over 32&nbsp;KiB is refused rather than truncated.</p>
 
         <h3 id="result-lifecycle">Result lifecycle</h3>
         <p>Completed results are not silently inserted into foreground context. The terminal completion notification marks a result seen; injecting adds a bounded handoff; explicit parent collection marks it consumed; ignoring marks it ignored. <code>collect_agent_results</code> is a read-only tool and is normally auto-allowed unless an explicit rule changes it to ask or deny. Artifact manifests summarize changed files, worktree metadata, commands/tests, searches, child jobs, bounded previews, and errors. Full logs and files stay in the transcript/worktree.</p>
@@ -720,7 +721,7 @@ git cherry-pick &lt;commit&gt;</code></pre>
         </div>
 
         <h3 id="agent-limits">Limits and persistence</h3>
-        <p>Defaults are four concurrent jobs, nesting depth two, and 32 jobs per process run. Job snapshots persist under <code>~/.packetcode/jobs/</code>. Jobs active during an unclean exit recover as cancelled rather than resuming. Arbitrary sub-agent clarification questions and foreground streaming of sub-agent output are not implemented.</p>
+        <p>Defaults are four concurrent jobs, nesting depth two, and 32 jobs per process run. Job snapshots persist under <code>~/.packetcode/jobs/</code>. Jobs active during an unclean exit recover as cancelled rather than resuming, and can be explicitly re-run with <code>/jobs resubmit</code>. Arbitrary sub-agent clarification questions and foreground streaming of sub-agent output are not implemented.</p>
       </section>
 
       <section id="workflows" aria-labelledby="workflows-title">
@@ -824,6 +825,7 @@ reason = "refuse broad recursive deletes"</code></pre>
               <tr><td><code>~/.packetcode/config.toml</code></td><td>Providers, behavior, permissions, MCP, hooks, statusline.</td></tr>
               <tr><td><code>~/.packetcode/sessions/</code></td><td>Foreground and background transcripts.</td></tr>
               <tr><td><code>~/.packetcode/jobs/</code></td><td>Background snapshots and manifests.</td></tr>
+              <tr><td><code>~/.packetcode/computers/</code></td><td>Packet Computers registry (<code>registry.json</code>).</td></tr>
               <tr><td><code>~/.packetcode/worktrees/</code></td><td>Write-agent checkouts.</td></tr>
               <tr><td><code>~/.packetcode/commands/</code></td><td>User Markdown commands.</td></tr>
               <tr><td><code>~/.packetcode/workflows/</code></td><td>User workflow definitions.</td></tr>
@@ -1062,7 +1064,8 @@ packetcode doctor --json</code></pre>
               <tr><td>Read-only agent</td><td><code>/spawn audit the current diff</code></td></tr>
               <tr><td>Chosen agent model</td><td><code>/spawn --provider codex --model gpt-5.6-sol audit auth</code></td></tr>
               <tr><td>Isolated write agent</td><td><code>/spawn --write fix the focused tests</code></td></tr>
-              <tr><td>Agent control</td><td><code>/agents</code>, <code>/agents &lt;id&gt;</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td></tr>
+              <tr><td>Agent control</td><td><code>/agents</code>, <code>/agents &lt;id&gt;</code>, <code>/jobs [id]</code>, <code>/jobs resubmit [id]</code>, <code>/cancel &lt;id|all&gt;</code></td></tr>
+              <tr><td>Computers</td><td><code>/computers</code>, <code>/computers status &lt;name&gt;</code> (registry-only)</td></tr>
               <tr><td>Fan-out workflow</td><td><code>/workflows run review target="the staged diff"</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
               <tr><td>Repeat work</td><td><code>/loop Continue until complete</code>, <code>/loop 10m /workflows run review</code>, <code>/loop list</code>, <code>/loop stop all</code></td></tr>
               <tr><td>Pending prompts</td><td><code>/queue</code>, <code>/queue drop &lt;n&gt;</code>, <code>/queue clear</code></td></tr>
@@ -1085,6 +1088,8 @@ packetcode doctor --json</code></pre>
               <tr><td><code>/effort [default|low|medium|high|xhigh|max|ultra]</code></td><td>Show or set supported reasoning effort.</td></tr>
               <tr><td><code>/spawn [--provider slug] [--model id] [--write] &lt;prompt&gt;</code></td><td>Start a background agent.</td></tr>
               <tr><td><code>/agents [id]</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td><td>Inspect or cancel background work.</td></tr>
+              <tr><td><code>/jobs resubmit [id]</code></td><td>Re-run a job abandoned by a previous app exit (new job; the original is not resumed).</td></tr>
+              <tr><td><code>/computers [status &lt;name&gt;]</code></td><td>List or inspect registered Packet Computers. Registry-only &mdash; no daemon, nothing connects yet.</td></tr>
               <tr><td><code>/workflows [run &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Run or inspect workflows.</td></tr>
               <tr><td><code>/loop [interval] &lt;prompt|/command&gt;</code></td><td>Repeat work; use <code>list</code> or <code>stop</code>.</td></tr>
               <tr><td><code>/queue [drop &lt;n&gt;|clear]</code></td><td>Manage queued foreground prompts.</td></tr>

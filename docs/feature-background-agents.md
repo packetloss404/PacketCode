@@ -58,6 +58,8 @@ Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen wor
 
 Jobs persist snapshots under `~/.packetcode/jobs/`. Queued, running, and terminal transitions are written immediately; high-frequency activity updates are coalesced and flushed at shutdown. Jobs left active by an unclean prior exit recover as cancelled; execution is not resumed yet.
 
+Recovered jobs carry a durable `Recovered` flag (not inferred from the reason string) and can be explicitly re-run with `/jobs resubmit <id>`. That spawns a *new* job from the saved prompt and links the pair via `ResubmitOf` / `ResubmittedAs`; the abandoned job is never mutated beyond gaining the forward link, so its evidence stays intact. Resubmit is allowed once per job, rejects jobs that ended normally, and refuses a saved prompt larger than `jobs.MaxResubmitPromptBytes` (32 KiB) rather than truncating it. True reconnect-and-continue needs the Packet Computers daemon and is tracked as PCMP9 in [`packet-computers-loop.md`](packet-computers-loop.md).
+
 Terminal results are not silently inserted into foreground context. Agent View marks them seen and lets the user inject or ignore them. Parent agents that explicitly wait/collect mark results consumed.
 
 Each result includes a bounded artifact manifest derived from tool activity:

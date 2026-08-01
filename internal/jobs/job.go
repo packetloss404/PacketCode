@@ -120,6 +120,14 @@ type Job struct {
 	WorktreeBranch string             // branch checked out by the worktree
 	WorktreeBase   string             // base ref/SHA used to create the worktree
 	WorktreeNote   string             // fallback or setup note when no worktree was created
+
+	// Reconcile lineage. A job abandoned by a previous process exit is
+	// rewritten as Cancelled and marked Recovered; it is never resumed.
+	// Resubmitting one creates a brand-new job, and the two records are
+	// linked in both directions so neither pretends the old run continued.
+	Recovered     bool   // reconciled from a previous app exit
+	ResubmitOf    string // id of the recovered job this job was resubmitted from
+	ResubmittedAs string // id of the new job created from this recovered job
 }
 
 // Snapshot is a safe-to-copy projection of Job for UI consumption. It
@@ -138,6 +146,8 @@ type Snapshot struct {
 	Seq                                                      int64
 	Artifacts                                                []Artifact
 	WorktreePath, WorktreeBranch, WorktreeBase, WorktreeNote string
+	Recovered                                                bool
+	ResubmitOf, ResubmittedAs                                string
 }
 
 // snapshotOf builds a Snapshot from a Job. Caller must hold the Manager's
@@ -170,6 +180,9 @@ func snapshotOf(j *Job) Snapshot {
 		WorktreeBranch: j.WorktreeBranch,
 		WorktreeBase:   j.WorktreeBase,
 		WorktreeNote:   j.WorktreeNote,
+		Recovered:      j.Recovered,
+		ResubmitOf:     j.ResubmitOf,
+		ResubmittedAs:  j.ResubmittedAs,
 	}
 	s.Tokens.Input = j.InputTokens
 	s.Tokens.Output = j.OutputTokens

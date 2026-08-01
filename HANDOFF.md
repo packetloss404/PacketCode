@@ -1,8 +1,9 @@
 # Packetcode Maintainer Handoff
 
-Updated: 2026-07-29
+Updated: 2026-07-31
 
-Handoff baseline: `main` at `3314179` (`Harden PacketCode workflows and PacketADE integration`)
+Handoff baseline: `main` at `2195400` (`Document maintainer handoff`), plus the
+2026-07-31 pass below.
 
 This file is the quickest way to resume Packetcode work without reconstructing
 the repository's recent history. Read it together with [README.md](README.md),
@@ -41,6 +42,24 @@ hardening pass:
   documentation.
 - A reviewed user manual, advanced guide, printable cheat sheet, and
   self-contained offline HTML5 manual.
+
+The 2026-07-31 pass added:
+
+- **PCH4 — abandoned-job resubmit.** `/jobs resubmit [id]` re-runs work a
+  previous app exit abandoned. It spawns a *new* job and never claims the old
+  process resumed; the abandoned record keeps its state and evidence, and the
+  pair links via `ResubmitOf`/`ResubmittedAs`. See
+  [docs/bridgecode-plus-hardening-loop-2026-07-27.md](docs/bridgecode-plus-hardening-loop-2026-07-27.md).
+- **PCMP1/PCMP2 — Packet Computers registry (Milestone A).** `internal/computers`
+  plus read-only `/computers`. Registry-only: no daemon, no transport, and a
+  stored status is never shown as a live probe. See
+  [docs/packet-computers-loop.md](docs/packet-computers-loop.md) and
+  [docs/feature-packet-computers.md](docs/feature-packet-computers.md).
+- **PCH3 and PCH5 specified, not implemented.** Acceptance conditions are
+  written into the hardening loop; PCH3 is the next implementation item.
+- **Packet Control split to PacketADE.** Phases 1–2 are implemented there
+  (`D:\projects\PacketADE\dev\packet-control-loop.md`). No packetcode work is
+  scheduled; if it ever lands here it must consume that manifest schema.
 
 ## Start Here
 
@@ -104,6 +123,9 @@ Inside Packetcode:
 - [docs/feature-background-agents.md](docs/feature-background-agents.md) and
   [docs/feature-agent-view.md](docs/feature-agent-view.md): job orchestration
   and result lifecycle.
+- [docs/feature-packet-computers.md](docs/feature-packet-computers.md): the
+  computer registry as it actually ships, and an explicit list of what does
+  not work yet.
 - [docs/mcp.md](docs/mcp.md): MCP configuration and runtime management.
 - [docs/troubleshooting.md](docs/troubleshooting.md): common setup and runtime
   failures.

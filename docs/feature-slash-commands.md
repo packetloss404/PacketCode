@@ -37,7 +37,10 @@ Slash commands are parsed and handled locally before a prompt reaches the model.
 | `/spawn [--provider P] [--model M] [--write] <prompt>` | Start a background job. |
 | `/agents [id]` | Open Agent View or a transcript. |
 | `/jobs [id]` | List jobs or open a transcript. |
+| `/jobs resubmit [id]` | Re-run a job abandoned by a previous app exit. Starts a new job; the original is not resumed. |
 | `/cancel <id\|all>` | Cancel jobs. |
+| `/computers` | List registered Packet Computers (registry-only; nothing connects yet). |
+| `/computers status <name>` | Show one computer's stored record. |
 | `/workflows` | Open Workflow View. |
 | `/workflows run <name> [key=value...]` | Start a workflow. |
 | `/workflows list` | List definitions/runs. |

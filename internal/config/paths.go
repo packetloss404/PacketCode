@@ -116,6 +116,20 @@ func WorktreesDir() (string, error) {
 	return worktrees, nil
 }
 
+// ComputersDir returns ~/.packetcode/computers/, creating it if missing.
+// Holds the Packet Computers registry; see internal/computers.
+func ComputersDir() (string, error) {
+	dir, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	computers := filepath.Join(dir, "computers")
+	if err := EnsureDir(computers); err != nil {
+		return "", err
+	}
+	return computers, nil
+}
+
 // CostTallyPath returns ~/.packetcode/cost-tally.json.
 // The directory is created if missing; the file is not.
 func CostTallyPath() (string, error) {

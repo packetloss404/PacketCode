@@ -25,7 +25,8 @@ packetcode doctor --json
 | Read-only agent | `/spawn audit the current diff` |
 | Chosen agent model | `/spawn --provider codex --model gpt-5.6-sol audit auth` |
 | Isolated write agent | `/spawn --write fix the focused tests` |
-| Agent control | `/agents`, `/agents <id>`, `/jobs [id]`, `/cancel <id|all>` |
+| Agent control | `/agents`, `/agents <id>`, `/jobs [id]`, `/jobs resubmit [id]`, `/cancel <id|all>` |
+| Computers | `/computers`, `/computers status <name>` (registry-only) |
 | Fan-out workflow | `/workflows run review target="the staged diff"`, `/workflows list`, `/workflows stop all` |
 | Repeat work | `/loop Continue until complete`, `/loop 10m /workflows run review`, `/loop list`, `/loop stop all` |
 | Pending prompts | `/queue`, `/queue drop <n>`, `/queue clear` |

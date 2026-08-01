@@ -410,6 +410,8 @@ Results are not silently added to your foreground conversation. Inject the usefu
 ```text
 /jobs
 /jobs <id>
+/jobs resubmit
+/jobs resubmit <id>
 /cancel <id>
 /cancel all
 ```
@@ -417,6 +419,14 @@ Results are not silently added to your foreground conversation. Inject the usefu
 `/jobs` prints a compact job table; `/jobs <id>` opens the live transcript. Transcripts refresh while jobs run and retain full output beyond the bounded result summary.
 
 Jobs persist under `~/.packetcode/jobs/`. If packetcode is interrupted, previously active jobs recover as cancelled on the next launch; they do not resume automatically.
+
+### Re-running abandoned jobs
+
+`/jobs resubmit` lists jobs that a previous app exit abandoned; `/jobs resubmit <id>` re-runs one.
+
+This starts a **new** job from the abandoned job's saved prompt, provider, and model. Nothing is resumed — the previous process is gone and its agent loop cannot be continued. The original job keeps its cancelled state, its reason, and all of its evidence (artifacts, transcript, worktree references, token and cost totals), and the two records are linked in both directions so the lineage stays inspectable in `/jobs`.
+
+A job can be resubmitted once. Jobs that finished normally are not eligible, and a saved prompt over 32 KiB is refused rather than truncated — a shortened prompt would start a different run than the one you asked to re-run.
 
 ### Agent limits
 

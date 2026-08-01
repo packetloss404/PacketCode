@@ -33,7 +33,7 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 - Add workflow pipeline stages and adversarial verification/retry policies.
 - Add a workflow schema/version field, validation command, and example library.
-- Resume or reconcile active background jobs after process restart; current persistence records state and recovers abandoned jobs as cancelled.
+- Resume or reconcile active background jobs after process restart. Abandoned jobs are recovered as cancelled and can now be explicitly re-run via `/jobs resubmit` (PCH4, 2026-07-31), which starts a new job and never claims the old process resumed. True reconnect-and-continue requires the daemon and lands as PCMP9.
 - Let background agents request user clarification through Agent View.
 - Add optional live sub-agent transcript streaming without injecting it into foreground model context.
 - Add safe worktree merge/apply assistance and explicit cleanup commands.
@@ -54,24 +54,35 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 ## Packet Computers
 
-See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md).
+Product source: [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md). Bounded Phases 1–2
+ledger: [docs/packet-computers-loop.md](docs/packet-computers-loop.md)
+(PCMP1–PCMP9). PCMP1/PCMP2 shipped 2026-07-31 — versioned registry plus a
+read-only `/computers` surface. Everything below is open.
 
-- Add a versioned computer registry and read-only `/computers` status surface.
-- Design a loopback-only daemon RPC and heartbeat before adding SSH forwarding.
-- Introduce a runtime backend abstraction for local/remote filesystem and shell operations.
-- Add `ComputerID` to jobs and `/spawn --computer <name>`.
-- Reconcile persistent remote jobs and group Agent View by computer.
-- Defer managed cloud machines, snapshots, and process supervision until local/SSH contracts are stable.
+- PCMP3 — `/computers register|ssh|remove` write commands with validation and
+  confirmation. Registration is hand-edited JSON until this lands.
+- PCMP4/PCMP5 — loopback-only daemon RPC plus heartbeat, so status stops being
+  a stored value and becomes a probed one. Must refuse non-loopback binds.
+- PCMP6/PCMP7 — SSH-forwarded transport with host-key verification, then the
+  runtime backend abstraction so tools gain no remote conditionals.
+- PCMP8/PCMP9 — `ComputerID` on jobs, `/spawn --computer <name>`, then
+  persistent job reconcile. PCMP9 is the first point at which "jobs survive
+  restart" is true; it must not be claimed earlier, and it must preserve
+  PCH4's rule that anything not genuinely resumed is reported as abandoned.
+- Defer managed cloud machines, snapshots, and process supervision until the
+  local/SSH contracts are stable.
 
 ## Packet Control
 
-See [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md).
+**Split to PacketADE 2026-07-31.** Packet Control Phases 1–2 are implemented
+in PacketADE (`D:\projects\PacketADE\dev\packet-control-loop.md`, CTL1–CTL9),
+because evidence bundles need a viewer and PacketADE already has the diff,
+review-gate, and Flight surfaces to show them in. See
+[PACKETCOMPUTERS.md](PACKETCOMPUTERS.md) for the product definition.
 
-- Define versioned control-run, artifact, verdict, and report formats.
-- Add terminal-first `/verify` and `/qa` with command, exit-code, and output evidence.
-- Integrate control runs into jobs or a dedicated Control View.
-- Add browser screenshots/traces only after target allowlists and prompt-injection boundaries are explicit.
-- Defer desktop control and polished demo composition.
+- No packetcode work is scheduled. If Control is later wanted in the TUI, it
+  must consume CTL1's manifest schema rather than defining a second evidence
+  format.
 
 ## Security and Trust
 

@@ -2,13 +2,37 @@
 
 Status: product/research proposal; not implemented unless explicitly identified below.
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-31
 
-This document captures the Packet Computers and Packet Control product ideas for PacketADE/packetcode, the external research behind them, and a staged implementation plan that fits the current codebase.
+This document captures the Packet Computers and Packet Control product ideas,
+the external research behind them, and a staged implementation plan.
+
+## Which product is this about?
+
+Two Packet products are named throughout, and the distinction matters because
+they have very different starting positions:
+
+- **packetcode** — the Go terminal (TUI) coding agent in this repository. Every
+  architecture section below (`internal/computers/`, `internal/control/`,
+  `packetcode daemon`, `~/.packetcode/...`) is a proposal for *this* codebase,
+  and the "Current packetcode fit" gap list describes *this* codebase.
+- **PacketADE** — the Tauri desktop ADE at `D:\projects\PacketADE`. It is a
+  separate product that already ships a large part of what Packet Computers
+  Phase 1 proposes. See "Current PacketADE fit" below before reusing the gap
+  list against it.
+
+**Product split decided 2026-07-31.** Packet Computers remains a packetcode
+proposal. **Packet Control Phases 1–2 are being implemented in PacketADE**, not
+here — evidence bundles want a viewer, and PacketADE already has the diff,
+review-gate, and Flight surfaces to show them in. The PacketADE-side plan is
+`D:\projects\PacketADE\dev\packet-control-loop.md` (CTL1–CTL9). If Packet
+Control is later wanted in packetcode too, it must consume that plan's manifest
+schema rather than defining a second evidence format.
 
 ## Executive Summary
 
-Packet Computers and Packet Control both make sense for PacketADE, but they should be built in different layers.
+Packet Computers and Packet Control are both worth building, but they belong in
+different layers and — per the split above — in different products.
 
 Packet Computers should be the durable place where agents work: local machines, SSH machines, and eventually managed cloud machines that keep project state, dependencies, services, jobs, transcripts, logs, and approvals across time.
 
@@ -28,10 +52,10 @@ The recommended order:
 
 Factory's Droid Computers are persistent workstations for agents. Their BYOM model is especially relevant: users can register their own Linux, macOS, or Windows machines, and Factory routes traffic without exposing public ports.
 
-Relevant ideas for PacketADE:
+Relevant ideas for the Packet products:
 
 - A computer is not a chat session. It is a durable execution environment.
-- Users should be able to register their own machines before PacketADE attempts managed cloud machines.
+- Users should be able to register their own machines before either product attempts managed cloud machines.
 - Remote development access, including SSH-style workflows, is a major part of the product surface.
 - Persistent machine state is useful because agents need installed dependencies, running services, repo state, and logs.
 
@@ -52,7 +76,7 @@ Factory's Droid Control points toward an evidence-driven control layer: automate
 4. Judge the evidence against the claim.
 5. Return a verdict with artifacts.
 
-Relevant ideas for PacketADE:
+Relevant ideas for the Packet products:
 
 - Packet Control should start as verification and QA, not as a video generator.
 - Artifacts need to be first-class: logs, terminal snapshots, screenshots, traces, manifests, and verdicts.
@@ -68,7 +92,7 @@ Sources:
 
 Codex points toward isolated, configurable environments, explicit approvals, security-first defaults, and network controls. The most relevant lesson is that agent execution environments should have clear boundaries and reviewable outputs.
 
-Relevant ideas for PacketADE:
+Relevant ideas for the Packet products:
 
 - Environment setup and project-specific docs matter as much as model quality.
 - Internet access and privileged execution need explicit policy.
@@ -88,7 +112,7 @@ Sources:
 
 OpenAI and Anthropic computer-use documentation reinforces that UI and desktop control should be treated as a high-risk capability. The controlled app or webpage can contain prompt-injection content, and authenticated sessions can expose sensitive data.
 
-Relevant ideas for PacketADE:
+Relevant ideas for the Packet products:
 
 - Treat UI content as untrusted evidence, not instructions.
 - Use fresh browser profiles by default.
@@ -105,7 +129,7 @@ Sources:
 
 Playwright and asciinema are good references for the evidence side. Playwright traces are structured and inspectable. Asciinema is lightweight and well-suited to terminal recordings.
 
-Relevant ideas for PacketADE:
+Relevant ideas for the Packet products:
 
 - Browser evidence should include traces, screenshots, console summaries, network summaries, and accessibility or DOM snapshots.
 - Terminal evidence should include command output, exit codes, text snapshots, and optional recordings.
@@ -120,9 +144,9 @@ Sources:
 - [agent-browser](https://agent-browser.io/)
 - [agent-browser Chrome/CDP docs](https://agent-browser.dev/engines/chrome)
 
-## Current Packetcode Fit
+## Current packetcode Fit
 
-Packetcode already has much of the spine needed for both ideas:
+packetcode already has much of the spine needed for both ideas:
 
 - Provider-neutral agent loop.
 - Tool registry with approval-aware tools.
@@ -141,18 +165,57 @@ Important gaps:
 
 - No durable machine registry.
 - No daemon or remote execution transport.
-- No persistent job reconnect/reconcile flow after PacketADE restarts.
+- No persistent job reconnect/reconcile flow after packetcode restarts.
 - No remote runtime/backend abstraction or computer identity on jobs.
 - No resumable remote/local execution after process restart.
 - No general control-run evidence format (job artifact manifests are bounded handoffs, not QA evidence bundles).
 - No browser/terminal capture abstraction.
 - No target-level policy for computer control.
 
+## Current PacketADE Fit
+
+The gap list above is about packetcode and **must not be reused for PacketADE**,
+which starts from a very different position. Verified against the PacketADE
+source on 2026-07-31:
+
+Already shipped, and close to what Packet Computers Phase 1 proposes:
+
+- `ServerConfig` (`src/types/server.ts`, `core::storage::ServerConfig`) is
+  already a durable machine record: `id`, `name`, `host`, `port`, `username`,
+  `authMethod`, `remotePath` (≈ project root), `installedAgents`
+  (≈ capabilities), and `lastConnectedAt` (≈ `last_seen`).
+- `hostFingerprint` pins SSH host keys against an app-managed `known_hosts`,
+  with TOFU only as a warned legacy fallback — stricter than this document's
+  security section asks for.
+- SSH-backed file and bash tools for API agents, plus remote worktrees.
+- Per-attempt git worktree isolation for Flight attempts, which is this
+  document's Phase 3 "local foundation".
+- Durable supervision of delegated PacketAgent runs that survives a PacketADE
+  restart (`dev/bridgemind/packetagent-handoff-loop.md`, PH7).
+
+Genuinely missing in PacketADE:
+
+- No heartbeat or health probe on any server record.
+- No computer identity on Flight attempts, and no per-machine policy axes.
+- `ServerStatus` is ephemeral connection UI state, not a durable status.
+- No control-run evidence format. The nearest type,
+  `CoordinationArtifactRef` (`src-tauri/src/core/flight.rs`), is only
+  `id`/`label`/`uri`/`mime_type` hung off coordination messages — a pointer,
+  not an evidence bundle.
+
+One deliberate difference to respect: PacketADE Flight attempts **intentionally**
+do not resume after restart. `flight_attempts.rs` passes `None` for both
+`resume_token` and `resume_messages` ("flights start fresh"), and
+`core/orchestrator.rs` carries a test named
+`recover_never_resumes_bounded_autonomy_after_restart`. Phase 2's "jobs survive
+restart" goal is therefore a bounded-autonomy product decision to re-open in
+PacketADE, not a gap to close silently.
+
 ## Packet Computers
 
 ### Product Definition
 
-A Packet Computer is a durable machine that PacketADE can delegate work to.
+A Packet Computer is a durable machine that packetcode can delegate work to.
 
 It can be:
 
@@ -302,7 +365,7 @@ The jobs manager should resolve `ComputerID` into a backend and pass it into the
 
 #### Phase 1: BYO Local/SSH MVP
 
-Goal: PacketADE can register a machine and spawn an agent job there.
+Goal: packetcode can register a machine and spawn an agent job there.
 
 Scope:
 
@@ -325,12 +388,12 @@ Out of scope:
 
 #### Phase 2: Persistent Jobs
 
-Goal: Jobs survive PacketADE restart.
+Goal: Jobs survive packetcode restart.
 
 Scope:
 
 - Daemon keeps job state.
-- PacketADE reconnects and reconciles jobs.
+- packetcode reconnects and reconciles jobs.
 - Agent View restores active and completed jobs.
 - Transcripts stream after reconnect.
 - Cancellation works across reconnect.
@@ -732,7 +795,7 @@ Users need clear distinctions:
 
 Build both, but do not build both as giant features.
 
-Packet Computers should start with BYO local/SSH machines and persistent job execution. That makes PacketADE more useful quickly without taking on managed cloud operations.
+Packet Computers should start with BYO local/SSH machines and persistent job execution. That makes packetcode more useful quickly without taking on managed cloud operations.
 
 Packet Control should start with terminal verification and QA manifests. That gives PacketADE a trust-and-truth layer: users can ask not just "did you change it?" but "prove it works."
 
