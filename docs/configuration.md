@@ -155,11 +155,13 @@ Custom profile values are `ask`, `allow`, and `deny`. Use `default` as the fallb
 
 `[permissions.tools]` is still accepted as a backward-compatible inline rule table, but new config should prefer named profiles plus `[[permissions.rules]]`.
 
-`[[permissions.rules]]` adds ordered policy rules. Later rules win when more than one matches. `command` matches an exact `execute_command` string, and `command_prefix` matches shell command fields from the beginning.
+`[[permissions.rules]]` adds ordered policy rules. An explicit matching deny is a safety floor; among other matches, later rules win. `command` matches an exact `execute_command` string, and `command_prefix` matches shell command fields from the beginning. The `read_only` profile also has a hard non-mutation floor that allow/ask rules cannot override.
 
 `[statusline]` configures an optional shell command that replaces the native statusline, which is enabled by default even when `command` is empty. See [Hooks and statusline](hooks-and-statusline.md).
 
-`[mcp.<name>]` declares stdio MCP servers. See [MCP servers](mcp.md).
+`[mcp.<name>]` declares stdio MCP servers. There is no URL or transport field.
+See [MCP servers](mcp.md). The future Streamable HTTP surface is gated by the
+[approved trust contract](mcp-http-trust-contract.md), not yet configurable.
 
 ## Custom Prompt Commands
 

@@ -109,7 +109,9 @@ The approval menu supports arrow keys and numbers:
 2. Yes, and do not ask again for this tool/session rule
 3. No
 
-Use `/permissions` to inspect or change the session policy. See [Security and permissions](docs/security.md).
+Use `/permissions` to inspect or change the session policy. `/permissions reset`
+revokes remembered/session rules and restores the startup policy. See
+[Security and permissions](docs/security.md).
 
 ## Background Agents and Workflows
 
@@ -170,7 +172,7 @@ See [Background agents](docs/feature-background-agents.md) and [Agent View](docs
 | `/compact [--keep N]` | Summarize older context. |
 | `/undo` | Restore the latest file backup. |
 | `/cost` | Show or reset tracked API cost. |
-| `/permissions` | Inspect or change tool policy. |
+| `/permissions` | Inspect or change tool policy; `reset` revokes session rules. |
 | `/trust [on\|off]` | Show or set bypass mode. |
 | `/ollama [status\|models\|ps\|pull <model>]` | Inspect and manage local/remote Ollama. |
 | `/mcp` | Inspect MCP servers, status, tools, and logs. |
@@ -235,6 +237,13 @@ To reduce repeated context:
 ## MCP, Hooks, Themes, and Statusline
 
 - MCP servers are external stdio processes configured under `[mcp.<name>]`; discovered tools use `<server>__<tool>` names and remain policy-gated.
+- Streamable HTTP is not enabled. Its reviewed v1 trust contract now pins exact
+  origins/address classes, bounded bodyless same-origin redirects and atomically
+  bound target-only credential rules, disabled ambient proxies, system-root
+  TLS, bounded resources,
+  credential-bound untrusted output provenance/redaction, per-call approval,
+  revocation, and manual failure recovery before a transport implementation can
+  land.
 - Hooks run on user prompt submission, before a tool, or after a tool.
 - A native Claude Code-style statusline is enabled by default. A custom command can consume a Claude-compatible JSON snapshot.
 - `~/.packetcode/theme.toml` overrides semantic colors and provider colors.
@@ -257,6 +266,7 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 - [Workflows and verification](docs/workflows.md)
 - [Code intelligence](docs/code-intelligence.md)
 - [MCP servers](docs/mcp.md)
+- [Streamable HTTP MCP trust contract](docs/mcp-http-trust-contract.md)
 - [Hooks and statusline](docs/hooks-and-statusline.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [TUI parity harness](docs/tui-parity-harness.md)

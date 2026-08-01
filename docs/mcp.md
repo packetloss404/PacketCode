@@ -10,7 +10,9 @@ surfaced to the conversation pane and counts against the existing
 approval flow.
 
 MCP support uses **stdio transport only**. HTTP+SSE, WebSocket, and
-StreamableHTTP remotes are not supported yet.
+Streamable HTTP remotes are not supported yet. The required security design is
+approved in the [Streamable HTTP MCP trust contract](mcp-http-trust-contract.md),
+but no URL/transport configuration or network client has landed.
 
 ---
 
@@ -138,6 +140,8 @@ By default, each `fetch__fetch` call asks for approval.
 
 The approval menu shows the exact tool name (`filesystem__write_file`)
 and proposed arguments before you select Yes, remember a session rule, or No.
+Use `/permissions reset` to revoke remembered/session rules and restore the
+startup policy.
 
 ---
 
@@ -176,8 +180,8 @@ PacketCode itself after changing `config.toml`.
 - **No automatic reconnect.** If a server crashes mid-session, calls to its
   tools return a friendly `/mcp restart <name>` recovery instruction; native
   tools and other MCP servers keep working.
-- **stdio transport only.** HTTP+SSE, WebSocket, StreamableHTTP
-  remotes are deferred.
+- **stdio transport only.** Streamable HTTP has a reviewed, fail-closed trust
+  contract, but the transport and its configuration remain deferred.
 - **No MCP prompts, resources, sampling, elicitation, logging, or
   roots.** packetcode implements tools-only. Server-initiated requests
   for those surfaces are refused with a JSON-RPC `-32601` (method not
@@ -190,4 +194,6 @@ PacketCode itself after changing `config.toml`.
   the tool result. Tools can still be useful — they just can't
   surface non-text payloads to the LLM.
 
-See [MCP implementation notes](feature-mcp.md) for the maintained protocol contract.
+See [MCP implementation notes](feature-mcp.md) for the maintained stdio
+protocol contract and the [Streamable HTTP MCP trust contract](mcp-http-trust-contract.md)
+for the network design gate.

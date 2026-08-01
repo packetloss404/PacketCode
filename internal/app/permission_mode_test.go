@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -123,6 +125,57 @@ func TestCyclePermissionMode_ReevaluatesVisibleApproval(t *testing.T) {
 	decision := waitDecision(t, decisionCh)
 	if !decision.Approved {
 		t.Fatalf("live auto-mode decision = %+v, want approved", decision)
+	}
+}
+
+func TestCyclePermissionMode_AdvancesToNextQueuedApproval(t *testing.T) {
+	r := newTestApp(t)
+	r.app.applyPermMode(modeNormal)
+	r.app.streaming = true
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	writeTool := tools.NewWriteFileTool(r.tmp, nil)
+	writeCall := provider.ToolCall{ID: "write-1", Name: writeTool.Name(), Arguments: `{"path":"a.txt","content":"x"}`}
+	writeDecision := make(chan agent.ApprovalDecision, 1)
+	go func() {
+		writeDecision <- r.app.approver.Approve(ctx, agent.ApprovalRequest{
+			Tool: writeTool, ToolCall: writeCall, Params: json.RawMessage(writeCall.Arguments),
+		})
+	}()
+	waitPendingApproval(t, r.app.approver)
+	r.app.approval.Show(writeTool, writeCall)
+
+	shellTool := tools.NewExecuteCommandTool(r.tmp)
+	shellCall := provider.ToolCall{ID: "shell-2", Name: shellTool.Name(), Arguments: `{"command":"go test ./..."}`}
+	shellDecision := make(chan agent.ApprovalDecision, 1)
+	go func() {
+		shellDecision <- r.app.approver.Approve(ctx, agent.ApprovalRequest{
+			Tool: shellTool, ToolCall: shellCall, Params: json.RawMessage(shellCall.Arguments),
+		})
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(r.app.approver.pendingCh) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(r.app.approver.pendingCh) == 0 {
+		t.Fatal("second approval did not reach the queue")
+	}
+
+	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}) // manual -> accept edits
+	if decision := waitDecision(t, writeDecision); !decision.Approved {
+		t.Fatalf("write decision = %+v, want approved", decision)
+	}
+	if !r.app.approval.Visible() {
+		t.Fatal("queued shell approval should become visible")
+	}
+	if view := r.app.approval.View(); !strings.Contains(view, "go test ./...") {
+		t.Fatalf("next approval was not the queued shell command:\n%s", view)
+	}
+
+	r.app.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "test cleanup"})
+	if decision := waitDecision(t, shellDecision); decision.Approved {
+		t.Fatalf("shell cleanup decision = %+v, want rejected", decision)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -24,11 +23,6 @@ const tailLogLineCount = 50
 // /mcp logs reads into memory. The command is a diagnostic tail, not a
 // full log viewer.
 const maxMCPLogTailBytes = 256 * 1024
-
-var (
-	mcpBearerSecretRE = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
-	mcpKeyValueRE     = regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password)(["']?\s*[:=]\s*["']?)[^"',\s}]+`)
-)
 
 // handleMCPCommand routes the /mcp slash command. Empty args renders
 // the configured-servers table; `logs <name>` tails the named server's
@@ -381,6 +375,5 @@ func readLastLines(path string, n int) ([]string, error) {
 }
 
 func redactMCPLogLine(line string) string {
-	line = mcpBearerSecretRE.ReplaceAllString(line, "Bearer [REDACTED]")
-	return mcpKeyValueRE.ReplaceAllString(line, `${1}${2}[REDACTED]`)
+	return mcp.RedactSensitiveText(line)
 }

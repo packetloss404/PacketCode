@@ -81,6 +81,7 @@ func (a *App) cyclePermissionMode() {
 	}
 	if a.approver != nil && a.approver.ResolveActiveByPolicy() {
 		a.approval.Hide()
+		a.showPendingApproval()
 	}
 }
 
@@ -92,6 +93,7 @@ func (a *App) applyPermMode(target permMode) {
 	if target == a.currentPermMode() {
 		return
 	}
+	wasPlan := a.planMode
 	// Leaving plan mode: drop the flag before repointing the profile.
 	if a.planMode && target != modePlan {
 		a.planMode = false
@@ -113,10 +115,14 @@ func (a *App) applyPermMode(target permMode) {
 		a.planMode = true
 		a.refreshTopBar()
 	case modeBypass:
-		if a.currentPermissionPolicy().Profile() != permissions.ProfileFull {
-			a.preTrustPolicy = a.currentPermissionPolicy()
+		restore := a.currentPermissionPolicy()
+		if wasPlan {
+			restore = restore.WithProfile(a.planPrevProfile)
 		}
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileFull))
+		if restore.Profile() != permissions.ProfileFull {
+			a.preTrustPolicy = restore
+		}
+		a.setPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
 	}
 }
 

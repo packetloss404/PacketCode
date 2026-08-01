@@ -23,9 +23,24 @@ Only tools are exposed. Prompts, resources, sampling, elicitation, roots, and no
 
 ## Current Limits
 
-- stdio only; no Streamable HTTP.
+- stdio only; no Streamable HTTP. The
+  [network trust contract](mcp-http-trust-contract.md) is approved and backed
+  by a transport-independent validator/redaction suite, but no transport flag
+  or HTTP client exists.
 - no live configuration reload; restart uses the configuration loaded at
   PacketCode startup.
 - no automatic reconnect after process death.
 - non-text result blocks are represented as omitted content.
 - MCP calls remain approval-gated unless the active policy/rule allows them.
+
+## Future Streamable HTTP Gate
+
+`internal/mcp/http_trust.go` now validates the approved v1 decisions: exact
+origins and explicit ports, separately allowed address classes, mixed-DNS
+rejection, denied or bounded bodyless same-origin GET/HEAD redirects, disabled
+ambient proxies, system-root TLS, identity compression, atomically bound
+target-only environment credentials, per-call approval, bounded response/event/
+header/output sizes, bounded timeout, and manual reconnect. It also defines a
+credential-bound, labelled/redacted
+untrusted-output envelope. This code is not wired to configuration or network
+I/O; the implementation loop must use it rather than creating a second policy.

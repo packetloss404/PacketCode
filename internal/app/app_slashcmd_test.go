@@ -1215,6 +1215,24 @@ func TestApp_Trust_On(t *testing.T) {
 	}
 }
 
+func TestApp_Trust_OnExitsPlanAndOffRestoresPrePlanProfile(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"profile", "accept-edits"}, "/permissions profile accept-edits")
+	r.app.handleSlashCommand("plan", []string{"on"}, "/plan on")
+	if !r.app.planMode {
+		t.Fatal("plan mode precondition not established")
+	}
+
+	r.app.handleSlashCommand("trust", []string{"on"}, "/trust on")
+	if r.app.planMode || r.app.currentPermissionPolicy().Profile() != permissions.ProfileFull {
+		t.Fatalf("trust on must exit Plan into full policy: plan=%v profile=%v", r.app.planMode, r.app.currentPermissionPolicy().Profile())
+	}
+	r.app.handleSlashCommand("trust", []string{"off"}, "/trust off")
+	if r.app.planMode || r.app.currentPermissionPolicy().Profile() != permissions.ProfileEdit {
+		t.Fatalf("trust off must restore pre-Plan profile without restoring Plan: plan=%v profile=%v", r.app.planMode, r.app.currentPermissionPolicy().Profile())
+	}
+}
+
 func TestApp_Trust_Off(t *testing.T) {
 	r := newTestApp(t)
 	r.app.approver.SetTrust(true)
@@ -1222,6 +1240,41 @@ func TestApp_Trust_Off(t *testing.T) {
 	convContains(t, r.app, "trust mode disabled")
 	if r.app.approver.IsTrusted() {
 		t.Fatalf("approver should NOT be trusted")
+	}
+}
+
+func TestApp_Trust_OffWhenAlreadyOffPreservesSessionRules(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"rule", "write_file", "allow"}, "/permissions rule write_file allow")
+
+	r.app.handleSlashCommand("trust", []string{"off"}, "/trust off")
+	convContains(t, r.app, "trust mode already disabled")
+	decision := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "write_file", RequiresApproval: true})
+	if decision.Decision != permissions.DecisionAllow {
+		t.Fatalf("write_file decision = %s, want preserved session allow", decision.Decision)
+	}
+}
+
+func TestApp_Trust_OffPreservesRulesAddedBeforeAndDuringBypass(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"rule", "write_file", "allow"}, "/permissions rule write_file allow")
+	r.app.handleSlashCommand("trust", []string{"on"}, "/trust on")
+	r.app.handleSlashCommand("permissions", []string{"rule", "execute_command", "deny"}, "/permissions rule execute_command deny")
+	r.app.handleSlashCommand("trust", []string{"off"}, "/trust off")
+
+	if got := r.app.currentPermissionPolicy().Profile(); got != permissions.ProfileAsk {
+		t.Fatalf("profile = %v, want restored ask", got)
+	}
+	for _, test := range []struct {
+		tool string
+		want permissions.Decision
+	}{
+		{"write_file", permissions.DecisionAllow},
+		{"execute_command", permissions.DecisionDeny},
+	} {
+		if got := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: test.tool, RequiresApproval: true}).Decision; got != test.want {
+			t.Errorf("%s decision = %s, want %s", test.tool, got, test.want)
+		}
 	}
 }
 
@@ -1251,6 +1304,48 @@ func TestApp_Permissions_Profile(t *testing.T) {
 	}
 }
 
+func TestApp_Permissions_ProfileExitsPlanMode(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("plan", []string{"on"}, "/plan on")
+	r.app.handleSlashCommand("permissions", []string{"profile", "bypass"}, "/permissions profile bypass")
+	if r.app.planMode {
+		t.Fatal("an explicit profile change must exit temporary Plan mode")
+	}
+	if got := r.app.currentPermissionPolicy().Profile(); got != permissions.ProfileFull {
+		t.Fatalf("profile = %v, want full", got)
+	}
+}
+
+func TestApp_Permissions_BypassProfilePreservesEarlierRulesOnTrustOff(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"rule", "execute_command", "deny"}, "/permissions rule execute_command deny")
+	r.app.handleSlashCommand("permissions", []string{"profile", "bypass"}, "/permissions profile bypass")
+	r.app.handleSlashCommand("trust", []string{"off"}, "/trust off")
+
+	if got := r.app.currentPermissionPolicy().Profile(); got != permissions.ProfileAsk {
+		t.Fatalf("profile = %v, want ask", got)
+	}
+	if got := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "execute_command", RequiresApproval: true}).Decision; got != permissions.DecisionDeny {
+		t.Fatalf("execute_command decision = %s, want preserved deny", got)
+	}
+}
+
+func TestApp_PlanRoundTripFromBypassPreservesTrustRestoreRules(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"rule", "execute_command", "deny"}, "/permissions rule execute_command deny")
+	r.app.handleSlashCommand("trust", []string{"on"}, "/trust on")
+	r.app.handleSlashCommand("plan", []string{"on"}, "/plan on")
+	r.app.handleSlashCommand("plan", []string{"off"}, "/plan off")
+	r.app.handleSlashCommand("trust", []string{"off"}, "/trust off")
+
+	if got := r.app.currentPermissionPolicy().Profile(); got != permissions.ProfileAsk {
+		t.Fatalf("profile = %v, want ask", got)
+	}
+	if got := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "execute_command", RequiresApproval: true}).Decision; got != permissions.DecisionDeny {
+		t.Fatalf("execute_command decision = %s, want preserved deny", got)
+	}
+}
+
 func TestApp_Permissions_Rule(t *testing.T) {
 	r := newTestApp(t)
 	r.app.handleSlashCommand("permissions", []string{"rule", "execute_command", "deny"}, "/permissions rule execute_command deny")
@@ -1258,6 +1353,30 @@ func TestApp_Permissions_Rule(t *testing.T) {
 	decision := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "execute_command", RequiresApproval: true})
 	if decision.Decision != permissions.DecisionDeny {
 		t.Fatalf("execute_command decision = %s, want deny", decision.Decision)
+	}
+}
+
+func TestApp_Permissions_ResetRevokesSessionRules(t *testing.T) {
+	r := newTestApp(t)
+	r.app.handleSlashCommand("permissions", []string{"rule", "filesystem__read_file", "allow"}, "/permissions rule filesystem__read_file allow")
+	decision := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "filesystem__read_file", RequiresApproval: true})
+	if decision.Decision != permissions.DecisionAllow {
+		t.Fatalf("precondition decision = %s, want allow", decision.Decision)
+	}
+	r.app.planMode = true
+	r.app.approver.SetTrust(true)
+
+	r.app.handleSlashCommand("permissions", []string{"reset"}, "/permissions reset")
+	convContains(t, r.app, "session rules revoked")
+	decision = r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "filesystem__read_file", RequiresApproval: true})
+	if decision.Decision != permissions.DecisionAsk {
+		t.Fatalf("decision after reset = %s, want ask", decision.Decision)
+	}
+	if r.app.approver.IsTrusted() {
+		t.Fatal("reset must leave trust mode off")
+	}
+	if r.app.planMode {
+		t.Fatal("reset must leave temporary plan mode")
 	}
 }
 

@@ -31,10 +31,11 @@ type uiApprover struct {
 }
 
 type approvalEnvelope struct {
-	id     uint64
-	ctx    context.Context
-	req    agent.ApprovalRequest
-	result chan agent.ApprovalDecision
+	id          uint64
+	ctx         context.Context
+	req         agent.ApprovalRequest
+	result      chan agent.ApprovalDecision
+	policyBound bool
 }
 
 func newUIApprover() *uiApprover {
@@ -46,6 +47,14 @@ func newUIApprover() *uiApprover {
 
 func (u *uiApprover) Approve(ctx context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
 	return u.decideOrPrompt(ctx, req, true)
+}
+
+// PromptApproval queues a request that a caller has already classified as
+// "ask". This is used by background agents whose permission policy is a
+// launch-time snapshot: a later foreground policy change must not silently
+// broaden the running job's authority.
+func (u *uiApprover) PromptApproval(ctx context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
+	return u.prompt(ctx, req, false)
 }
 
 func (u *uiApprover) DecideTool(ctx context.Context, req agent.ApprovalRequest, requiresApproval bool) (agent.ApprovalDecision, bool) {
@@ -102,17 +111,24 @@ func (u *uiApprover) decideOrPrompt(ctx context.Context, req agent.ApprovalReque
 	}
 	u.mu.Lock()
 	trusted := u.autoTrust
-	u.nextID++
-	id := u.nextID
 	u.mu.Unlock()
 	if trusted {
 		return agent.ApprovalDecision{Approved: true, EditedParams: req.Params}
 	}
+	return u.prompt(ctx, req, true)
+}
+
+func (u *uiApprover) prompt(ctx context.Context, req agent.ApprovalRequest, policyBound bool) agent.ApprovalDecision {
+	u.mu.Lock()
+	u.nextID++
+	id := u.nextID
+	u.mu.Unlock()
 	env := approvalEnvelope{
-		id:     id,
-		ctx:    ctx,
-		req:    req,
-		result: make(chan agent.ApprovalDecision, 1),
+		id:          id,
+		ctx:         ctx,
+		req:         req,
+		result:      make(chan agent.ApprovalDecision, 1),
+		policyBound: policyBound,
 	}
 
 	select {
@@ -151,7 +167,7 @@ func (u *uiApprover) Pending() (agent.ApprovalRequest, bool) {
 				continue
 			}
 			u.mu.Lock()
-			if decision, resolved := policyApprovalDecision(u.policy, env.req); resolved {
+			if decision, resolved := envelopePolicyDecision(u.policy, env); resolved {
 				u.mu.Unlock()
 				deliverApprovalDecision(env, decision)
 				continue
@@ -191,7 +207,7 @@ func (u *uiApprover) ResolveActiveByPolicy() bool {
 		return false
 	}
 	env := *u.active
-	decision, resolved := policyApprovalDecision(u.policy, env.req)
+	decision, resolved := envelopePolicyDecision(u.policy, env)
 	if !resolved {
 		u.mu.Unlock()
 		return false
@@ -200,6 +216,16 @@ func (u *uiApprover) ResolveActiveByPolicy() bool {
 	u.mu.Unlock()
 	deliverApprovalDecision(env, decision)
 	return true
+}
+
+func envelopePolicyDecision(policy *permissions.Policy, env approvalEnvelope) (agent.ApprovalDecision, bool) {
+	decision, resolved := policyApprovalDecision(policy, env.req)
+	if env.policyBound || !resolved || !decision.Approved {
+		return decision, resolved
+	}
+	// A snapshot-bound background "ask" remains an explicit prompt even if
+	// the foreground policy later broadens. A later deny still revokes it.
+	return agent.ApprovalDecision{}, false
 }
 
 func policyApprovalDecision(policy *permissions.Policy, req agent.ApprovalRequest) (agent.ApprovalDecision, bool) {

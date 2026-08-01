@@ -12,18 +12,27 @@ import (
 // prompt's "always allow" choice. Shell programs are remembered exactly:
 // inferring a prefix can authorize additional commands through shell syntax.
 func (a *App) rememberApproval(call provider.ToolCall) {
+	call.Name = stripJobApprovalPrefix(call.Name)
 	base := a.currentPermissionPolicy()
 	if call.Name == "execute_command" {
 		if command, ok := commandFromArgs(call.Arguments); ok {
-			a.preTrustPolicy = nil
+			if base.Profile() == permissions.ProfileFull {
+				a.preTrustPolicy = a.trustOffPolicy().WithCommandRule(command, permissions.DecisionAllow)
+			} else {
+				a.preTrustPolicy = nil
+			}
 			a.setPermissionPolicy(base.WithCommandRule(command, permissions.DecisionAllow))
-			a.conversation.AppendSystem("won't ask again for this exact command this session (/permissions to review)")
+			a.conversation.AppendSystem("won't ask again for this exact command this session (/permissions to review; /permissions reset to revoke)")
 		}
 		return
 	}
-	a.preTrustPolicy = nil
+	if base.Profile() == permissions.ProfileFull {
+		a.preTrustPolicy = a.trustOffPolicy().WithRule(call.Name, permissions.DecisionAllow)
+	} else {
+		a.preTrustPolicy = nil
+	}
 	a.setPermissionPolicy(base.WithRule(call.Name, permissions.DecisionAllow))
-	a.conversation.AppendSystem("won't ask again for " + call.Name + " this session (/permissions to review)")
+	a.conversation.AppendSystem("won't ask again for " + call.Name + " this session (/permissions to review; /permissions reset to revoke)")
 }
 
 func commandFromArgs(args string) (string, bool) {

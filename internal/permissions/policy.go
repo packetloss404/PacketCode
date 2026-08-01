@@ -37,6 +37,7 @@ type Rule struct {
 	Reason        string
 	Command       string
 	CommandPrefix []string
+	DenyFloor     bool
 }
 
 type Request struct {
@@ -81,6 +82,7 @@ func New(cfg config.PermissionConfig) (*Policy, error) {
 		if !validDecision(converted.Decision) {
 			return nil, fmt.Errorf("permission rule for %s has invalid action %q", converted.Tool, rule.Action)
 		}
+		converted.DenyFloor = converted.Decision == DecisionDeny
 		rules = append(rules, converted)
 	}
 
@@ -104,7 +106,7 @@ func New(cfg config.PermissionConfig) (*Policy, error) {
 		if !validDecision(decision) {
 			return nil, fmt.Errorf("permission rule for %s has invalid action %q", tool, action)
 		}
-		rules = append(rules, Rule{Tool: tool, Decision: decision, Reason: "inline tool rule"})
+		rules = append(rules, Rule{Tool: tool, Decision: decision, Reason: "inline tool rule", DenyFloor: decision == DecisionDeny})
 	}
 
 	return &Policy{profile: profile, rules: rules}, nil
@@ -144,6 +146,9 @@ func (p *Policy) Decide(req Request) Result {
 		p = DefaultPolicy()
 	}
 	profile := p.Profile()
+	if profile == ProfileSafe && !readOnlyTool(req.ToolName) {
+		return Result{Decision: DecisionDeny, Profile: profile, Reason: "safe profile denies non-read-only tools"}
+	}
 	if rule, ok := p.matchingRule(req); ok {
 		return Result{
 			Decision: rule.Decision,
@@ -175,9 +180,10 @@ func (p *Policy) WithRule(tool string, decision Decision) *Policy {
 		out.rules = p.Rules()
 	}
 	out.rules = append(out.rules, Rule{
-		Tool:     strings.TrimSpace(tool),
-		Decision: NormalizeDecision(decision),
-		Reason:   "session rule",
+		Tool:      strings.TrimSpace(tool),
+		Decision:  NormalizeDecision(decision),
+		Reason:    "session rule",
+		DenyFloor: NormalizeDecision(decision) == DecisionDeny,
 	})
 	return out
 }
@@ -205,6 +211,7 @@ func (p *Policy) WithCommandPrefixRule(prefix []string, decision Decision) *Poli
 		CommandPrefix: trimmed,
 		Decision:      NormalizeDecision(decision),
 		Reason:        "session rule",
+		DenyFloor:     NormalizeDecision(decision) == DecisionDeny,
 	})
 	return out
 }
@@ -221,10 +228,11 @@ func (p *Policy) WithCommandRule(command string, decision Decision) *Policy {
 		return out
 	}
 	out.rules = append(out.rules, Rule{
-		Tool:     "execute_command",
-		Command:  command,
-		Decision: NormalizeDecision(decision),
-		Reason:   "session rule",
+		Tool:      "execute_command",
+		Command:   command,
+		Decision:  NormalizeDecision(decision),
+		Reason:    "session rule",
+		DenyFloor: NormalizeDecision(decision) == DecisionDeny,
 	})
 	return out
 }
@@ -243,6 +251,9 @@ func (p *Policy) SummaryLines() []string {
 		if rule.Command != "" {
 			detail += " when command equals " + rule.Command
 		}
+		if rule.DenyFloor {
+			detail += " (deny floor)"
+		}
 		lines = append(lines, detail)
 	}
 	return lines
@@ -251,18 +262,30 @@ func (p *Policy) SummaryLines() []string {
 func (p *Policy) matchingRule(req Request) (Rule, bool) {
 	for i := len(p.rules) - 1; i >= 0; i-- {
 		rule := p.rules[i]
-		if !toolPatternMatches(rule.Tool, req.ToolName) {
-			continue
+		if rule.DenyFloor && ruleMatchesRequest(rule, req) {
+			return rule, true
 		}
-		if rule.Command != "" && !commandMatches(req.Params, rule.Command) {
-			continue
+	}
+	for i := len(p.rules) - 1; i >= 0; i-- {
+		rule := p.rules[i]
+		if ruleMatchesRequest(rule, req) {
+			return rule, true
 		}
-		if len(rule.CommandPrefix) > 0 && !commandPrefixMatches(req.Params, rule.CommandPrefix) {
-			continue
-		}
-		return rule, true
 	}
 	return Rule{}, false
+}
+
+func ruleMatchesRequest(rule Rule, req Request) bool {
+	if !toolPatternMatches(rule.Tool, req.ToolName) {
+		return false
+	}
+	if rule.Command != "" && !commandMatches(req.Params, rule.Command) {
+		return false
+	}
+	if len(rule.CommandPrefix) > 0 && !commandPrefixMatches(req.Params, rule.CommandPrefix) {
+		return false
+	}
+	return true
 }
 
 func configProfile(name string, cfg config.PermissionConfig) (Profile, []Rule, error) {
@@ -297,7 +320,7 @@ func configProfile(name string, cfg config.PermissionConfig) (Profile, []Rule, e
 		if !validDecision(decision) {
 			return "", nil, fmt.Errorf("permissions.profiles.%s.%s has invalid action %q", name, tool, raw)
 		}
-		rules = append(rules, Rule{Tool: profileToolPattern(tool), Decision: decision, Reason: "profile " + name})
+		rules = append(rules, Rule{Tool: profileToolPattern(tool), Decision: decision, Reason: "profile " + name, DenyFloor: decision == DecisionDeny})
 	}
 	return base, rules, nil
 }

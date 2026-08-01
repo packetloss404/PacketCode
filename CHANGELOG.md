@@ -6,6 +6,23 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Approved `packetcode-mcp-http-trust-v1` design gate plus a fail-closed,
+  transport-independent validator for exact origins/ports, separately allowed
+  network address classes, bounded bodyless same-origin GET/HEAD redirects,
+  disabled ambient proxies, system-root TLS, atomically bound target-only
+  environment credentials, per-call
+  approval, bounded response/event/header/output sizes, bounded timeouts, and
+  manual reconnect. Remote output has a credential-bound, labelled, capped
+  untrusted tool boundary with exact-value, partial percent, JSON-escape, and
+  base64 redaction tests; the
+  Streamable HTTP transport itself remains disabled (PCH5).
+- `/permissions reset` revokes remembered/manually added session rules and
+  restores the startup permission policy.
+- Permission transitions now fail closed: Plan mode cannot be weakened by
+  allow/ask rules, explicit denies remain floors, queued approvals advance,
+  and a running background job's snapshot-bound prompt cannot be silently
+  broadened by foreground trust changes. Remembered background approvals are
+  recorded against the real tool name; leaving Bypass preserves session rules.
 - Versioned workflow schema and `/workflows validate <name>`, plus explicit
   read-only step verifiers, fail-closed structured verdicts, hard retry caps,
   verifier-feedback retries, and agent/token accounting across every attempt

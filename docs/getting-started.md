@@ -66,7 +66,7 @@ The context gauge is current occupancy, not cumulative billed tokens.
 
 ## Approvals and Modes
 
-The numbered approval menu supports arrows, Enter, `1`/`2`/`3`, and the legacy `Y`/`A`/`N` shortcuts. Option 2 remembers a session rule; shell approvals remember the exact command.
+The numbered approval menu supports arrows, Enter, `1`/`2`/`3`, and the legacy `Y`/`A`/`N` shortcuts. Option 2 remembers a session rule; shell approvals remember the exact command. `/permissions reset` revokes session rules and restores the startup policy.
 
 Shift+Tab remains active while the model is thinking or streaming. If an approval is already visible, switching to a mode that allows or denies the action resolves it immediately. Already-running processes are not interrupted.
 

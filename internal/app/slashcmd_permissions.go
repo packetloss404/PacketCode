@@ -18,6 +18,23 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 	case "profiles":
 		a.conversation.AppendSystem(renderPermissionProfiles())
 		return a, nil
+	case "reset":
+		if len(args) != 1 {
+			a.conversation.AppendSystem("permissions: reset does not take arguments")
+			return a, nil
+		}
+		policy := a.permissionBase
+		if policy == nil {
+			policy = permissions.DefaultPolicy()
+		}
+		a.planMode = false
+		a.preTrustPolicy = nil
+		if a.approver != nil {
+			a.approver.SetTrust(false)
+		}
+		a.setPermissionPolicy(policy)
+		a.conversation.AppendSystem("permission policy reset to startup configuration; session rules revoked")
+		return a, nil
 	case "profile", "use":
 		if len(args) != 2 {
 			a.conversation.AppendSystem("permissions: profile requires one value")
@@ -28,8 +45,21 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("permissions: " + err.Error())
 			return a, nil
 		}
-		policy := a.currentPermissionPolicy().WithProfile(profile)
-		a.preTrustPolicy = nil
+		base := a.currentPermissionPolicy()
+		if profile == permissions.ProfileFull {
+			restore := base
+			if a.planMode {
+				restore = restore.WithProfile(a.planPrevProfile)
+			}
+			if restore.Profile() != permissions.ProfileFull {
+				a.preTrustPolicy = restore
+			}
+			base = restore
+		} else {
+			a.preTrustPolicy = nil
+		}
+		a.planMode = false
+		policy := base.WithProfile(profile)
 		a.setPermissionPolicy(policy)
 		a.conversation.AppendSystem("permission profile: " + permissions.ProfileConfigName(profile) + " (session)")
 		return a, nil
@@ -50,13 +80,18 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("permissions: " + err.Error())
 			return a, nil
 		}
-		policy := a.currentPermissionPolicy().WithRule(args[1], action)
-		a.preTrustPolicy = nil
+		base := a.currentPermissionPolicy()
+		policy := base.WithRule(args[1], action)
+		if base.Profile() == permissions.ProfileFull {
+			a.preTrustPolicy = a.trustOffPolicy().WithRule(args[1], action)
+		} else {
+			a.preTrustPolicy = nil
+		}
 		a.setPermissionPolicy(policy)
 		a.conversation.AppendSystem(fmt.Sprintf("permission rule: %s = %s (session)", args[1], action))
 		return a, nil
 	default:
-		a.conversation.AppendSystem(fmt.Sprintf("permissions: unknown subcommand %q (want profiles, profile, use, explain, or rule)", args[0]))
+		a.conversation.AppendSystem(fmt.Sprintf("permissions: unknown subcommand %q (want profiles, profile, use, explain, rule, or reset)", args[0]))
 		return a, nil
 	}
 }

@@ -65,3 +65,17 @@ func TestRememberApproval_ToolScopedRule(t *testing.T) {
 		t.Fatalf("write_file should be auto-allowed after remember, got %v", d.Decision)
 	}
 }
+
+func TestRememberApproval_StripsBackgroundJobAnnotation(t *testing.T) {
+	r := newTestApp(t)
+	r.app.rememberApproval(provider.ToolCall{Name: "[job:abc12345] write_file", Arguments: `{"path":"a.go"}`})
+
+	decision := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "write_file", RequiresApproval: true})
+	if decision.Decision != permissions.DecisionAllow {
+		t.Fatalf("write_file should be auto-allowed after background remember, got %v", decision.Decision)
+	}
+	annotated := r.app.currentPermissionPolicy().Decide(permissions.Request{ToolName: "[job:abc12345] write_file", RequiresApproval: true})
+	if annotated.Decision == permissions.DecisionAllow {
+		t.Fatal("remembered rule must target the real tool name, not the UI annotation")
+	}
+}

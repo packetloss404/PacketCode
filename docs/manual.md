@@ -192,6 +192,10 @@ Bypass is intentionally outside that cycle. Enable or disable it explicitly:
 ```
 
 Or use `packetcode --trust` at startup. Explicit deny rules continue to apply in Bypass mode.
+Enabling Bypass while Plan is active exits Plan atomically; `/trust off`
+restores the pre-Bypass profile (the profile that preceded Plan in that case)
+and preserves session rules added before or during Bypass. An explicit
+`/permissions profile ...` choice also exits Plan.
 
 ### Approval menu
 
@@ -214,9 +218,16 @@ Inspect or change the session policy with:
 /permissions explain execute_command
 /permissions rule execute_command ask
 /permissions rule filesystem__* deny
+/permissions reset
 ```
 
-Session changes do not rewrite your saved configuration.
+Session changes do not rewrite your saved configuration. `/permissions reset`
+revokes remembered and manually added session rules, exits temporary Plan or
+Bypass state, and restores the policy loaded at startup.
+
+Explicit deny rules are safety floors. Among other matching rules, the later
+rule wins. Plan mode adds its own read-only floor, so an allow or ask rule
+cannot authorize a mutating tool until Plan is exited.
 
 ### Plan before editing
 
@@ -568,7 +579,12 @@ If generation is slow, run `/ollama ps`. Partial GPU or CPU-only placement usual
 
 ## 9. MCP Servers
 
-MCP servers add tools supplied by external programs. packetcode currently supports stdio MCP tools; it does not support HTTP/SSE transports or MCP prompts/resources.
+MCP servers add tools supplied by external programs. packetcode currently
+supports stdio MCP tools; it does not support HTTP/SSE transports or MCP
+prompts/resources. A reviewed
+[Streamable HTTP trust contract](mcp-http-trust-contract.md) now defines the
+required security boundary, but no URL field, transport flag, or HTTP client is
+enabled.
 
 Add a server to `~/.packetcode/config.toml`:
 
@@ -731,7 +747,10 @@ Run `codex login` and choose ChatGPT sign-in, not API-key mode. The `codex` prov
 
 ### A tool was unexpectedly denied or allowed
 
-Run `/permissions` and `/permissions explain <tool>`. Explicit session or configuration rules override profile defaults. Return to ordinary Manual behavior with `/permissions profile ask`.
+Run `/permissions` and `/permissions explain <tool>`. Explicit session or
+configuration rules override profile defaults. Use `/permissions reset` to
+revoke session changes and restore the startup policy, or
+`/permissions profile ask` to change only the active profile.
 
 ### A write-capable agent fails
 
@@ -818,12 +837,14 @@ Before destructive or broad work, a safe rhythm is:
 | `/permissions profile <name>` | Change the session profile. |
 | `/permissions explain <tool>` | Explain a policy decision. |
 | `/permissions rule <tool-or-pattern> <ask\|allow\|deny>` | Add a session rule. |
+| `/permissions reset` | Revoke session rules and restore startup policy. |
 | `/trust [on\|off]` | Show or set Bypass Permissions mode. |
 | `/ollama [status\|models\|ps\|pull <model>]` | Inspect or manage Ollama. |
 | `/mcp` | List configured MCP servers. |
 | `/mcp status <name>` | Show MCP server health. |
 | `/mcp tools <name>` | List a server's tools. |
 | `/mcp logs <name>` | Show a bounded stderr tail. |
+| `/mcp restart <name>` | Reconnect one stdio server with startup configuration. |
 | `/statusline [refresh]` | Show or refresh statusline output. |
 | `/transcript` | Open the current persisted transcript. |
 | `/clear` | Clear visible output without deleting the session. |

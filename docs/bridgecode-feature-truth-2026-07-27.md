@@ -31,7 +31,7 @@ Status values:
 | Read-only and write sub-agents | Present | `spawn_agent`, nested limits, read-only default, write opt-in, isolated worktrees, artifact manifests, cancellation, and collection have focused tests. | No automatic merge/conflict resolution and no arbitrary clarification prompt from a child. |
 | Reusable commands and workflows | Present | User/project Markdown commands plus versioned workflow TOML, offline validation, sequential/parallel phases, bindings, joins, fail-closed step verifiers, bounded retries, cancellation, views, and token/agent bounds. | Explicit pipeline stages beyond ordered phases/steps and a broader example library remain open. |
 | Bounded repeat loops | Present | `/loop` supports interval and self-paced modes, a hard 25-iteration cap, non-overlap, kill controls, and a versioned structured stop decision with legacy compatibility. | Loops are intentionally process-local, not a daemon or PacketAgent substitute. |
-| MCP lifecycle and policy | Present | Stdio startup/handshake/discovery/calls, aliases, approval policy, bounded redacted logs, crash isolation, doctor checks, and `/mcp restart <name>` are covered by tests. | Live config reload, Streamable HTTP, prompts, and resources remain open behind explicit trust/context design. |
+| MCP lifecycle and policy | Present | Stdio startup/handshake/discovery/calls, aliases, approval policy, bounded redacted logs, crash isolation, doctor checks, `/mcp restart <name>`, and the approved Streamable HTTP trust contract/validator are covered by tests. | Live config reload, the Streamable HTTP transport itself, prompts, and resources remain open. |
 | Context and compaction | Present | Full request occupancy accounting, automatic/manual compaction, complete tool-pair preservation, bounded model-facing tool results, and persisted full transcripts have focused tests. | Provider-native exact token counting is not universal. |
 | Cost and usage | Present | Session usage and persistent per-provider/model tallies are independent from context occupancy and exposed through `/cost` and statusline data. | Subscription invoices remain authoritative; cache-input telemetry is incomplete. |
 | Doctor and data-home contract | Present | Schema-1 `doctor --json`, additive `effective_home`, `home_source`, provider summary, absolute `PACKETCODE_HOME`, path isolation, and secret-redaction tests. | Schema compatibility policy still needs a pre-1.0 release document. |
@@ -67,9 +67,10 @@ structured-loop hardening changes.
 4. **Closed 2026-07-31 — abandoned-job restart assistance.** Explicit
    resubmit starts a new job and links it to the preserved abandoned record;
    PacketCode never labels that as resumed execution.
-5. **Next — Streamable HTTP MCP trust contract.** Define network targets,
-   credentials, redirects, origins, output provenance, and approval scopes
-   before enabling the transport.
+5. **Closed 2026-08-01 — Streamable HTTP MCP trust contract.** Exact network
+   targets/address classes, credentials, redirects, output provenance,
+   approval/revocation, and failure semantics are approved and validator-backed.
+   The transport remains disabled and is now a separate implementation loop.
 6. **Release gate — signed clean-machine upgrades.** Exercise published stable
    and preview assets on Windows/macOS/Linux, including checksum failure and
    rollback. This cannot be proven from a source checkout alone.

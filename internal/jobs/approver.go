@@ -54,6 +54,9 @@ func (j *jobApprover) Approve(ctx context.Context, req agent.ApprovalRequest) ag
 	}
 	annotated := req
 	annotated.ToolCall.Name = fmt.Sprintf("[job:%s] %s", j.jobID, req.ToolCall.Name)
+	if prompter, ok := j.parent.(agent.ApprovalPrompter); ok {
+		return prompter.PromptApproval(ctx, annotated)
+	}
 	return j.parent.Approve(ctx, annotated)
 }
 

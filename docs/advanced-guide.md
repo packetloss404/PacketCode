@@ -187,6 +187,7 @@ Inspect or alter session policy without rewriting config:
 /permissions profile ask
 /permissions explain execute_command
 /permissions rule execute_command ask
+/permissions reset
 /trust
 /trust on
 /trust off
@@ -210,7 +211,7 @@ action = "ask"
 reason = "review calls through the filesystem MCP server"
 ```
 
-Rules are evaluated from last to first; the last matching rule wins. Exact tool names, suffix wildcards, `mcp:*`, `*`, exact command strings, and tokenized command prefixes are supported. “Approve and remember” records an exact command for `execute_command`; it does not infer a broader shell family.
+Explicit deny rules are safety floors. Among the remaining matching rules, evaluation runs from last to first, so the last match wins. Plan mode also has a hard read-only floor: allow or ask rules cannot authorize a mutating tool while Plan is active. Exact tool names, suffix wildcards, `mcp:*`, `*`, exact command strings, and tokenized command prefixes are supported. “Approve and remember” records an exact command for `execute_command`; it does not infer a broader shell family. `/permissions reset` revokes remembered/manually added session rules and restores the startup policy.
 
 For the complete matcher syntax and threat model, read [Security and Permissions](security.md).
 
@@ -468,6 +469,14 @@ PacketCode startup and refreshes its tool adapters. Configuration changes still
 require a PacketCode restart. MCP servers are trusted local programs, not
 sandboxed plugins. See [MCP Servers](mcp.md).
 
+Streamable HTTP remains disabled. Its approved
+[trust contract](mcp-http-trust-contract.md) requires an exact origin and
+address-class allowlist, bounded bodyless same-origin redirect validation,
+atomically bound environment-sourced target-only credentials, labelled/
+redacted/capped tool-role output, per-call approval, and manual reconnect. A
+transport-independent validator pins these decisions,
+but the current config still accepts only stdio commands.
+
 ## 12. Hooks and Statusline
 
 Hooks and custom statusline commands run as your user in the project root: PowerShell on Windows and `sh -c` elsewhere. Treat their configuration as executable code.
@@ -659,7 +668,7 @@ Ask agents for conclusions, evidence paths, commands run, and unresolved risks�
 | Write isolation | Dedicated worktree and branch from committed `HEAD`. | Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning. |
 | Workflows | Versioned schema, offline validation, sequential phases, single/parallel steps, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets. | Explicit pipeline stages and a broader versioned example library. |
 | Terminal | Native scrollback, bounded live region, sanitized output, multiline fallbacks. | Uniform true Shift+Enter reporting across terminals. |
-| MCP | Stdio startup/discovery/calls, namespaced tools, policies, logs, per-server restart. | Live config reload and network transports. |
+| MCP | Stdio startup/discovery/calls, namespaced tools, policies, logs, per-server restart; reviewed Streamable HTTP trust contract/validator. | The Streamable HTTP transport itself, live config reload, prompts/resources. |
 | Reasoning | Codex catalog-driven `/effort` controls and status display. | A universal reasoning control for every provider/model. |
 | Security | Root-scoped native file tools, approvals/rules, worktree isolation, output hardening. | OS/container sandboxing for allowed shell, hook, statusline, or MCP processes. |
 

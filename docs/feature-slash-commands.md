@@ -58,11 +58,13 @@ Slash commands are parsed and handled locally before a prompt reaches the model.
 | `/permissions` | Show current policy. |
 | `/permissions profile <name>` | Change session profile. |
 | `/permissions rule <tool> <ask\|allow\|deny>` | Add session rule. |
+| `/permissions reset` | Revoke session rules and restore startup policy. |
 | `/ollama [status\|models\|ps\|pull <model>]` | Inspect/manage Ollama. |
 | `/mcp` | List MCP servers. |
 | `/mcp status <name>` | Show health/config. |
 | `/mcp tools <name>` | Show callable aliases. |
 | `/mcp logs <name>` | Show redacted stderr tail. |
+| `/mcp restart <name>` | Reconnect one stdio server. |
 | `/statusline [refresh]` | Inspect/refresh statusline. |
 | `/help` | Show runtime help. |
 | `/exit` / `/quit` | Exit. |

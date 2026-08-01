@@ -43,7 +43,9 @@ func (a *App) handlePlanCommand(args []string) (tea.Model, tea.Cmd) {
 
 	if want {
 		a.planPrevProfile = a.currentPermissionPolicy().Profile()
-		a.preTrustPolicy = nil
+		if a.planPrevProfile != permissions.ProfileFull {
+			a.preTrustPolicy = nil
+		}
 		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileSafe))
 		a.planMode = true
 		a.refreshTopBar()

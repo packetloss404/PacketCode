@@ -41,7 +41,11 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 ## MCP and Extensions
 
-- Support Streamable HTTP MCP transport with explicit network and credential policy.
+- Implement Streamable HTTP MCP against the approved
+  [`packetcode-mcp-http-trust-v1`](docs/mcp-http-trust-contract.md) contract and
+  existing fail-closed validator. Do not add a second policy or weaken exact
+  origin/address, redirect, credential, provenance, approval, or reconnect
+  rules.
 - Add MCP resources/prompts only after their context and trust model is defined.
 - Add a declarative pack manifest and install/list/enable workflow for prompt commands, MCP, hooks, themes, and workflows.
 - Surface MCP timeout, crash, and reconnect details consistently in transcripts and Agent View.
@@ -88,7 +92,9 @@ review-gate, and Flight surfaces to show them in. See
 ## Security and Trust
 
 - Define shared policy axes for filesystem, shell, network, MCP, browser, desktop, secrets, and remote computers.
-- Add redaction tests for provider errors, MCP logs/output, hooks, statuslines, job artifacts, and future control evidence.
+- Add redaction tests for provider errors, hooks, statuslines, job artifacts,
+  and future control evidence. MCP log and future remote-output redaction are
+  covered by the PCH5 suite.
 - Add audit events for live permission-mode changes and remembered approvals.
 - Keep Bypass Permissions explicit, visible, outside the normal Shift+Tab cycle, and subordinate to deny rules.
 - Treat remote/browser/desktop content as untrusted evidence rather than instructions.
@@ -102,8 +108,6 @@ The evidence audit and bounded follow-up ledger are
 and
 [`docs/bridgecode-plus-hardening-loop-2026-07-27.md`](docs/bridgecode-plus-hardening-loop-2026-07-27.md).
 
-- Add honest abandoned-job reconcile/resubmit assistance without claiming the
-  previous process resumed.
 - Complete the signed clean-machine release matrix and packaged PacketADE
   compatibility gates when published artifacts/runners exist.
 - Consume PacketAgent's versioned durable-handoff contract when that sibling

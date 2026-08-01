@@ -601,7 +601,7 @@ supports_tools = true</code></pre>
             </tbody>
           </table>
         </div>
-        <p><kbd>Shift</kbd>+<kbd>Tab</kbd> cycles the first four modes, including during a turn. It affects subsequent tool calls and re-evaluates a visible approval, but cannot interrupt a command already running. Bypass is deliberately outside the cycle.</p>
+        <p><kbd>Shift</kbd>+<kbd>Tab</kbd> cycles the first four modes, including during a turn. It affects subsequent tool calls and re-evaluates a visible approval, but cannot interrupt a command already running. Bypass is deliberately outside the cycle. Entering Bypass from Plan exits Plan atomically; <code>/trust off</code> restores the pre-Bypass profile (the profile that preceded Plan in that case) and preserves session rules, while <code>/permissions reset</code> is the revocation command.</p>
 
         <h3 id="permission-commands">Inspect and alter session policy</h3>
         <pre><code>/permissions
@@ -611,11 +611,12 @@ supports_tools = true</code></pre>
 /permissions explain execute_command
 /permissions rule execute_command ask
 /permissions rule filesystem__* deny
+/permissions reset
 /plan on
 /plan off
 /trust on
 /trust off</code></pre>
-        <p>Session policy commands do not rewrite the saved configuration. The approval menu offers Yes, Yes and remember, and No. A remembered shell approval matches the exact command string; other remembered approvals use the tool name.</p>
+        <p>Session policy commands do not rewrite the saved configuration. The approval menu offers Yes, Yes and remember, and No. A remembered shell approval matches the exact command string; other remembered approvals use the tool name. <code>/permissions reset</code> revokes session rules, exits temporary Plan or Bypass state, and restores the startup policy.</p>
 
         <h3 id="permission-rules">Persistent policy rules</h3>
         <pre><code>[permissions]
@@ -630,7 +631,7 @@ reason = "refuse broad recursive deletes"
 [[permissions.rules]]
 tool = "filesystem__*"
 action = "ask"</code></pre>
-        <p>Rules can match exact tool names, suffix wildcards, <code>mcp:*</code>, all tools (<code>*</code>), exact command strings, or tokenized command prefixes. Evaluation runs from last to first, so the last matching rule wins. Explicit deny rules remain active in Bypass mode.</p>
+        <p>Rules can match exact tool names, suffix wildcards, <code>mcp:*</code>, all tools (<code>*</code>), exact command strings, or tokenized command prefixes. Explicit deny matches are safety floors; among other matches, evaluation runs from last to first, so the last match wins. Plan mode adds a hard read-only floor that allow or ask rules cannot override. Explicit deny rules remain active in Bypass mode.</p>
       </section>
 
       <section id="sessions" aria-labelledby="sessions-title">
@@ -873,9 +874,10 @@ LOG_LEVEL = "warn"</code></pre>
         <pre><code>/mcp
 /mcp status filesystem
 /mcp tools filesystem
-/mcp logs filesystem</code></pre>
+/mcp logs filesystem
+/mcp restart filesystem</code></pre>
         <p>MCP calls use normal permission rules; match all with <code>mcp:*</code> or a server with <code>filesystem__*</code>. Startup failures do not prevent the TUI from opening. Logs use a bounded, redacted tail.</p>
-        <div class="callout limit"><span class="callout-title">MCP limit</span><p>HTTP/SSE transports, prompts/resources, and live configuration reload are not supported. Use <code>/mcp restart &lt;name&gt;</code> after a process crash; restart PacketCode after changing configuration.</p></div>
+        <div class="callout limit"><span class="callout-title">MCP limit</span><p>Streamable HTTP, prompts/resources, and live configuration reload are not supported. The reviewed <a href="mcp-http-trust-contract.md">Streamable HTTP trust contract</a> pins exact origins/address classes, bounded bodyless same-origin redirects, disabled ambient proxies, system-root TLS, atomically bound target-only credentials, bounded credential-redacted output, per-call approval/revocation, and manual reconnect, but no URL field, transport flag, or HTTP client exists. Use <code>/mcp restart &lt;name&gt;</code> after a stdio process crash; restart PacketCode after changing configuration.</p></div>
 
         <h3 id="hooks">Hooks</h3>
         <p>Hooks execute configured shell text in the project root: PowerShell on Windows and <code>sh -c</code> elsewhere.</p>
@@ -967,7 +969,7 @@ packetcode doctor --check project,state.worktrees</code></pre>
           </article>
           <article class="card">
             <h3>Unexpected allow or deny</h3>
-            <p>Run <code>/permissions</code> and <code>/permissions explain &lt;tool&gt;</code>. Return to Manual with <code>/permissions profile ask</code>.</p>
+            <p>Run <code>/permissions</code> and <code>/permissions explain &lt;tool&gt;</code>. Use <code>/permissions reset</code> to revoke session changes and restore startup policy, or <code>/permissions profile ask</code> to change only the active profile.</p>
           </article>
           <article class="card">
             <h3>Write job failed</h3>
@@ -979,7 +981,7 @@ packetcode doctor --check project,state.worktrees</code></pre>
           </article>
           <article class="card">
             <h3>MCP or hook failure</h3>
-            <p>Use <code>/mcp status</code> and <code>/mcp logs</code>. Test hooks in the platform shell and restart packetcode after MCP changes.</p>
+            <p>Use <code>/mcp status &lt;name&gt;</code> and <code>/mcp logs &lt;name&gt;</code>. Test hooks in the platform shell and restart packetcode after MCP changes.</p>
           </article>
           <article class="card">
             <h3>Cannot scroll</h3>
@@ -1032,7 +1034,7 @@ packetcode doctor --check project,state.worktrees</code></pre>
               <tr><td>Write isolation</td><td>Dedicated worktree/branch from committed <code>HEAD</code>.</td><td>Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning.</td></tr>
               <tr><td>Workflows</td><td>Versioned schema, offline validation, sequential phases, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets.</td><td>Explicit pipeline stages and a broader example library.</td></tr>
               <tr><td>Terminal</td><td>Native scrollback, bounded live region, sanitized output, multiline fallbacks.</td><td>Uniform true Shift+Enter across terminals.</td></tr>
-              <tr><td>MCP</td><td>Stdio discovery/calls, namespaced tools, policies, logs.</td><td>HTTP/SSE, prompts/resources, live reload/restart.</td></tr>
+              <tr><td>MCP</td><td>Stdio discovery/calls, namespaced tools, policies, logs/restart; reviewed Streamable HTTP trust contract/validator.</td><td>The Streamable HTTP transport itself, prompts/resources, live reload.</td></tr>
               <tr><td>Reasoning</td><td>Catalog-driven Codex <code>/effort</code> and status display.</td><td>Universal reasoning control for every provider/model.</td></tr>
               <tr><td>Security</td><td>Root-scoped native files, policy, worktrees, display hardening.</td><td>OS/container sandbox for allowed shell, hook, statusline, or MCP processes.</td></tr>
             </tbody>
@@ -1071,7 +1073,7 @@ packetcode doctor --json</code></pre>
             <tbody>
               <tr><td>Provider and model</td><td><code>/provider</code>, <code>/provider codex</code>, <code>/provider add &lt;slug&gt;</code>, <code>/model</code>, <code>/model gpt-5.6-sol</code></td></tr>
               <tr><td>Codex reasoning</td><td><code>/effort</code>, <code>/effort high</code>, <code>/effort max</code>, <code>/effort default</code></td></tr>
-              <tr><td>Permissions</td><td><code>/permissions</code>, <code>/permissions profiles</code>, <code>/permissions profile auto</code>, <code>/plan on</code>, <code>/trust on</code></td></tr>
+              <tr><td>Permissions</td><td><code>/permissions</code>, <code>/permissions profiles</code>, <code>/permissions profile auto</code>, <code>/permissions reset</code>, <code>/plan on</code>, <code>/trust on</code></td></tr>
               <tr><td>Include a file</td><td><code>Review @internal/app/app.go and fix the focus bug</code></td></tr>
               <tr><td>Read-only agent</td><td><code>/spawn audit the current diff</code></td></tr>
               <tr><td>Chosen agent model</td><td><code>/spawn --provider codex --model gpt-5.6-sol audit auth</code></td></tr>
@@ -1084,7 +1086,7 @@ packetcode doctor --json</code></pre>
               <tr><td>Sessions/context</td><td><code>/sessions</code>, <code>/sessions resume &lt;id&gt;</code>, <code>/sessions rename &lt;name&gt;</code>, <code>/compact --keep 10</code></td></tr>
               <tr><td>Usage/recovery</td><td><code>/cost</code>, <code>/cost reset --yes</code>, <code>/undo</code>, <code>/transcript</code></td></tr>
               <tr><td>Ollama</td><td><code>/ollama status</code>, <code>/ollama models</code>, <code>/ollama ps</code>, <code>/ollama pull &lt;model&gt;</code></td></tr>
-              <tr><td>MCP</td><td><code>/mcp</code>, <code>/mcp status &lt;name&gt;</code>, <code>/mcp tools &lt;name&gt;</code>, <code>/mcp logs &lt;name&gt;</code></td></tr>
+              <tr><td>MCP</td><td><code>/mcp</code>, <code>/mcp status &lt;name&gt;</code>, <code>/mcp tools &lt;name&gt;</code>, <code>/mcp logs &lt;name&gt;</code>, <code>/mcp restart &lt;name&gt;</code></td></tr>
               <tr><td>Literal slash</td><td><code>//not-a-command</code> sends <code>/not-a-command</code> as the prompt.</td></tr>
             </tbody>
           </table>
@@ -1109,7 +1111,7 @@ packetcode doctor --json</code></pre>
               <tr><td><code>/compact [--keep N]</code>, <code>/cost [reset [--yes]]</code>, <code>/undo</code></td><td>Manage context, usage, and latest native backup.</td></tr>
               <tr><td><code>/plan [on|off]</code>, <code>/permissions ...</code>, <code>/trust [on|off]</code></td><td>Control session policy.</td></tr>
               <tr><td><code>/ollama [status|models|ps|pull &lt;model&gt;]</code></td><td>Inspect or manage Ollama.</td></tr>
-              <tr><td><code>/mcp [status|tools|logs] [name]</code></td><td>Inspect MCP servers.</td></tr>
+              <tr><td><code>/mcp</code>; <code>/mcp &lt;status|tools|logs|restart&gt; &lt;name&gt;</code></td><td>List, inspect, or restart stdio MCP servers.</td></tr>
               <tr><td><code>/statusline [refresh]</code>, <code>/transcript</code>, <code>/clear</code>, <code>/help</code></td><td>Inspect or control the interface.</td></tr>
               <tr><td><code>/exit</code>, <code>/quit</code></td><td>Exit packetcode.</td></tr>
             </tbody>

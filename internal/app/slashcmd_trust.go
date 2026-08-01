@@ -25,24 +25,41 @@ func (a *App) handleTrustCommand(args []string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	if value {
-		if a.currentPermissionPolicy().Profile() != permissions.ProfileFull {
-			a.preTrustPolicy = a.currentPermissionPolicy()
+		restore := a.currentPermissionPolicy()
+		if a.planMode {
+			restore = restore.WithProfile(a.planPrevProfile)
+			a.planMode = false
+		}
+		if restore.Profile() != permissions.ProfileFull {
+			a.preTrustPolicy = restore
 		}
 		a.approver.SetTrust(false)
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileFull))
+		a.setPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
 		a.conversation.AppendSystem("trust mode enabled — prompted tools will auto-approve unless policy denies them")
 	} else {
+		if a.currentPermissionPolicy().Profile() != permissions.ProfileFull && !a.approver.IsTrusted() && a.preTrustPolicy == nil {
+			a.conversation.AppendSystem("trust mode already disabled")
+			return a, nil
+		}
 		a.approver.SetTrust(false)
-		restore := a.preTrustPolicy
-		if restore == nil {
-			restore = a.permissionBase
-		}
-		if restore == nil {
-			restore = a.currentPermissionPolicy().WithProfile(permissions.ProfileAsk)
-		}
+		restore := a.trustOffPolicy()
 		a.preTrustPolicy = nil
 		a.setPermissionPolicy(restore)
-		a.conversation.AppendSystem("trust mode disabled — destructive tools will prompt")
+		a.conversation.AppendSystem("trust mode disabled — restored permission profile: " + permissions.ProfileConfigName(restore.Profile()))
 	}
 	return a, nil
+}
+
+func (a *App) trustOffPolicy() *permissions.Policy {
+	restore := a.preTrustPolicy
+	if restore == nil {
+		restore = a.permissionBase
+	}
+	if restore == nil {
+		restore = a.currentPermissionPolicy().WithProfile(permissions.ProfileAsk)
+	}
+	if restore.Profile() == permissions.ProfileFull {
+		restore = restore.WithProfile(permissions.ProfileAsk)
+	}
+	return restore
 }

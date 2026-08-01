@@ -55,6 +55,35 @@ func TestJobApprover_AnnotatesJobID(t *testing.T) {
 	assert.Equal(t, "c1", calls[0].ToolCall.ID, "non-name fields must be untouched")
 }
 
+func TestJobApprover_UsesExplicitPromptWhenParentSupportsIt(t *testing.T) {
+	parent := &fakePromptApprover{decision: agent.ApprovalDecision{Approved: true}}
+	app := NewJobApprover(parent, "abc12345", true)
+
+	dec := app.Approve(context.Background(), agent.ApprovalRequest{
+		ToolCall: provider.ToolCall{Name: "execute_command", ID: "c2"},
+	})
+	assert.True(t, dec.Approved)
+	require.Len(t, parent.promptCalls, 1)
+	assert.Empty(t, parent.approveCalls)
+	assert.Equal(t, "[job:abc12345] execute_command", parent.promptCalls[0].ToolCall.Name)
+}
+
+type fakePromptApprover struct {
+	approveCalls []agent.ApprovalRequest
+	promptCalls  []agent.ApprovalRequest
+	decision     agent.ApprovalDecision
+}
+
+func (f *fakePromptApprover) Approve(_ context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
+	f.approveCalls = append(f.approveCalls, req)
+	return f.decision
+}
+
+func (f *fakePromptApprover) PromptApproval(_ context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
+	f.promptCalls = append(f.promptCalls, req)
+	return f.decision
+}
+
 // TestJobApprover_NoParentRejects verifies the defensive nil-parent
 // branch — if no parent approver is wired, the adapter rejects rather
 // than panicking.

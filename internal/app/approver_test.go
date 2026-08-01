@@ -108,6 +108,52 @@ func TestUIApproverPermissionPolicyAllowAndDeny(t *testing.T) {
 	}
 }
 
+func TestUIApproverExplicitPromptIgnoresLivePolicyAndAutoTrust(t *testing.T) {
+	u := newUIApprover()
+	u.SetPermissionPolicy(permissions.DefaultPolicy().WithProfile(permissions.ProfileFull))
+	u.SetTrust(true)
+	decisions := make(chan agent.ApprovalDecision, 1)
+
+	go func() {
+		decisions <- u.PromptApproval(context.Background(), approvalReq("snapshot-ask"))
+	}()
+
+	req := waitPendingApproval(t, u)
+	if req.ToolCall.ID != "snapshot-ask" {
+		t.Fatalf("pending id = %q, want snapshot-ask", req.ToolCall.ID)
+	}
+	if u.ResolveActiveByPolicy() {
+		t.Fatal("live policy must not resolve an explicit snapshot-bound prompt")
+	}
+	u.Resolve(agent.ApprovalDecision{Approved: false, Reason: "explicit rejection"})
+	if got := waitDecision(t, decisions); got.Approved || got.Reason != "explicit rejection" {
+		t.Fatalf("decision = %+v, want explicit rejection", got)
+	}
+}
+
+func TestUIApproverExplicitPromptHonorsLiveDeny(t *testing.T) {
+	u := newUIApprover()
+	notified := make(chan struct{}, 1)
+	u.SetNotify(func() { notified <- struct{}{} })
+	decisions := make(chan agent.ApprovalDecision, 1)
+	go func() {
+		decisions <- u.PromptApproval(context.Background(), approvalReq("snapshot-revoked"))
+	}()
+	select {
+	case <-notified:
+	case <-time.After(time.Second):
+		t.Fatal("approval did not reach the queue")
+	}
+
+	u.SetPermissionPolicy(permissions.DefaultPolicy().WithRule("test_tool", permissions.ActionDeny))
+	if _, ok := u.Pending(); ok {
+		t.Fatal("live deny should resolve the snapshot-bound prompt without displaying it")
+	}
+	if got := waitDecision(t, decisions); got.Approved || got.Reason == "" {
+		t.Fatalf("decision = %+v, want policy denial", got)
+	}
+}
+
 func approvalReq(id string) agent.ApprovalRequest {
 	return agent.ApprovalRequest{
 		Tool: approverTestTool{},

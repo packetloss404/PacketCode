@@ -2,8 +2,9 @@
 
 Updated: 2026-08-01
 
-Handoff baseline: `main` at `ac758fe` (`Add job resubmit and the Packet
-Computers registry`), plus the 2026-08-01 PCH3 pass below.
+Handoff baseline: PCH3 was published to `main` at `4a8f671` (`Add fail-closed
+workflow verification`); this handoff also records the bounded PCH5 pass. Use
+the current `git log` below for the post-publication tip.
 
 This file is the quickest way to resume Packetcode work without reconstructing
 the repository's recent history. Read it together with [README.md](README.md),
@@ -55,8 +56,6 @@ The 2026-07-31 pass added:
   stored status is never shown as a live probe. See
   [docs/packet-computers-loop.md](docs/packet-computers-loop.md) and
   [docs/feature-packet-computers.md](docs/feature-packet-computers.md).
-- **PCH5 specified, not implemented.** It is the next PacketCode hardening
-  item and defines the trust contract required before Streamable HTTP MCP.
 - **Packet Control split to PacketADE.** Phases 1–2 are implemented there
   (`D:\projects\PacketADE\dev\packet-control-loop.md`). No packetcode work is
   scheduled; if it ever lands here it must consume that manifest schema.
@@ -69,6 +68,20 @@ The 2026-08-01 pass added:
   `packetcode-workflow-verdict-v1` block and hard retry caps. Every work and
   verifier attempt consumes the same agent and token budgets. See
   [docs/workflows.md](docs/workflows.md).
+- **PCH5 — Streamable HTTP MCP trust gate.** The approved v1 contract and
+  fail-closed validator now pin exact origins/ports, address classes, bounded
+  bodyless same-origin GET/HEAD redirects, disabled ambient proxies, system-
+  root TLS, atomically bound target-only environment credentials, credential-
+  bound output provenance/redaction,
+  bounded response/event/header/output sizes, per-call approval and revocation,
+  bounded timeout, and manual reconnect. Streamable HTTP itself is still
+  disabled.
+- **Approval safety review.** Plan mode is now a hard read-only floor and
+  explicit denies cannot be weakened by later session allows. Running jobs keep
+  snapshot-bound explicit prompts even if foreground trust broadens, while a
+  later deny can still revoke them. Mode transitions advance queued approvals,
+  `/trust off` is a no-op when already off and otherwise preserves session
+  rules, and remembered background rules use the unannotated tool name.
 
 ## Start Here
 
@@ -138,6 +151,8 @@ Inside Packetcode:
   computer registry as it actually ships, and an explicit list of what does
   not work yet.
 - [docs/mcp.md](docs/mcp.md): MCP configuration and runtime management.
+- [docs/mcp-http-trust-contract.md](docs/mcp-http-trust-contract.md): approved
+  Streamable HTTP design gate; the transport is not shipped.
 - [docs/troubleshooting.md](docs/troubleshooting.md): common setup and runtime
   failures.
 - [BACKLOG.md](BACKLOG.md): unshipped work only.
@@ -160,7 +175,7 @@ The primary runtime wiring is in `cmd/packetcode/main.go`. Important packages:
 | Permissions | `internal/permissions` | Profiles, matching rules, allow/ask/deny decisions, and remembered approvals. |
 | Background jobs | `internal/jobs` | Job lifecycle, isolated sessions, write worktrees, transcripts, artifacts, persistence, and nested agents. |
 | Workflows | `internal/workflow` | Versioned schema, ordered phases, parallel fan-out, fail-closed verification, bounded retries, cancellation, bindings, and token boundaries. |
-| MCP | `internal/mcp` | Stdio server startup, discovery, namespaced adapters, calls, logs, and restart. |
+| MCP | `internal/mcp` | Stdio server startup, discovery, namespaced adapters, calls, logs, restart, and the transport-independent future HTTP trust validator/output boundary. |
 | Persistence | `internal/session`, `internal/config`, `internal/cost` | Sessions, backups, user paths/configuration, and usage/cost tallies. |
 | TUI components | `internal/ui/components` | Conversation, input, topbar, approvals, pickers, Agent View, workflow view, and transcripts. |
 | Display safety | `internal/ui/terminaltext` | Stateful sanitization of untrusted terminal text. |
@@ -259,9 +274,10 @@ steps are:
    session resume, approvals, agents, workflows, and MCP.
 4. Improve cancellation-drain visibility and add transcript search/jump-to-
    latest.
-5. Design PCH5's Streamable HTTP MCP trust contract before enabling that
-   transport; independently, add explicit workflow pipeline stages and a
-   broader versioned example library.
+5. If Streamable HTTP MCP is selected, implement it only against
+   `packetcode-mcp-http-trust-v1` and its adversarial integration matrix;
+   independently, add explicit workflow pipeline stages and a broader
+   versioned example library.
 6. Add safe worktree apply/merge assistance and explicit cleanup commands.
 7. Continue context/cost work: provider-native counting where stable, bounded
    model-facing output caps, cached-input telemetry, and opaque Codex reasoning
@@ -288,6 +304,6 @@ tests and a short changelog entry.
 8. Run the verification baseline before publishing.
 ```
 
-At the time this handoff was created, the working tree started clean from
-`origin/main`; the handoff/documentation update itself is intended to be one
-isolated commit.
+At the start of this loop, `main` and `origin/main` were clean at `4a8f671`.
+PCH5 was developed as one isolated change; check the current branch, log, and
+working tree before resuming.

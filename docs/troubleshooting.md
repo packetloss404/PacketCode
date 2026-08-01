@@ -68,7 +68,7 @@ Picker, transcript, Agent, and Workflow workspaces own their keyboard while open
 packetcode doctor --check permissions
 ```
 
-Run `/permissions` in the TUI. Explicit session/config rules override profile defaults. Option 2 in the approval menu remembers a session rule; shell commands are remembered exactly. Use `/permissions profile ask` to return to Manual behavior.
+Run `/permissions` in the TUI. Session/config rules normally refine profile defaults, but explicit denies and Plan's read-only boundary are safety floors. Option 2 in the approval menu remembers a session rule; shell commands are remembered exactly. Use `/permissions reset` to revoke session changes and restore the startup policy, or `/permissions profile ask` to change only the active profile.
 
 ## `/spawn --write` Failed
 

@@ -20,7 +20,7 @@ packetcode doctor --json
 | --- | --- |
 | Provider and model | `/provider`, `/provider codex`, `/provider add <slug>`, `/model`, `/model gpt-5.6-sol` |
 | Codex reasoning | `/effort`, `/effort high`, `/effort max`, `/effort default` |
-| Permissions | `/permissions`, `/permissions profiles`, `/permissions profile auto`, `/plan on`, `/trust on` |
+| Permissions | `/permissions`, `/permissions profiles`, `/permissions profile auto`, `/permissions reset`, `/plan on`, `/trust on` |
 | Include a file | `Review @internal/app/app.go and fix the focus bug` (`@` opens completion) |
 | Read-only agent | `/spawn audit the current diff` |
 | Chosen agent model | `/spawn --provider codex --model gpt-5.6-sol audit auth` |
@@ -33,7 +33,7 @@ packetcode doctor --json
 | Sessions/context | `/sessions`, `/sessions resume <id>`, `/sessions rename <name>`, `/compact --keep 10` |
 | Usage/recovery | `/cost`, `/cost reset --yes`, `/undo`, `/transcript` |
 | Ollama | `/ollama status`, `/ollama models`, `/ollama ps`, `/ollama pull <model>` |
-| MCP | `/mcp`, `/mcp status <name>`, `/mcp tools <name>`, `/mcp logs <name>` |
+| MCP | `/mcp`, `/mcp status <name>`, `/mcp tools <name>`, `/mcp logs <name>`, `/mcp restart <name>` (stdio only) |
 | Literal slash | `//not-a-command` sends `/not-a-command` as the prompt |
 
 ## Keys worth remembering

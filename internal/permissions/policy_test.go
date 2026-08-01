@@ -52,7 +52,7 @@ func TestPolicy_SafeProfileDeniesDestructiveAndAllowsRead(t *testing.T) {
 
 func TestPolicy_RuleSpecificityAndOrder(t *testing.T) {
 	p := Must(config.PermissionConfig{
-		Profile: string(ProfileSafe),
+		Profile: string(ProfileAsk),
 		Rules: []config.PermissionRule{
 			{Tool: "mcp:*", Action: string(DecisionAsk)},
 			{Tool: "filesystem__read_file", Action: string(DecisionAllow)},
@@ -65,7 +65,7 @@ func TestPolicy_RuleSpecificityAndOrder(t *testing.T) {
 
 func TestPolicy_CommandPrefixMatchesFields(t *testing.T) {
 	p := Must(config.PermissionConfig{
-		Profile: string(ProfileSafe),
+		Profile: string(ProfileFull),
 		Rules: []config.PermissionRule{{
 			Tool:          "execute_command",
 			Action:        string(DecisionAsk),
@@ -77,7 +77,7 @@ func TestPolicy_CommandPrefixMatchesFields(t *testing.T) {
 	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionAsk)
 
 	params, _ = json.Marshal(map[string]any{"command": "git status-rm"})
-	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionDeny)
+	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionAllow)
 
 	for _, command := range []string{
 		"git status && echo chained",
@@ -88,8 +88,34 @@ func TestPolicy_CommandPrefixMatchesFields(t *testing.T) {
 		"git status\necho chained",
 	} {
 		params, _ = json.Marshal(map[string]any{"command": command})
-		assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionDeny)
+		assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true, Params: params}, DecisionAllow)
 	}
+}
+
+func TestPolicy_SafeProfileIsNonReadOnlySafetyFloor(t *testing.T) {
+	p := Must(config.PermissionConfig{
+		Profile: string(ProfileSafe),
+		Rules: []config.PermissionRule{
+			{Tool: "execute_command", Action: string(DecisionAllow)},
+			{Tool: "mcp:*", Action: string(DecisionAsk)},
+		},
+	}).WithRule("write_file", DecisionAllow)
+
+	for _, tool := range []string{"execute_command", "write_file", "filesystem__read_file"} {
+		assertDecision(t, p, Request{ToolName: tool, RequiresApproval: true}, DecisionDeny)
+	}
+}
+
+func TestPolicy_ConfiguredDenyIsFloorForLaterSessionAllow(t *testing.T) {
+	p := Must(config.PermissionConfig{
+		Profile: string(ProfileFull),
+		Rules: []config.PermissionRule{{
+			Tool:   "execute_command",
+			Action: string(DecisionDeny),
+		}},
+	}).WithRule("execute_command", DecisionAllow)
+
+	assertDecision(t, p, Request{ToolName: "execute_command", RequiresApproval: true}, DecisionDeny)
 }
 
 func TestPolicy_EmptySessionCommandRulesAreNoOps(t *testing.T) {

@@ -21,6 +21,14 @@ type Approver interface {
 	Approve(ctx context.Context, req ApprovalRequest) ApprovalDecision
 }
 
+// ApprovalPrompter is an optional extension for callers that already made a
+// policy decision and specifically need an explicit user decision. Unlike
+// Approve, PromptApproval must not be silently approved by a different live
+// policy or auto-trust state; a later live deny may still revoke the request.
+type ApprovalPrompter interface {
+	PromptApproval(ctx context.Context, req ApprovalRequest) ApprovalDecision
+}
+
 // ToolDecider is an optional extension for approvers that can apply
 // policy before deciding whether a tool call should be allowed, denied,
 // or routed through the normal approval prompt. handled=false means the

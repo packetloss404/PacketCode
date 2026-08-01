@@ -15,15 +15,15 @@ credential, SSH host, or PacketAgent contract.
 | **PCH2** | Per-server MCP restart | Restart replaces one client and its tool adapters, preserves other clients, rejects unknown/disabled names, and exposes a recovery command in help/docs. | closed |
 | **PCH3** | Versioned workflow verifier/retry | Workflow schema explicitly declares verifier prompt/provider/model, pass contract, and retry cap; invalid or missing verdict never passes; token/agent budgets include retries. | **closed 2026-08-01** |
 | **PCH4** | Abandoned-job reconcile/resubmit | Restarted PacketCode shows recovered cancelled jobs and can explicitly resubmit from bounded saved input while preserving old evidence and never claiming the old process resumed. | **closed 2026-07-31** |
-| **PCH5** | Streamable HTTP MCP trust contract | Network targets, credentials, redirects, origins, output provenance, and approval scopes are explicit before enabling remote MCP. | queued — spec below |
+| **PCH5** | Streamable HTTP MCP trust contract | Network targets, credentials, redirects, origins, output provenance, and approval scopes are explicit before enabling remote MCP. | **closed 2026-08-01** |
 | **PCH6** | Signed clean-machine release matrix | Stable and preview assets install, update, fail closed on a bad checksum, and roll back on Windows/macOS/Linux. | external-gate |
 | **PCH7** | PacketADE packaged smoke | Packaged PacketADE detects, installs, probes, configures, launches, restarts, and SSH-launches a published PacketCode build. | external-gate |
 | **PCH8** | PacketAgent durable handoff | PacketCode/PacketADE consume PacketAgent's versioned Worker contract and pass close/reconnect evidence gates without duplicating its runtime. | external-gate |
 
-PCH4 shipped 2026-07-31 and PCH3 shipped 2026-08-01. PCH5 is the next
-PacketCode-owned hardening item, but it is security-design work, not a
-transport toggle. PCH6–PCH8 stay visibly gated until their named external
-substrate exists.
+PCH4 shipped 2026-07-31; PCH3 and PCH5 shipped 2026-08-01. PCH5 closes the
+security-design gate without enabling a transport. Streamable HTTP is now an
+independent implementation loop bound to the approved contract. PCH6–PCH8 stay
+visibly gated until their named external substrate exists.
 
 ---
 
@@ -112,7 +112,7 @@ Gate: focused workflow/App/UI tests green, workflow race suite green, strict
 schema fixtures and malformed/missing verdict regressions included. Canonical
 schema: [workflows.md](workflows.md).
 
-## PCH5 — specification
+## PCH5 — implemented 2026-08-01
 
 Goal: decide the trust model **before** Streamable HTTP MCP is enabled. This
 is a security-design item; shipping the transport without it is the failure
@@ -141,3 +141,36 @@ The contract must state, explicitly and per server:
 Acceptance: the contract is written and reviewed, redaction tests cover remote
 MCP output, and only then does an implementation loop open. No transport flag
 lands before this document does.
+
+Shipped design gate:
+
+- [Streamable HTTP MCP trust contract](mcp-http-trust-contract.md), versioned
+  `packetcode-mcp-http-trust-v1`, records the exact target/address,
+  redirect, credential, provenance, approval/revocation, timeout, and reconnect
+  decisions. It explicitly states that the executable remains stdio-only.
+- `internal/mcp/http_trust.go` is a transport-independent, fail-closed
+  validator. It canonicalizes exact origins with mandatory ports, classifies
+  loopback/private/link-local/reserved/public addresses separately, rejects
+  mixed DNS answers, permits only denied or bounded bodyless same-origin
+  GET/HEAD redirects, disables ambient proxies, pins system-root TLS, and
+  refuses public plain HTTP.
+- Credentials are environment-sourced bearer values attached only to the
+  original target origin after atomic runtime/output binding; cross-origin
+  hops, POST redirects, and request-body replay are refused.
+- Remote output has a labelled untrusted envelope plus shared credential
+  redaction used by visible MCP logs. The credential-bound sanitizer also
+  removes the exact bearer value, partial percent/JSON escapes, and common
+  base64 variants, preserves provenance,
+  and enforces the configured model-facing output cap. Tests cover prompt-
+  injection-shaped text, bearer/JSON/URL secrets, redirect escape, address
+  classes, and credential non-forwarding.
+- Remote approval scope is one call. An explicit exact-tool session grant can
+  still be chosen in the approval UI, and `/permissions reset` now provides a
+  tested revocation path back to startup policy. Reconnect is manual with zero
+  automatic attempts. Response, event, header, and output sizes are bounded,
+  with identity compression required.
+
+Gate: `go test ./internal/mcp ./internal/app` green. No config URL, transport
+flag, HTTP client, or network request was added. The follow-up transport loop
+must consume this validator and pass the adversarial integration matrix named
+in the canonical contract.
