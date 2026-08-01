@@ -483,14 +483,13 @@ packetcode doctor --json</code></pre>
             <thead><tr><th>Key</th><th>Action</th></tr></thead>
             <tbody>
               <tr><td><kbd>Enter</kbd></td><td>Send the prompt.</td></tr>
-              <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd> or <kbd>\</kbd> then <kbd>Enter</kbd></td><td>Insert a universal portable newline.</td></tr>
+              <tr><td><kbd>\</kbd> then <kbd>Enter</kbd></td><td>Insert a portable newline in every input state; <kbd>Alt</kbd>+<kbd>Enter</kbd> also works when Alt is reported distinctly.</td></tr>
               <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Insert a newline unless completion is open; in the completion popup it moves selection down.</td></tr>
-              <tr><td><kbd>\</kbd> then <kbd>Enter</kbd></td><td>Portable newline fallback.</td></tr>
-              <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Insert a newline when the terminal reports it distinctly.</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Insert a newline only when the terminal maps it to <kbd>Ctrl</kbd>+<kbd>J</kbd>.</td></tr>
               <tr><td><kbd>Up</kbd> / <kbd>Down</kbd></td><td>Recall history at the first or last visual input row.</td></tr>
               <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Cycle Manual → Accept Edits → Auto → Plan.</td></tr>
               <tr><td><kbd>Left</kbd> on an empty idle prompt</td><td>Open Agent View.</td></tr>
-              <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <code>/model</code></td><td>Open the provider / model picker. <kbd>Ctrl</kbd>+<kbd>M</kbd> is terminal-dependent.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <code>/model</code></td><td>Open the provider / model picker. <kbd>Alt</kbd>+<kbd>M</kbd> also works when Alt is reported distinctly.</td></tr>
               <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Cancel active work, clear a draft, or quit from an empty prompt.</td></tr>
               <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Quit from an empty prompt.</td></tr>
               <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>Clear visible output while keeping the saved session.</td></tr>
@@ -498,7 +497,7 @@ packetcode doctor --json</code></pre>
             </tbody>
           </table>
         </div>
-        <p>The input grows to multiple rows. <code>max_input_rows</code> controls its displayed height, not maximum prompt length. <kbd>Alt</kbd>+<kbd>Enter</kbd> and backslash-Enter are universal multiline choices. <kbd>Ctrl</kbd>+<kbd>J</kbd> inserts a newline only when completion is closed; while the popup is open it moves the selected completion down. Not every terminal distinguishes Shift+Enter.</p>
+        <p>The input grows to multiple rows. <code>max_input_rows</code> controls its displayed height, not maximum prompt length. Backslash-Enter works in every input state. <kbd>Ctrl</kbd>+<kbd>J</kbd> inserts a newline only when completion is closed; while the popup is open it moves the selected completion down. <kbd>Alt</kbd>+<kbd>Enter</kbd> works when the terminal reports Alt distinctly. Under Bubble Tea v1, Shift+Enter works only when the terminal maps it to Ctrl+J.</p>
 
         <h3 id="mentions-and-commands">File mentions and slash commands</h3>
         <p>Type <code>@</code> at a token boundary to search project files:</p>
@@ -541,7 +540,7 @@ packetcode doctor --json</code></pre>
 /provider add openai
 /model
 /model gpt-5.6-sol</code></pre>
-        <p><kbd>Ctrl</kbd>+<kbd>P</kbd> opens the provider picker; <code>/model</code> is the reliable model-picker path. <kbd>Ctrl</kbd>+<kbd>M</kbd> also opens the model picker only when the terminal reports it distinctly—ordinary terminals may encode it as carriage return. Press <kbd>Ctrl</kbd>+<kbd>A</kbd> on a provider row to set or update its key. Switching in the TUI persists the active provider and model as the default.</p>
+        <p><kbd>Ctrl</kbd>+<kbd>P</kbd> opens the provider picker; <code>/model</code> opens the model picker portably, and <kbd>Alt</kbd>+<kbd>M</kbd> also works when the terminal reports Alt distinctly. <kbd>Ctrl</kbd>+<kbd>M</kbd> is intentionally unbound under Bubble Tea v1 because terminals encode it as carriage return and it can be mistaken for Enter. Press <kbd>Ctrl</kbd>+<kbd>A</kbd> on a provider row to set or update its key. Switching in the TUI persists the active provider and model as the default.</p>
         <p>Environment variables override stored credentials. Built-ins use <code>PACKETCODE_&lt;SLUG&gt;_API_KEY</code>; custom slugs normalize non-alphanumeric characters to underscores unless <code>api_key_env</code> names another variable.</p>
 
         <h3 id="codex-subscription">Codex subscription and <code>/effort</code></h3>
@@ -932,6 +931,7 @@ Bubble Tea app ---- provider registry ---- active model stream
 
         <h3 id="terminal-safety">Terminal behavior</h3>
         <p>Finalized output goes to terminal-native scrollback; only active work remains in the live region. Provider and tool text is sanitized before display: terminal control sequences, mouse-mode toggles, clipboard operations, unsafe control bytes, destructive carriage-return rewrites, and malformed split UTF-8 are removed or normalized.</p>
+        <p>PacketCode keeps mouse tracking and alternate-screen mode disabled. CI checks normalized lifecycle renders at 72×24 and 100×30, exercises a live resize, and rejects unsafe terminal protocol sequences. Native Windows/ConPTY remains a manual release check.</p>
         <div class="callout warning"><span class="callout-title">Display hardening is not command safety</span><p>Sanitization protects terminal state. It does not make the underlying shell command, hook, or MCP process safe.</p></div>
 
         <h3 id="security-boundaries">Security boundaries</h3>
@@ -1062,7 +1062,7 @@ packetcode doctor --json</code></pre>
           </div>
           <div>
             <h3>Keys worth remembering</h3>
-            <p class="key-strip"><kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> / <kbd>\</kbd> then <kbd>Enter</kbd> universal newline · <kbd>Ctrl</kbd>+<kbd>J</kbd> newline (completion down while popup open) · <kbd>Shift</kbd>+<kbd>Tab</kbd> permissions · <kbd>Ctrl</kbd>+<kbd>P</kbd> provider · <code>/model</code> model picker (<kbd>Ctrl</kbd>+<kbd>M</kbd> terminal-dependent) · <kbd>Left</kbd> agents · <kbd>Ctrl</kbd>+<kbd>C</kbd> cancel/clear/quit · <kbd>Ctrl</kbd>+<kbd>D</kbd> quit · <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output · <kbd>Esc</kbd> rejects an approval.</p>
+            <p class="key-strip"><kbd>Enter</kbd> send · <kbd>\</kbd> then <kbd>Enter</kbd> newline everywhere · <kbd>Ctrl</kbd>+<kbd>J</kbd> newline (completion down while popup open) · <kbd>Alt</kbd>+<kbd>Enter</kbd> newline when Alt is distinct · <kbd>Shift</kbd>+<kbd>Tab</kbd> permissions · <kbd>Ctrl</kbd>+<kbd>P</kbd> provider · <code>/model</code> model picker (<kbd>Alt</kbd>+<kbd>M</kbd> when Alt is distinct) · <kbd>Left</kbd> agents · <kbd>Ctrl</kbd>+<kbd>C</kbd> cancel/clear/quit · <kbd>Ctrl</kbd>+<kbd>D</kbd> quit · <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output · <kbd>Esc</kbd> rejects an approval.</p>
           </div>
         </div>
 

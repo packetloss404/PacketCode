@@ -100,7 +100,7 @@ Useful session commands:
 /model gpt-5.6-sol        switch directly by model id
 ```
 
-`Ctrl+P` opens the provider picker. `/model` is the portable model-picker path; `Ctrl+M` opens it only when the terminal reports that chord distinctly instead of carriage return. The picker model list comes from the active account where possible; curated fallback catalogs keep selection usable when a provider's list endpoint is unavailable. The next model request is still authoritative.
+`Ctrl+P` opens the provider picker. `/model` is the portable model-picker path; `Alt+M` also works when the terminal reports Alt distinctly. `Ctrl+M` is intentionally unbound under Bubble Tea v1 because terminals encode it as carriage return and it can be mistaken for Enter. The picker model list comes from the active account where possible; curated fallback catalogs keep selection usable when a provider's list endpoint is unavailable. The next model request is still authoritative.
 
 ### API keys and custom endpoints
 
@@ -529,9 +529,9 @@ The input is a bounded multiline editor. `max_input_rows` controls its displayed
 | Input | Behavior |
 | --- | --- |
 | `Enter` | Submit. |
-| `Alt+Enter` or `\` then `Enter` | Insert a portable newline in every input state. |
+| `\` then `Enter` | Insert a portable newline in every input state; `Alt+Enter` also works when Alt is reported distinctly. |
 | `Ctrl+J` | Insert a newline while completion is closed; move down when the popup is open. |
-| `Shift+Enter` | Insert a newline only when the terminal reports it distinctly. |
+| `Shift+Enter` | Insert a newline only when the terminal maps it to `Ctrl+J`. |
 | `Up`/`Down` | Recall history at the first/last visual input row. |
 | `Ctrl+C` | Cancel active work, otherwise clear a draft, otherwise quit. |
 | `Ctrl+D` | Quit from an empty prompt. |
@@ -545,7 +545,11 @@ Provider and tool text is sanitized before rendering: terminal control sequences
 
 Finalized output belongs to native terminal scrollback. Use terminal scrolling, `Shift+PageUp`, or tmux copy mode; `/transcript` opens the saved session. Full-screen pickers, Agent View, workflow view, and transcript view own the keyboard while open.
 
-**Limit:** the current terminal stack cannot reliably distinguish every modified Enter sequence. `Alt+Enter` and backslash-Enter are the most portable multiline bindings; `Ctrl+J` is reserved for completion navigation while that popup is open.
+The committed 72×24/100×30 golden and protocol contract is described in
+[Supported terminals](supported-terminals.md) and the
+[TUI parity harness](tui-parity-harness.md).
+
+**Limit:** the current terminal stack cannot reliably distinguish every modified Enter sequence. Backslash-Enter works in every input state; `Ctrl+J` works while completion is closed; `Alt+Enter` works when the terminal reports Alt distinctly.
 
 ## 14. Security Boundaries
 

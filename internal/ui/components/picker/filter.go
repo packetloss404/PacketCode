@@ -1,5 +1,5 @@
 // Package picker provides a generic filter-as-you-type list modal used
-// by the provider / model pickers (Ctrl+P, Ctrl+M) and reusable for
+// by the provider / model pickers (Ctrl+P, Alt+M) and reusable for
 // the forthcoming slash-command autocomplete and theme picker.
 package picker
 

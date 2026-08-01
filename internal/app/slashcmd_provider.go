@@ -40,7 +40,7 @@ func (a *App) handleProviderCommand(args []string) (tea.Model, tea.Cmd) {
 
 // handleModelCommand opens the model picker modal (0 args) or switches
 // to a specific model (1 arg). The picker open path is shared with the
-// Ctrl+M keybind via openModelPicker — same async loader, cache reuse,
+// Alt+M keybind via openModelPicker — same async loader, cache reuse,
 // and error surface.
 func (a *App) handleModelCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {

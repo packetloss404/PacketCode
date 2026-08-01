@@ -38,6 +38,6 @@ packetcode doctor --json
 
 ## Keys worth remembering
 
-`Enter` send · `Alt+Enter` / `\` then `Enter` newline · `Ctrl+J` newline except when completion is open (moves down) · `Shift+Tab` cycle Manual → Accept Edits → Auto → Plan · `Ctrl+P` provider · `/model` model picker (`Ctrl+M` when distinctly reported) · `Left` on an empty prompt agents · `Ctrl+C` cancel/clear draft/quit when empty · `Ctrl+D` quit when empty · `Ctrl+L` or `/clear` clear visible output, keep session · `/help` everything else
+`Enter` send · `\` then `Enter` newline everywhere · `Ctrl+J` newline except when completion is open (moves down) · `Alt+Enter` newline when Alt is distinct · `Shift+Tab` cycle Manual → Accept Edits → Auto → Plan · `Ctrl+P` provider · `/model` model picker (`Alt+M` when Alt is distinct) · `Left` on an empty prompt agents · `Ctrl+C` cancel/clear draft/quit when empty · `Ctrl+D` quit when empty · `Ctrl+L` or `/clear` clear visible output, keep session · `/help` everything else
 
 Write agents work in separate git worktrees; their changes are not merged automatically. Completed agent results stay out of foreground context until you inject/collect them.

@@ -5,7 +5,7 @@ Provider and model selection use the shared `picker` component.
 ## Open and Use
 
 - `Ctrl+P`, `/provider`, or `/providers`: provider picker.
-- `/model` or `/models`: active-provider model picker. `Ctrl+M` also works when the terminal reports it distinctly instead of carriage return.
+- `/model` or `/models`: active-provider model picker. `Alt+M` also works when the terminal reports Alt distinctly. `Ctrl+M` is intentionally unbound under Bubble Tea v1 because it aliases Enter.
 - Type to filter; matching is case-insensitive and normalized.
 - Up/Down, Ctrl+N/P, and Ctrl+J/K move.
 - PageUp/PageDown move by half a page.

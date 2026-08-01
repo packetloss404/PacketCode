@@ -7,19 +7,19 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 - Automate signed/notarized macOS, Linux, and Windows release artifacts and checksum verification.
 - Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions.
 - Add end-to-end smoke coverage for first-run setup, provider switching, session resume, approvals, background jobs, workflows, and MCP.
-- Promote reviewed credential-free PTY fixtures into CI golden tests without committing machine/account data.
 - Keep provider catalogs, pricing, context windows, and tool-capability metadata current; prefer live discovery when authoritative.
 - Add opt-in live-provider contract tests that never run in ordinary CI.
-- Document supported terminal emulators and minimum practical geometry.
 
 ## TUI and Interaction Parity
 
 - Add transcript search/filter and a compact jump-to-latest affordance.
 - Add queue reorder/edit controls; list, drop, and clear already ship.
 - Improve visibility when cancellation is draining a provider or child process that has not exited yet.
-- Add terminal-width golden coverage below 80 columns and for very tall approval/tool blocks.
+- Add golden coverage for very tall approval/tool blocks.
 - Continue comparing lifecycle states against Claude Code while preserving packetcode provider colors and multi-provider controls.
-- Evaluate Bubble Tea v2 migration for enhanced keyboard reporting (including true Shift+Enter where supported) and synchronized-output rendering.
+- Migrate to Bubble Tea v2 for enhanced keyboard reporting (including true
+  Shift+Enter where supported) and synchronized-output rendering, preserving
+  the committed inline/native-scrollback, no-mouse, and PTY safety contract.
 
 ## Context and Cost Efficiency
 

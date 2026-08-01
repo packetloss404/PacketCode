@@ -8,35 +8,29 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/packetcode/packetcode/internal/config"
 	jobspkg "github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/tools"
+	"github.com/packetcode/packetcode/internal/ui/components/picker"
 )
 
 // routeKey simulates a bare keypress through App.handleKey. Returns
 // the cmd produced so tests can resolve async loaders.
 //
-// Note: Ctrl+M is indistinguishable from Enter in bubbletea (both
-// resolve to keyCR/13, String() "enter"). We route "ctrl+m" tests
-// through App.openModelPicker directly so the handler's
-// `case "ctrl+m"` is exercised by unit tests and the integration
-// behaviour (what actually happens when the user hits the shortcut
-// in a CSI-u terminal) is validated end-to-end.
+// Alt+M has a distinct v1 KeyMsg representation, so route it through the same
+// handleKey path as a terminal event. Ctrl+M is deliberately absent because
+// Bubble Tea v1 aliases it to Enter and could submit a draft.
 func routeKey(t *testing.T, a *App, s string) tea.Cmd {
 	t.Helper()
 	var km tea.KeyMsg
 	switch s {
 	case "ctrl+p":
 		km = tea.KeyMsg{Type: tea.KeyCtrlP}
-	case "ctrl+m":
-		// Bypass the KeyMsg translation: pair open + picker guard
-		// manually so tests don't depend on terminal capabilities.
-		if a.approval.Visible() || a.picker.Visible() {
-			return nil
-		}
-		return a.openModelPicker()
+	case "alt+m":
+		km = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true}
 	case "esc":
 		km = tea.KeyMsg{Type: tea.KeyEsc}
 	case "enter":
@@ -219,24 +213,43 @@ func TestApp_CtrlP_NoProvidersConfigured(t *testing.T) {
 	convContains(t, r.app, "no providers configured")
 }
 
-// TestApp_CtrlM_OpensModelPicker verifies Ctrl+M opens the model
+// TestApp_AltM_OpensModelPicker verifies Alt+M opens the model
 // picker on the active provider.
-func TestApp_CtrlM_OpensModelPicker(t *testing.T) {
+func TestApp_AltM_OpensModelPicker(t *testing.T) {
 	r := newTestApp(t)
-	routeKey(t, r.app, "ctrl+m")
+	routeKey(t, r.app, "alt+m")
 	if !r.app.picker.Visible() {
-		t.Fatalf("picker should be visible after Ctrl+M")
+		t.Fatalf("picker should be visible after Alt+M")
 	}
 }
 
-// TestApp_CtrlM_CachedListNoNetwork verifies a pre-warmed cache skips
+func TestApp_AltM_ReplacesAutocompleteAndOneEscapeClosesPicker(t *testing.T) {
+	r := newTestApp(t)
+	r.reg.SetCachedModels("fake", []provider.Model{{ID: "fake-model"}})
+	r.app.input.SetValue("/co")
+	r.app.refreshAutocomplete()
+	if !r.app.autocomplete.Visible() {
+		t.Fatal("precondition: autocomplete should be visible")
+	}
+
+	routeKey(t, r.app, "alt+m")
+	if r.app.autocomplete.Visible() || !r.app.picker.Visible() {
+		t.Fatalf("after Alt+M: autocomplete=%v picker=%v", r.app.autocomplete.Visible(), r.app.picker.Visible())
+	}
+	routeKey(t, r.app, "esc")
+	if r.app.picker.Visible() {
+		t.Fatal("one Escape should close the visible picker")
+	}
+}
+
+// TestApp_AltM_CachedListNoNetwork verifies a pre-warmed cache skips
 // the loader path entirely.
-func TestApp_CtrlM_CachedListNoNetwork(t *testing.T) {
+func TestApp_AltM_CachedListNoNetwork(t *testing.T) {
 	r := newTestApp(t)
 	r.reg.SetCachedModels("fake", []provider.Model{{ID: "fake-model"}, {ID: "fake-mini"}})
 	before := atomic.LoadInt32(&r.prov.listCalls)
 
-	cmd := routeKey(t, r.app, "ctrl+m")
+	cmd := routeKey(t, r.app, "alt+m")
 	if cmd != nil {
 		t.Fatalf("cached open must return nil cmd, got %T", cmd)
 	}
@@ -249,11 +262,11 @@ func TestApp_CtrlM_CachedListNoNetwork(t *testing.T) {
 	}
 }
 
-// TestApp_CtrlM_FreshLoadFromListModels verifies an absent cache
+// TestApp_AltM_FreshLoadFromListModels verifies an absent cache
 // triggers the loader and populates items on resolution.
-func TestApp_CtrlM_FreshLoadFromListModels(t *testing.T) {
+func TestApp_AltM_FreshLoadFromListModels(t *testing.T) {
 	r := newTestApp(t)
-	cmd := routeKey(t, r.app, "ctrl+m")
+	cmd := routeKey(t, r.app, "alt+m")
 	if cmd == nil {
 		t.Fatalf("expected loader cmd when cache cold, got nil")
 	}
@@ -268,12 +281,12 @@ func TestApp_CtrlM_FreshLoadFromListModels(t *testing.T) {
 	}
 }
 
-// TestApp_CtrlM_SelectAppliesModelSwitch verifies picking a row routes
+// TestApp_AltM_SelectAppliesModelSwitch verifies picking a row routes
 // through applyModelSwitch.
-func TestApp_CtrlM_SelectAppliesModelSwitch(t *testing.T) {
+func TestApp_AltM_SelectAppliesModelSwitch(t *testing.T) {
 	r := newTestApp(t)
 	r.reg.SetCachedModels("fake", []provider.Model{{ID: "fake-model"}, {ID: "fake-mini"}})
-	routeKey(t, r.app, "ctrl+m")
+	routeKey(t, r.app, "alt+m")
 
 	// Walk to "fake-mini".
 	for i := 0; i < 5; i++ {
@@ -292,14 +305,14 @@ func TestApp_CtrlM_SelectAppliesModelSwitch(t *testing.T) {
 	convContains(t, r.app, "switched model: fake/fake-mini")
 }
 
-// TestApp_CtrlM_CachePopulatedAfterLoad verifies a successful async
+// TestApp_AltM_CachePopulatedAfterLoad verifies a successful async
 // load warms Registry.CachedModels.
-func TestApp_CtrlM_CachePopulatedAfterLoad(t *testing.T) {
+func TestApp_AltM_CachePopulatedAfterLoad(t *testing.T) {
 	r := newTestApp(t)
 	if _, ok := r.reg.CachedModels("fake"); ok {
 		t.Fatalf("precondition: cache should be cold")
 	}
-	cmd := routeKey(t, r.app, "ctrl+m")
+	cmd := routeKey(t, r.app, "alt+m")
 	resolveCmd(t, r.app, cmd)
 
 	cached, ok := r.reg.CachedModels("fake")
@@ -308,13 +321,13 @@ func TestApp_CtrlM_CachePopulatedAfterLoad(t *testing.T) {
 	}
 }
 
-// TestApp_CtrlM_ListError verifies a loader error lands in error state
+// TestApp_AltM_ListError verifies a loader error lands in error state
 // with "r retry" visible.
-func TestApp_CtrlM_ListError(t *testing.T) {
+func TestApp_AltM_ListError(t *testing.T) {
 	r := newTestApp(t)
 	r.prov.listErr = errors.New("offline")
 
-	cmd := routeKey(t, r.app, "ctrl+m")
+	cmd := routeKey(t, r.app, "alt+m")
 	resolveCmd(t, r.app, cmd)
 
 	out := r.app.picker.View()
@@ -326,13 +339,13 @@ func TestApp_CtrlM_ListError(t *testing.T) {
 	}
 }
 
-// TestApp_CtrlM_RetryFiresAgain verifies pressing 'r' in error state
+// TestApp_AltM_RetryFiresAgain verifies pressing 'r' in error state
 // re-fires the loader.
-func TestApp_CtrlM_RetryFiresAgain(t *testing.T) {
+func TestApp_AltM_RetryFiresAgain(t *testing.T) {
 	r := newTestApp(t)
 	r.prov.listErr = errors.New("offline")
 
-	cmd := routeKey(t, r.app, "ctrl+m")
+	cmd := routeKey(t, r.app, "alt+m")
 	resolveCmd(t, r.app, cmd)
 
 	before := atomic.LoadInt32(&r.prov.listCalls)
@@ -363,19 +376,19 @@ func TestApp_CtrlP_RefusesToStackOverApproval(t *testing.T) {
 	}
 }
 
-// TestApp_CtrlM_RefusesToStackOverApproval — same, for Ctrl+M.
-func TestApp_CtrlM_RefusesToStackOverApproval(t *testing.T) {
+// TestApp_AltM_RefusesToStackOverApproval — same, for Alt+M.
+func TestApp_AltM_RefusesToStackOverApproval(t *testing.T) {
 	r := newTestApp(t)
 	showApprovalForTest(r.app)
-	routeKey(t, r.app, "ctrl+m")
+	routeKey(t, r.app, "alt+m")
 	if r.app.picker.Visible() {
 		t.Fatalf("picker should NOT open over approval")
 	}
 }
 
-// TestApp_CtrlP_OpensOverJobsPanel verifies jobs-panel visibility
-// does not block the picker (picker has higher precedence).
-func TestApp_CtrlP_OpensOverJobsPanel(t *testing.T) {
+// TestApp_CtrlP_RefusesToStackOverJobsPanel verifies the visible workspace
+// keeps ownership rather than revealing a surprise picker after Escape.
+func TestApp_CtrlP_RefusesToStackOverJobsPanel(t *testing.T) {
 	r := newTestApp(t)
 	// Fake the jobs panel into visible. We can't easily construct a
 	// jobs.Snapshot here, so we poke Show with minimal data.
@@ -384,8 +397,60 @@ func TestApp_CtrlP_OpensOverJobsPanel(t *testing.T) {
 	r.app.jobsPanel.Show(fakeJobsSnapForTest(), nil)
 
 	routeKey(t, r.app, "ctrl+p")
-	if !r.app.picker.Visible() {
-		t.Fatalf("picker should open even while jobs panel is visible")
+	if r.app.picker.Visible() {
+		t.Fatalf("picker should NOT open while jobs panel is visible")
+	}
+}
+
+func TestApp_PickerShortcutsDoNotStackOverOtherWorkspaces(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*App)
+	}{
+		{"secret prompt", func(a *App) { a.prompt.Open("fake", "API key", "enter key", true) }},
+		{"agent view", func(a *App) { a.agentView.Show(nil) }},
+		{"workflow view", func(a *App) { a.workflowView.Show(nil) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestApp(t)
+			tc.setup(r.app)
+			for _, key := range []string{"ctrl+p", "alt+m"} {
+				r.app.picker = picker.New("", "")
+				routeKey(t, r.app, key)
+				if r.app.picker.Visible() {
+					t.Fatalf("%s opened a picker beneath %s", key, tc.name)
+				}
+			}
+		})
+	}
+}
+
+func TestApp_SecretPromptOwnsTerminalGeometry(t *testing.T) {
+	r := newTestApp(t)
+	r.app.resize(80, 24)
+	r.app.prompt.Open("fake", "API key", "enter key", true)
+
+	view := r.app.View()
+	if got := lipgloss.Height(view); got > 24 {
+		t.Fatalf("prompt view height = %d, want <= 24:\n%s", got, view)
+	}
+	if strings.Contains(view, "❯") {
+		t.Fatalf("composer rendered beneath full-screen prompt:\n%s", view)
+	}
+}
+
+func TestApp_ClearShortcutDoesNotMutateBeneathPrompt(t *testing.T) {
+	r := newTestApp(t)
+	r.app.conversation.AppendSystem("keep this visible")
+	r.app.prompt.Open("fake", "API key", "enter key", true)
+
+	_, cmd := r.app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if cmd != nil {
+		t.Fatal("Ctrl+L beneath prompt returned a command")
+	}
+	if !strings.Contains(convText(r.app), "keep this visible") {
+		t.Fatal("Ctrl+L cleared conversation beneath prompt")
 	}
 }
 

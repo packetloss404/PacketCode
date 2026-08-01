@@ -2,9 +2,9 @@
 
 Updated: 2026-08-01
 
-Handoff baseline: PCH3 was published to `main` at `4a8f671` (`Add fail-closed
-workflow verification`); this handoff also records the bounded PCH5 pass. Use
-the current `git log` below for the post-publication tip.
+Handoff baseline: PCH5 was published to `main` at `2a9e32d` (`Close remote MCP
+trust design gate`); this handoff also records the bounded TUI evidence and
+interaction pass. Use the current `git log` below for the post-publication tip.
 
 This file is the quickest way to resume Packetcode work without reconstructing
 the repository's recent history. Read it together with [README.md](README.md),
@@ -43,6 +43,11 @@ hardening pass:
   documentation.
 - A reviewed user manual, advanced guide, printable cheat sheet, and
   self-contained offline HTML5 manual.
+- Reviewed TUI text-and-style cell goldens at 72×24 and 100×30,
+  post-SIGWINCH live-resize and terminal-mode safety checks, a cross-platform
+  layout matrix, and an explicit supported-terminal contract. Built-in status
+  content recomposes at the new width. The model picker uses `Alt+M`; queued
+  prompt whitespace and modal keyboard/geometry ownership are preserved.
 
 The 2026-07-31 pass added:
 
@@ -214,11 +219,12 @@ machine-specific Codex/Packetcode state.
 
 ## Interaction Caveats
 
-- `/model` is the reliable model-picker path. Ordinary terminals encode
-  Ctrl+M as carriage return; the shortcut works only when reported distinctly.
-- `Alt+Enter` and backslash-Enter are the most portable multiline bindings.
-  Ctrl+J inserts a newline while completion is closed and moves the completion
-  selection while its popup is open.
+- `/model` is the portable model-picker path; `Alt+M` also works when the
+  terminal reports Alt distinctly. `Ctrl+M` is intentionally unbound under
+  Bubble Tea v1 because terminals encode it as carriage return/Enter.
+- Backslash-Enter works in every input state. Ctrl+J inserts a newline while
+  completion is closed and moves the completion selection while its popup is
+  open; `Alt+Enter` also works when Alt is reported distinctly.
 - Esc dismisses ordinary overlays, but in an approval prompt it means **No**
   and rejects the action.
 - Finalized chat output is in terminal-native scrollback. Use the terminal or
@@ -248,6 +254,12 @@ go build -o bin\packetcode.exe ./cmd/packetcode
 .\bin\packetcode.exe --tui-fixture=agents
 ```
 
+On Linux, macOS, or WSL with `scripts/requirements-tui.txt` installed:
+
+```sh
+make tui-golden-check
+```
+
 The PTY harness is documented in
 [docs/tui-parity-harness.md](docs/tui-parity-harness.md). Captures under
 `testdata/tui/captures/` are ignored because they may contain local account or
@@ -266,10 +278,10 @@ For documentation changes, check:
 The authoritative queue is [BACKLOG.md](BACKLOG.md). The highest-leverage next
 steps are:
 
-1. Evaluate or execute the Bubble Tea v2 migration for enhanced keyboard
-   reporting and synchronized output.
-2. Promote reviewed PTY fixtures into CI golden tests, including widths below
-   80 columns and tall approval/tool blocks.
+1. Execute the Bubble Tea v2 migration for enhanced keyboard reporting and
+   synchronized output against the committed golden/protocol contract.
+2. Add golden fixtures for very tall approval/tool blocks and a native ConPTY
+   evidence lane when a credential-free harness is available.
 3. Add end-to-end smoke coverage for first-run setup, provider switching,
    session resume, approvals, agents, workflows, and MCP.
 4. Improve cancellation-drain visibility and add transcript search/jump-to-
@@ -304,6 +316,5 @@ tests and a short changelog entry.
 8. Run the verification baseline before publishing.
 ```
 
-At the start of this loop, `main` and `origin/main` were clean at `4a8f671`.
-PCH5 was developed as one isolated change; check the current branch, log, and
-working tree before resuming.
+At the start of this TUI loop, `main` and `origin/main` were clean at
+`2a9e32d`. Check the current branch, log, and working tree before resuming.

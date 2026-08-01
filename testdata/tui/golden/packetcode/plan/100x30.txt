@@ -1,0 +1,15 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Ask packetcode anything... (/ commands · @ files)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  [Codex (ChatGPT)·gpt-5.6-sol] 🟢 12% (33K/272K) | 📂 packetcode | 🌿 main | ● high · /effort
+  ⏸ plan mode on (shift+tab to cycle) · ← for agents
+
+-- cell styles --
+1:1-100 fg=3c3c5c
+2:1-2 fg=00d9ff
+2:3 fg=e1e1e8,reverse
+2:4-51 fg=494960
+3:1-100 fg=3c3c5c
+4:3-94 fg=8888a0
+5:3-16 fg=00d9ff,bold
+5:17-52 fg=494960

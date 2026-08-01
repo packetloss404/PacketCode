@@ -1,9 +1,10 @@
-.PHONY: build test lint verify vulncheck goreleaser-check smoke run clean ci tui-snapshots tui-snapshots-claude
+.PHONY: build test lint verify vulncheck goreleaser-check smoke run clean ci tui-deps tui-snapshots tui-snapshots-claude tui-golden-update tui-golden-check
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BINARY  ?= bin/packetcode
 GOVULNCHECK_VERSION ?= v1.3.0
+TUI_PYTHON ?= python3
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 build:
@@ -33,6 +34,17 @@ tui-snapshots: build
 
 tui-snapshots-claude:
 	sh scripts/tui_snapshot_suite.sh claude
+
+tui-deps:
+	$(TUI_PYTHON) -m pip install -r scripts/requirements-tui.txt
+
+tui-golden-update: build
+	$(TUI_PYTHON) -m unittest scripts/tui_capture_test.py
+	sh scripts/tui_golden.sh update
+
+tui-golden-check: build
+	$(TUI_PYTHON) -m unittest scripts/tui_capture_test.py
+	sh scripts/tui_golden.sh check
 
 run: build
 	./$(BINARY)

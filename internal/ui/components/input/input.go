@@ -38,8 +38,8 @@ func New() Model {
 	ta.SetHeight(1)
 	// Enter is owned by this component as the submit key. Keep explicit
 	// newline fallbacks in the textarea keymap: modern terminals commonly
-	// encode Shift+Enter as Ctrl+J, while Alt+Enter is the portable fallback
-	// on terminals that cannot report a shifted Enter key distinctly.
+	// encode Shift+Enter as Ctrl+J. Alt+Enter is an additional fallback when
+	// the terminal reports Alt distinctly; backslash-Enter works everywhere.
 	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
 
 	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(theme.TextPrimary)
@@ -241,6 +241,15 @@ func (m Model) View() string {
 		width = 80
 	}
 	return style.Width(width).Render(body)
+}
+
+// ViewBlurred renders a copy with inactive focus styling while an overlay owns
+// the keyboard. The live composer remains focused, so dismissing the overlay
+// restores typing without an extra state transition or cursor jump.
+func (m Model) ViewBlurred() string {
+	m.focused = false
+	m.ta.Blur()
+	return m.View()
 }
 
 // ViewWithPlaceholder renders a copy with a context-specific placeholder.

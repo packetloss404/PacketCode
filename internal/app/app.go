@@ -834,15 +834,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+p":
-		// Refuse to stack on approval (more urgent) or an existing picker.
-		// Ctrl+P DOES open over the jobs panel — picker's higher
-		// precedence masks it until dismissed.
-		if a.approval.Visible() || a.picker.Visible() {
+		if a.modalOwnsKeyboard() {
 			return a, nil
 		}
 		return a, a.openProviderPicker()
-	case "ctrl+m":
-		if a.approval.Visible() || a.picker.Visible() {
+	case "alt+m":
+		// Bubble Tea v1 cannot distinguish Ctrl+M from Enter. Alt+M has a
+		// distinct event when the terminal reports Alt, so it cannot be
+		// mistaken for a draft-submitting Enter.
+		if a.modalOwnsKeyboard() {
 			return a, nil
 		}
 		return a, a.openModelPicker()
@@ -893,6 +893,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 	case "ctrl+l":
+		if a.modalOwnsKeyboard() {
+			return a, nil
+		}
 		return a.handleClearCommand(nil)
 	}
 
@@ -1100,6 +1103,12 @@ func (a *App) View() string {
 	if a.width <= 0 || a.height <= 0 {
 		return ""
 	}
+	// The secret-entry prompt already owns the full terminal rectangle.
+	// Rendering the composer/status beneath it makes the inline frame taller
+	// than the terminal and clips the modal on short windows.
+	if a.prompt.Visible() {
+		return a.prompt.View()
+	}
 
 	// Inline rendering: finalised messages live in the terminal's native
 	// scrollback (committed via tea.Println on DrainEmits). The View()
@@ -1108,6 +1117,9 @@ func (a *App) View() string {
 	// autocomplete popup, input, and topbar.
 	status := a.topbar.View()
 	in := a.input.View()
+	if a.approval.Visible() || a.picker.Visible() || a.jobsPanel.Visible() {
+		in = a.input.ViewBlurred()
+	}
 	if a.agentView.Visible() {
 		// Agent View owns the screen's lifecycle summary and shortcut footer.
 		// Keep the input geometry but use its task-oriented placeholder.
@@ -1125,9 +1137,7 @@ func (a *App) View() string {
 	pending := a.conversation.PendingView()
 
 	overlay := ""
-	if a.prompt.Visible() {
-		overlay = a.prompt.View()
-	} else if a.approval.Visible() {
+	if a.approval.Visible() {
 		overlay = a.approval.View()
 	} else if a.picker.Visible() {
 		overlay = a.picker.View()
@@ -1186,6 +1196,7 @@ func (a *App) resize(w, h int) {
 	a.prompt.Resize(w, h)
 	a.autocomplete.SetWidth(w)
 	a.conversation.Resize(w, h)
+	a.refreshDefaultStatusLine()
 	// First WindowSizeMsg after startup: commit the welcome splash to
 	// scrollback via the conversation's emit queue (picked up by
 	// DrainEmits in Update).
@@ -1232,14 +1243,19 @@ func (a *App) refreshTopBar() {
 
 	// When no external statusline command is configured, render packetcode's
 	// built-in Claude Code-style statusline natively (no jq/subprocess) and
-	// feed it through the top bar's custom-line slot. Doing this here — on the
-	// same per-second tick as the rest of the top bar — keeps the live
-	// operation timer current. An external [statusline].command, when set,
+	// feed it through the top bar's custom-line slot. The per-second refresh
+	// keeps the live operation timer current; resize also recomposes the
+	// width-prioritized segments. An external [statusline].command, when set,
 	// owns the custom line instead (see renderStatusLine).
-	if a.statusLine == nil || !a.statusLine.Enabled() {
-		contentWidth := a.width - 4 // topbar has two columns of padding per side
-		a.topbar.SetCustomLine(statusline.RenderDefaultWidth(a.statusLineSnapshot(), contentWidth))
+	a.refreshDefaultStatusLine()
+}
+
+func (a *App) refreshDefaultStatusLine() {
+	if a.statusLine != nil && a.statusLine.Enabled() {
+		return
 	}
+	contentWidth := a.width - 4 // topbar has two columns of padding per side
+	a.topbar.SetCustomLine(statusline.RenderDefaultWidth(a.statusLineSnapshot(), contentWidth))
 }
 
 func (a *App) renderStatusLine(manual bool) tea.Cmd {
@@ -1432,8 +1448,7 @@ func (a *App) shouldAutoCompact(text string) bool {
 }
 
 func (a *App) queueInput(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if strings.TrimSpace(text) == "" {
 		a.input.Reset()
 		return
 	}
@@ -1441,6 +1456,15 @@ func (a *App) queueInput(text string) {
 	a.queuedInputs = append(a.queuedInputs, queuedInput{Text: text, At: time.Now()})
 	a.conversation.AppendQueuedUser(text)
 	a.refreshTopBar()
+}
+
+// modalOwnsKeyboard is the single guard for global shortcuts that open or
+// mutate content beneath overlays. Escape/cancel and live permission cycling
+// have their own explicit routing because those operations intentionally act
+// on the visible modal or pending approval.
+func (a *App) modalOwnsKeyboard() bool {
+	return a.prompt.Visible() || a.approval.Visible() || a.picker.Visible() ||
+		a.jobsPanel.Visible() || a.agentView.Visible() || a.workflowView.Visible()
 }
 
 func (a *App) clearQueuedInputs() int {
@@ -2339,6 +2363,7 @@ func plural(n int, one, many string) string {
 // Open. Appends a system message and returns nil if no providers are
 // registered — we never want to show an empty modal.
 func (a *App) openProviderPicker() tea.Cmd {
+	a.autocomplete.Close()
 	provs := a.pickerProviders()
 	if len(provs) == 0 {
 		a.conversation.AppendSystem("provider picker: no providers configured")
@@ -2412,6 +2437,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 // fires a ListModels on a background goroutine, warming the cache on
 // success.
 func (a *App) openModelPicker() tea.Cmd {
+	a.autocomplete.Close()
 	prov, active := a.deps.Registry.Active()
 	if prov == nil {
 		a.conversation.AppendSystem("model picker: no active provider")

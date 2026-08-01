@@ -1,0 +1,12 @@
+{
+  "target": "packetcode",
+  "scenario": "user-assistant",
+  "initial_width": 72,
+  "initial_height": 24,
+  "width": 72,
+  "height": 24,
+  "keys_hex": [],
+  "expected_text": [
+    "caf\u00e9 \u00b7 \u4e2d\u6587 \u00b7 \ud83d\udc69\ud83c\udffd\u200d\ud83d\udcbb"
+  ]
+}

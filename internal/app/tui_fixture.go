@@ -109,6 +109,7 @@ func (m *tuiFixtureModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.populate()
 			m.ready = true
 		}
+		m.refreshStatusLine()
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" || msg.String() == "q" || msg.String() == "esc" {
 			return m, tea.Quit
@@ -134,7 +135,9 @@ func (m *tuiFixtureModel) View() string {
 	}
 	status := m.topbar.View() + "\n  " + renderPermModeHint(m.mode)
 	in := m.input.View()
-	if m.state == "agents" {
+	if m.state == "approval" {
+		in = m.input.ViewBlurred()
+	} else if m.state == "agents" {
 		in = m.input.ViewWithPlaceholder("press n to dispatch a new agent")
 		status = ""
 	} else if m.state == "workflows" {
@@ -144,7 +147,7 @@ func (m *tuiFixtureModel) View() string {
 	return layout.Frame(m.conversation.View(), overlay, "", in, status)
 }
 
-func (m *tuiFixtureModel) populate() {
+func (m *tuiFixtureModel) refreshStatusLine() {
 	m.topbar.SetCustomLine(statusline.RenderDefaultWidth(statusline.Snapshot{
 		Provider:      statusline.ProviderInfo{DisplayName: "Codex (ChatGPT)"},
 		Model:         statusline.ModelInfo{ID: "gpt-5.6-sol", ReasoningEffort: "high"},
@@ -152,9 +155,12 @@ func (m *tuiFixtureModel) populate() {
 		Project:       "packetcode",
 		GitBranch:     "main",
 	}, m.width-4))
+}
+
+func (m *tuiFixtureModel) populate() {
 	switch m.state {
 	case "user-assistant":
-		m.conversation.AppendUser("Summarize the current change.")
+		m.conversation.AppendUser("Summarize the current change with Unicode: café · 中文 · 👩🏽‍💻.")
 		m.conversation.AppendAgentText("gpt-5.6-sol", "codex", "The context accounting and TUI parity changes are ready for review.")
 		m.conversation.FinaliseAgent()
 	case "thinking":

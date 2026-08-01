@@ -536,7 +536,7 @@ func TestApp_Provider_NoModelFallback(t *testing.T) {
 
 // TestApp_Model_List verifies bare /model opens the centred picker
 // modal rather than printing a table into the conversation. Loader
-// error handling is covered by TestApp_CtrlM_ListError, which shares
+// error handling is covered by TestApp_AltM_ListError, which shares
 // the same openModelPicker code path.
 func TestApp_Model_List(t *testing.T) {
 	r := newTestApp(t)
@@ -1609,6 +1609,24 @@ func TestApp_StatusLineAutoRefreshThrottlesWhileTopbarTicks(t *testing.T) {
 	}
 	if got := r.app.renderStatusLine(false); got != nil {
 		t.Fatalf("automatic statusline render should respect refresh interval")
+	}
+}
+
+func TestApp_ResizeRecomposesBuiltInStatusLine(t *testing.T) {
+	r := newTestApp(t)
+	r.app.statusLine = nil
+
+	r.app.resize(100, 30)
+	wide := r.app.topbar.CustomLine()
+	r.app.resize(50, 24)
+	got := r.app.topbar.CustomLine()
+	want := statusline.RenderDefaultWidth(r.app.statusLineSnapshot(), 46)
+
+	if got != want {
+		t.Fatalf("resized built-in status line retained wide layout\n got: %q\nwant: %q", got, want)
+	}
+	if got == wide {
+		t.Fatalf("built-in status line did not change across width reduction: %q", got)
 	}
 }
 

@@ -1,0 +1,10 @@
+{
+  "target": "packetcode",
+  "scenario": "workflows",
+  "initial_width": 72,
+  "initial_height": 24,
+  "width": 72,
+  "height": 24,
+  "keys_hex": [],
+  "expected_text": []
+}

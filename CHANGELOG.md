@@ -53,6 +53,10 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Full-screen Agent workspace with grouped state, direct task entry, transcripts, peek, cancellation, explicit injection, and compact artifact manifests.
 - Per-job and per-workflow token budgets.
 - Deterministic credential-free TUI lifecycle fixtures and a PTY/cell capture harness for packetcode/Claude comparisons at fixed terminal sizes.
+- Reviewed credential-free TUI text-and-style cell goldens at 72×24 and
+  100×30, a post-SIGWINCH live-resize fixture, raw terminal-protocol safety
+  checks, pinned PTY tooling, and CI/release gates. Supported terminal geometry
+  and platform evidence are now documented explicitly.
 - Runtime `/effort` control for Codex models, including catalog-advertised levels, persistent configuration, and a compact footer indicator.
 - A practical user manual, advanced operator guide, printable terminal cheat sheet, and self-contained offline HTML5 manual.
 - A root-level maintainer handoff covering architecture, state and security boundaries, verification, interaction caveats, and prioritized next work.
@@ -70,6 +74,9 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - High-frequency background-job activity snapshots are coalesced while queued/running/terminal transitions remain synchronous and recovery-safe.
 - Documentation was consolidated around current behavior; shipped `Round N` design specs are now concise implementation/user guides.
 - The built-in agent prompt now encourages parallel fan-out for independent work, while Agent View separates list shortcuts from its explicit `n` task composer.
+- The model picker uses `Alt+M` (or `/model`) instead of the unsafe Bubble Tea
+  v1 `Ctrl+M`/Enter alias. Global picker and clear shortcuts no longer mutate
+  content beneath a visible modal or workspace.
 
 ### Fixed
 
@@ -83,7 +90,13 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 - Prompt editing now respects the caret for file mentions, supports portable multiline bindings, honors `max_input_rows`, keeps history navigation at visual-row boundaries, and clears a draft before Ctrl+C exits.
 - Terminal-originated text is sanitized before rendering, preventing tool output from enabling mouse modes, writing the clipboard, or corrupting the TUI; split UTF-8 and progress-line output remain intact.
 - Statuslines stay on one row at narrow widths, background transcripts refresh without losing scroll position, and reasoning activity is visible while an agent is thinking.
+- Built-in statusline segments are recomposed after a terminal resize instead
+  of retaining a wide-layout selection and clipping it at the new width.
 - Git branch refreshes no longer block the Bubble Tea event loop, and approval prompts wake the UI on demand instead of forcing continuous idle redraws.
+- Queued prompts preserve leading indentation and trailing newlines exactly.
+  Secret-entry prompts own the terminal geometry instead of rendering above an
+  extra composer/status footer, and inactive composers render blurred beneath
+  overlays.
 
 ## [0.5.1] - 2026-05-30
 

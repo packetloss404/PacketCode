@@ -105,14 +105,14 @@ Completed turns move into your terminal's normal scrollback. The small live area
 | Key | Action |
 | --- | --- |
 | `Enter` | Send the prompt. |
-| `Ctrl+J` or `Alt+Enter` | Insert a newline; while completion is open, `Ctrl+J` moves its selection instead. |
+| `Ctrl+J` or `\` then `Enter` | Insert a portable newline; `Alt+Enter` also works when Alt is reported distinctly. While completion is open, `Ctrl+J` moves its selection instead. |
 | `\` then `Enter` | Portable newline fallback. |
-| `Shift+Enter` | Insert a newline when the terminal reports it distinctly. |
+| `Shift+Enter` | Insert a newline only when the terminal maps it to `Ctrl+J`; otherwise use a portable fallback. |
 | `Up` / `Down` | Recall prompt history when the caret is on the first/last visual input row. |
 | `Shift+Tab` | Cycle Manual → Accept Edits → Auto → Plan. |
 | `Left` on an empty, idle prompt | Open Agent View. |
 | `Ctrl+P` | Open the provider picker. |
-| `/model` | Open the model picker; `Ctrl+M` is terminal-dependent. |
+| `/model` | Open the model picker; `Alt+M` also works when Alt is reported distinctly. |
 | `Ctrl+C` | Cancel active work, clear a draft, or quit from an empty prompt. |
 | `Ctrl+D` | Quit from an empty prompt. |
 | `Ctrl+L` | Clear visible output while keeping the saved session. |
@@ -122,7 +122,7 @@ The input grows to multiple rows as needed. Its default maximum height is 10 row
 
 ### Multiline prompts
 
-Use `Alt+Enter` or `\` followed by `Enter` for a newline in every input state. `Ctrl+J` is convenient while completion is closed. For example:
+Use `\` followed by `Enter` for a newline in every input state. `Ctrl+J` is convenient while completion is closed; `Alt+Enter` also works when the terminal reports Alt distinctly. For example:
 
 ```text
 Review these areas:
@@ -131,7 +131,7 @@ Review these areas:
 - tests
 ```
 
-`Shift+Enter` also works in terminals that send it as a distinct key. Some terminals do not distinguish it from ordinary Enter, which is why the portable alternatives exist.
+`Shift+Enter` works only in terminals that map it to `Ctrl+J`. Bubble Tea v1 cannot safely distinguish a true `Shift+Enter` event from ordinary Enter, which is why the portable alternatives remain authoritative.
 
 ### File mentions with `@`
 
@@ -294,7 +294,7 @@ Custom slugs default to `PACKETCODE_<NORMALIZED_SLUG>_API_KEY` unless `api_key_e
 
 ### Switch models
 
-Open the model picker reliably with `/model` (`Ctrl+M` is available when the terminal reports it distinctly), or switch directly:
+Open the model picker portably with `/model` (`Alt+M` also works when Alt is reported distinctly), or switch directly:
 
 ```text
 /model gpt-5.6-sol
@@ -771,6 +771,10 @@ Use `/mcp`, `/mcp status <name>`, and `/mcp logs <name>`. Check that its executa
 ### You cannot scroll
 
 Completed output uses terminal-native scrollback. Use your terminal's scroll controls, Shift+PageUp, or tmux copy mode. `/transcript` opens the persisted conversation.
+
+PacketCode keeps mouse tracking and alternate-screen mode disabled. The
+validated geometry and platform matrix is documented in
+[Supported terminals](supported-terminals.md).
 
 ### The context gauge grows quickly
 

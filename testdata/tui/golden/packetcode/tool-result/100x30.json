@@ -1,0 +1,10 @@
+{
+  "target": "packetcode",
+  "scenario": "tool-result",
+  "initial_width": 100,
+  "initial_height": 30,
+  "width": 100,
+  "height": 30,
+  "keys_hex": [],
+  "expected_text": []
+}

@@ -26,7 +26,7 @@ The packetcode `gemini` provider uses Google's developer API directly and does n
 
 ## Model Switch Fails
 
-Use `/model` to load the active account's exact model IDs (`Ctrl+M` is terminal-dependent). Curated fallback catalogs keep some providers selectable when `/models` is unavailable, but the next request remains authoritative. Run `packetcode doctor --check providers` for credential/connectivity failures.
+Use `/model` to load the active account's exact model IDs (`Alt+M` also works when Alt is reported distinctly). Curated fallback catalogs keep some providers selectable when `/models` is unavailable, but the next request remains authoritative. Run `packetcode doctor --check providers` for credential/connectivity failures.
 
 ## Ollama Is Unreachable or Slow
 
@@ -104,6 +104,9 @@ Commands run through PowerShell on Windows and `sh -c` elsewhere, with the proje
 ## Cannot Scroll
 
 Finalized output is in terminal-native scrollback. Use terminal scrolling, Shift+PageUp, or tmux copy mode. `/transcript` opens persisted session history. `/clear` and Ctrl+L clear only visible packetcode output.
+
+For key and geometry differences across Windows Terminal, macOS, Linux, WSL,
+MSYS, and tmux, see [Supported terminals](supported-terminals.md).
 
 ## Unknown Slash Command
 

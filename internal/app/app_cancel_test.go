@@ -439,6 +439,23 @@ func TestApp_SubmitWhileStreamingQueuesAndRunsNext(t *testing.T) {
 	}
 }
 
+func TestApp_QueueInputPreservesWhitespace(t *testing.T) {
+	r := newTestApp(t)
+	want := "  indented\nbody\n"
+	r.app.queueInput(want)
+	if got := len(r.app.queuedInputs); got != 1 {
+		t.Fatalf("queuedInputs = %d, want 1", got)
+	}
+	if got := r.app.queuedInputs[0].Text; got != want {
+		t.Fatalf("queued text = %q, want exact %q", got, want)
+	}
+
+	r.app.queueInput(" \n\t ")
+	if got := len(r.app.queuedInputs); got != 1 {
+		t.Fatalf("blank input changed queue length to %d", got)
+	}
+}
+
 func TestApp_CtrlC_ClearsMultipleQueuedPromptsAndDoesNotRunThem(t *testing.T) {
 	r := newTestApp(t)
 	prov := &releaseProvider{release: make(chan struct{})}

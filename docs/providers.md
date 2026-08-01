@@ -116,7 +116,7 @@ converted to `_`; set `api_key_env` to use a different variable.
 | Open provider picker | `Ctrl+P` or `/provider` |
 | Add/update provider key | `Ctrl+P` then `Ctrl+A`, `/provider add`, or `/provider add <slug>` |
 | Switch directly | `/provider <slug>` |
-| Open model picker | `/model`; `Ctrl+M` when the terminal reports it distinctly |
+| Open model picker | `/model`; `Alt+M` when Alt is reported distinctly |
 | Switch model directly | `/model <id>` |
 
 When switching providers, packetcode uses that provider's saved `default_model`. If no default model is saved, it falls back to the first model returned by the provider's model list. The chosen provider/model is persisted as the new default.

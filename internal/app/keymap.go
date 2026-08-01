@@ -5,7 +5,7 @@ package app
 var (
 	GlobalKeys = []KeyHelp{
 		{"Ctrl+P", "Open provider picker"},
-		{"/model", "Open model picker (Ctrl+M also works when the terminal reports it distinctly)"},
+		{"/model", "Open model picker (Alt+M when Alt is reported distinctly)"},
 		{"Shift+Tab", "Cycle permission mode, including during an active turn (normal → accept edits → auto → plan)"},
 		{"Ctrl+C", "Cancel generation, clear a draft, or quit from an empty prompt"},
 		{"Ctrl+D", "Quit from an empty prompt"},
@@ -39,7 +39,7 @@ var (
 		{"Esc", "Dismiss popup (keep typed text)"},
 	}
 	// PickerKeys documents the generic picker modal's bindings. The
-	// provider (Ctrl+P) and model (Ctrl+M) pickers both honour every
+	// provider (Ctrl+P) and model (Alt+M) pickers both honour every
 	// row below.
 	PickerKeys = []KeyHelp{
 		{"↑/↓", "Move cursor"},

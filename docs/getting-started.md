@@ -44,11 +44,11 @@ packetcode doctor --json
 | Key | Action |
 | --- | --- |
 | `Enter` | Send. |
-| `Alt+Enter` / `\` then Enter | Portable newline; `Ctrl+J` also works while completion is closed, and Shift+Enter works when distinctly reported. |
+| `Ctrl+J` / `\` then Enter | Portable newline; `Alt+Enter` also works when Alt is reported distinctly. Shift+Enter works only when the terminal maps it to Ctrl+J. |
 | `Up` / `Down` | Prompt history at the input boundary. |
 | `Shift+Tab` | Cycle Manual → Accept Edits → Auto → Plan, even during a turn. |
 | `Left` on an empty prompt | Open Agent View. |
-| `Ctrl+P` / `/model` | Provider/model picker; `Ctrl+M` is terminal-dependent. |
+| `Ctrl+P` / `/model` | Provider/model picker; `Alt+M` also works when Alt is reported distinctly. |
 | `Ctrl+C` | Cancel active work, clear a draft, or quit from an empty prompt. |
 | `Ctrl+L` | Clear visible output, keep the saved session. |
 

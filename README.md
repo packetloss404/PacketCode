@@ -72,17 +72,17 @@ See [Providers and models](docs/providers.md) for authentication, model discover
 
 ## Terminal Workflow
 
-Type a prompt and press `Enter`; use `Ctrl+J`, `Alt+Enter`, or `\` then `Enter` for a portable newline. `Shift+Enter` also works in terminals that report it distinctly. Finalized turns are committed to native terminal scrollback while the active response remains in a small live region.
+Type a prompt and press `Enter`; use `Ctrl+J` or `\` then `Enter` for a portable newline. `Alt+Enter` also works when the terminal reports Alt distinctly. `Shift+Enter` works only where the terminal maps it to `Ctrl+J`; true shifted-key reporting is reserved for the Bubble Tea v2 migration. Finalized turns are committed to native terminal scrollback while the active response remains in a small live region.
 
 | Key | Action |
 | --- | --- |
 | `Enter` | Send a prompt. |
-| `Alt+Enter` / `\` then `Enter` | Insert a portable newline; `Ctrl+J` also does so while completion is closed. |
+| `Ctrl+J` / `\` then `Enter` | Insert a portable newline; `Alt+Enter` also works when Alt is reported distinctly. |
 | `Up` / `Down` | Recall prompt history at the first/last input line. |
 | `Shift+Tab` | Cycle Manual → Accept Edits → Auto → Plan, including during an active turn. |
 | `Left` on an empty idle prompt | Open Agent View. |
 | `Ctrl+P` | Open the provider picker. |
-| `/model` | Open the model picker; `Ctrl+M` also works when the terminal reports it distinctly. |
+| `/model` | Open the model picker; `Alt+M` also works when Alt is reported distinctly. |
 | `Ctrl+C` | Cancel the active turn, clear a draft, or quit from an empty prompt. |
 | `Ctrl+D` | Quit from an empty prompt. |
 | `Ctrl+L` | Clear the visible transcript without deleting the session. |
@@ -270,6 +270,7 @@ See [MCP servers](docs/mcp.md), [Hooks and statusline](docs/hooks-and-statusline
 - [Hooks and statusline](docs/hooks-and-statusline.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [TUI parity harness](docs/tui-parity-harness.md)
+- [Supported terminals](docs/supported-terminals.md)
 - [Packet Computers registry](docs/feature-packet-computers.md)
 - [Backlog](BACKLOG.md)
 - [Packet Computers and Packet Control proposal](PACKETCOMPUTERS.md) — product
@@ -291,6 +292,7 @@ go test -race -count=1 ./...
 make build
 make smoke
 make tui-snapshots
+make tui-golden-check
 ```
 
 The credential-free `--tui-fixture=<state>` development flag renders deterministic lifecycle states for PTY snapshots without loading config, providers, credentials, sessions, hooks, MCP, or project files.
