@@ -6,6 +6,22 @@ A keyboard-first, multi-provider coding agent for the terminal, with a Claude Co
 
 packetcode keeps the conversation, tools, approvals, background agents, and workflows in one terminal interface. It can inspect and edit the current project, execute commands, delegate work, connect to MCP tools, and use hosted or local models without routing through OpenCode.
 
+## Interface
+
+<p align="center">
+  <img src="docs/images/packetcode-chat.png" alt="Packetcode chat interface using the Codex provider, with the prompt composer and native statusline" width="100%">
+</p>
+
+Permission-aware tool execution and the full background Agent workspace:
+
+<p align="center">
+  <a href="docs/images/packetcode-approval.png"><img src="docs/images/packetcode-approval.png" alt="Packetcode command approval interface" width="49%"></a>
+  <a href="docs/images/packetcode-agents.png"><img src="docs/images/packetcode-agents.png" alt="Packetcode background Agent View" width="49%"></a>
+</p>
+
+These screenshots are rendered from the deterministic TUI fixtures used by
+the release-gating terminal test suite.
+
 ## Install
 
 Install the latest macOS or Linux release:
