@@ -423,3 +423,34 @@ func TestBackupManager_CleanupSessionRejectsTraversal(t *testing.T) {
 	_, err := os.Stat(outside)
 	require.NoError(t, err)
 }
+
+func TestManagerBindWorkspacePersistsRemoteIdentity(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	created, err := m.New("minimax", "MiniMax-M3")
+	require.NoError(t, err)
+	require.NoError(t, m.BindWorkspace("pc_production", "/srv/app", "pcws_sha256:approved"))
+
+	reloaded := NewManager(dir)
+	s, err := reloaded.Load(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "pc_production", s.ComputerID)
+	assert.Equal(t, "/srv/app", s.WorkingDir)
+	assert.Equal(t, "pcws_sha256:approved", s.WorkspaceIdentity)
+}
+
+func TestValidateWorkspaceRefusesCrossComputerResume(t *testing.T) {
+	remote := &Session{ID: "remote", ComputerID: "pc_production", WorkingDir: "/srv/app", WorkspaceIdentity: "pcws_sha256:approved"}
+	require.NoError(t, ValidateWorkspace(remote, "pc_production", "/srv/app", "pcws_sha256:approved"))
+	require.Error(t, ValidateWorkspace(remote, "pc_staging", "/srv/app"))
+	require.Error(t, ValidateWorkspace(remote, "", ""))
+	require.Error(t, ValidateWorkspace(remote, "pc_production", "/srv/app", "pcws_sha256:replacement"))
+	require.Error(t, ValidateWorkspace(remote, "pc_production", "/srv/app"))
+
+	legacyLocal := &Session{ID: "local"}
+	require.NoError(t, ValidateWorkspace(legacyLocal, "", ""))
+	require.Error(t, ValidateWorkspace(legacyLocal, "pc_production", "/srv/app"))
+
+	legacyRemote := &Session{ID: "legacy", ComputerID: "pc_production", WorkingDir: "/srv/app"}
+	require.NoError(t, ValidateWorkspace(legacyRemote, "pc_production", "/srv/app", "pcws_sha256:new"))
+}

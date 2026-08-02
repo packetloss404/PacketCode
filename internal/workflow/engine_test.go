@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -30,6 +32,16 @@ type fakeProvider struct {
 	spawns       int32
 	verifierRuns int32
 }
+
+type routedTestBackend struct {
+	computers.RuntimeBackend
+	computerID string
+	root       string
+}
+
+func (b *routedTestBackend) ComputerID() string   { return b.computerID }
+func (b *routedTestBackend) Kind() computers.Kind { return computers.KindSSH }
+func (b *routedTestBackend) Root() string         { return b.root }
 
 func (f *fakeProvider) Name() string                                  { return "fake" }
 func (f *fakeProvider) Slug() string                                  { return "fake" }
@@ -158,6 +170,78 @@ func waitRun(t *testing.T, e *Engine, id string, want RunState, timeout time.Dur
 	snap, _ := e.Get(id)
 	t.Fatalf("run %s did not reach %s within %s (state=%s err=%s)", id, want, timeout, snap.State, snap.Err)
 	return RunSnapshot{}
+}
+
+func TestEngine_StartWithOptionsRoutesAttemptsRetriesAndVerifier(t *testing.T) {
+	prov := &fakeProvider{}
+	remoteRoot := t.TempDir()
+	mgr := newTestManager(t, prov, func(cfg *jobs.Config) {
+		cfg.ResolveWorkspace = func(selector string) (jobs.Workspace, error) {
+			if selector != "production" {
+				return jobs.Workspace{}, fmt.Errorf("unexpected selector %q", selector)
+			}
+			return jobs.Workspace{
+				ComputerID:   "pc_production",
+				ComputerName: "production",
+				WorkingDir:   "/srv/app",
+				Identity:     "test-endpoint-identity",
+				Kind:         computers.KindSSH,
+			}, nil
+		}
+		cfg.OpenBackend = func(context.Context, jobs.Workspace) (computers.RuntimeBackend, error) {
+			// The scripted provider invokes no tools. A local backend is enough
+			// to exercise independent worker backend ownership without SSH.
+			local, err := computers.NewLocalBackend(remoteRoot)
+			if err != nil {
+				return nil, err
+			}
+			return &routedTestBackend{
+				RuntimeBackend: local,
+				computerID:     "pc_production",
+				root:           "/srv/app",
+			}, nil
+		}
+	})
+	e := NewEngine(mgr)
+	wf := Workflow{
+		Name: "routed-retry",
+		Phases: []Phase{{Name: "p", Steps: []Step{
+			verifiedStep("VERIFY_FAIL_ONCE", 1),
+		}}},
+	}
+
+	run, err := e.StartWithOptions(context.Background(), wf, RunOptions{Computer: " production "})
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunCompleted, 5*time.Second)
+	require.Equal(t, "production", snap.Computer)
+	require.Equal(t, "pc_production", snap.ComputerID)
+	require.Equal(t, "production", snap.ComputerName)
+	require.Equal(t, "/srv/app", snap.WorkingDir)
+	require.Equal(t, "production", snap.TargetLabel())
+
+	// Two work attempts and two verifier runs must all carry the same
+	// manager-resolved target.
+	allJobs := mgr.List()
+	require.Len(t, allJobs, 4)
+	for _, job := range allJobs {
+		require.Equal(t, "pc_production", job.ComputerID, job.ID)
+		require.Equal(t, "production", job.ComputerName, job.ID)
+		require.Equal(t, "/srv/app", job.WorkingDir, job.ID)
+	}
+}
+
+func TestEngine_StartCompatibilityUsesManagerDefault(t *testing.T) {
+	prov := &fakeProvider{}
+	mgr := newTestManager(t, prov)
+	e := NewEngine(mgr)
+	wf := Workflow{Name: "compat", Phases: []Phase{{Name: "p", Steps: []Step{{Name: "s", Agent: AgentSpec{Prompt: "work"}}}}}}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunCompleted, 5*time.Second)
+	require.Empty(t, snap.Computer)
+	require.Empty(t, snap.ComputerID)
+	require.Equal(t, mgr.List()[0].WorkingDir, snap.WorkingDir)
 }
 
 // Test: a parallel step spawns N agents and joins them into StepResult.Agents.

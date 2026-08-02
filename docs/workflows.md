@@ -11,7 +11,7 @@ independent, read-only verifier and a hard retry cap.
 /workflows
 /workflows list
 /workflows validate <name>
-/workflows run <name> [key=value...]
+/workflows run [--computer <name>] <name> [key=value...]
 /workflows <run-id>
 /workflows stop <run-id>
 /workflows stop all
@@ -21,6 +21,11 @@ independent, read-only verifier and a hard retry cap.
 templates, and reports verified versus unverified steps without starting any
 agent or spending tokens.
 
+In a remote foreground session, every work agent, retry, and verifier inherits
+the active Packet Computer. From a local session, `--computer <name>` routes
+the whole run to that registered SSH computer. Placement is a run option, not
+part of workflow schema v1; a run cannot silently fan out across computers.
+
 Definitions are resolved in this order, highest precedence first:
 
 1. `<project>/.packetcode/workflows/<name>.toml`
@@ -29,6 +34,15 @@ Definitions are resolved in this order, highest precedence first:
 
 A malformed higher-precedence file fails loudly; Packetcode never falls back
 to a lower-precedence definition with the same name.
+
+For remote foreground sessions, project-scoped definitions on the server are
+not synchronously scanned over SFTP. Built-ins and local user definitions are
+available; remote project discovery is deferred to an asynchronous loader.
+
+Every write-enabled workflow agent still receives its own isolated worktree.
+Later steps receive prior summaries through template bindings, but do not
+automatically share prior filesystem edits. Keep one cohesive mutation in one
+write step; a workflow-scoped shared worktree is a later runtime feature.
 
 ## Version 1 schema
 

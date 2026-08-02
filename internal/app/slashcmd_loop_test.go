@@ -45,6 +45,49 @@ func TestParseWorkflowInputOverridesQuotedValues(t *testing.T) {
 	}
 }
 
+func TestParseWorkflowRunArgsComputerPlacement(t *testing.T) {
+	name, opts, inputs, err := parseWorkflowRunArgs([]string{
+		"--computer", "production", "review", `target="the`, "staged", `diff"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "review" || opts.Computer != "production" {
+		t.Fatalf("parseWorkflowRunArgs target = (%q, %q)", name, opts.Computer)
+	}
+	if got := parseInputOverrides(inputs)["target"]; got != "the staged diff" {
+		t.Fatalf("target override = %q", got)
+	}
+}
+
+func TestParseWorkflowRunArgsCompatibilityAndFlagErrors(t *testing.T) {
+	name, opts, inputs, err := parseWorkflowRunArgs([]string{"review", "target=tree"})
+	if err != nil || name != "review" || opts.Computer != "" || len(inputs) != 1 {
+		t.Fatalf("legacy syntax parsed as (%q, %#v, %#v, %v)", name, opts, inputs, err)
+	}
+	if _, _, _, err := parseWorkflowRunArgs([]string{"--computer"}); err == nil {
+		t.Fatal("expected missing --computer value error")
+	}
+	if _, _, _, err := parseWorkflowRunArgs([]string{"review", "--computer", "production"}); err == nil {
+		t.Fatal("expected placement-after-name error")
+	}
+	if _, _, _, err := parseWorkflowRunArgs([]string{"--mystery", "review"}); err == nil {
+		t.Fatal("expected unknown flag error")
+	}
+}
+
+func TestWorkflowRunTargetPrefersResolvedName(t *testing.T) {
+	run := workflow.RunSnapshot{
+		Computer:     "prod-alias",
+		ComputerID:   "pc_123",
+		ComputerName: "production",
+		WorkingDir:   "/srv/app",
+	}
+	if got := workflowRunTarget(run); got != "production" {
+		t.Fatalf("workflowRunTarget = %q", got)
+	}
+}
+
 func TestParseLoopArgs(t *testing.T) {
 	cases := []struct {
 		args     []string

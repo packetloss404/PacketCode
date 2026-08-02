@@ -24,15 +24,21 @@ import (
 
 // Session is the in-memory + on-disk record of a single conversation.
 type Session struct {
-	ID         string             `json:"id"`
-	Name       string             `json:"name"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
-	Provider   string             `json:"provider"`
-	Model      string             `json:"model"`
-	Messages   []provider.Message `json:"messages"`
-	TokenUsage TokenUsage         `json:"token_usage"`
-	Cost       CostInfo           `json:"cost"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	ComputerID string    `json:"computer_id,omitempty"`
+	WorkingDir string    `json:"working_dir,omitempty"`
+	// WorkspaceIdentity binds new remote sessions to endpoint, pinned host
+	// key, and registered root in addition to the user-facing computer id.
+	// Legacy sessions may omit it and retain the older id/root validation.
+	WorkspaceIdentity string             `json:"workspace_identity,omitempty"`
+	Messages          []provider.Message `json:"messages"`
+	TokenUsage        TokenUsage         `json:"token_usage"`
+	Cost              CostInfo           `json:"cost"`
 }
 
 type TokenUsage struct {
@@ -97,6 +103,60 @@ func (m *Manager) New(providerSlug, model string) (*Session, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// BindWorkspace records the remote computer identity for the active session.
+// Local sessions deliberately remain unbound for backward compatibility with
+// PacketCode's historically portable local transcripts.
+func (m *Manager) BindWorkspace(computerID, workingDir string, workspaceIdentity ...string) error {
+	m.mu.Lock()
+	if m.current == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("bind workspace: no current session")
+	}
+	m.current.ComputerID = strings.TrimSpace(computerID)
+	m.current.WorkingDir = strings.TrimSpace(workingDir)
+	m.current.WorkspaceIdentity = optionalIdentity(workspaceIdentity)
+	m.mu.Unlock()
+	return m.Save()
+}
+
+// ValidateWorkspace prevents a remote transcript from being resumed against a
+// different computer (or against the local filesystem) and prevents an older
+// local transcript from being silently attached to a remote machine.
+func ValidateWorkspace(s *Session, computerID, workingDir string, workspaceIdentity ...string) error {
+	if s == nil {
+		return fmt.Errorf("session is nil")
+	}
+	computerID = strings.TrimSpace(computerID)
+	workingDir = strings.TrimSpace(workingDir)
+	identity := optionalIdentity(workspaceIdentity)
+	if s.ComputerID == "" {
+		if computerID != "" {
+			return fmt.Errorf("session %s is not bound to a Packet Computer; start a new SSH session", s.ID)
+		}
+		return nil
+	}
+	if computerID == "" {
+		return fmt.Errorf("session %s belongs to Packet Computer %s; restart with --computer", s.ID, s.ComputerID)
+	}
+	if s.ComputerID != computerID {
+		return fmt.Errorf("session %s belongs to Packet Computer %s, not %s", s.ID, s.ComputerID, computerID)
+	}
+	if s.WorkingDir != "" && workingDir != "" && s.WorkingDir != workingDir {
+		return fmt.Errorf("session %s belongs to remote root %s, not %s", s.ID, s.WorkingDir, workingDir)
+	}
+	if s.WorkspaceIdentity != "" && s.WorkspaceIdentity != identity {
+		return fmt.Errorf("session %s belongs to a different Packet Computer endpoint or registered root", s.ID)
+	}
+	return nil
+}
+
+func optionalIdentity(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[0])
 }
 
 // Current returns a defensive copy of the active session (nil if none).

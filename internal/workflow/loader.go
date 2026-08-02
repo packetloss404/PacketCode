@@ -17,7 +17,7 @@ import (
 // <project>/.packetcode/workflows/*.toml. A project file named foo.toml
 // overrides a user file foo.toml, which overrides a built-in named foo.
 type Loader struct {
-	workingDir string
+	projectDir string
 }
 
 // NewLoader constructs a Loader rooted at workingDir for project-scoped specs.
@@ -25,8 +25,16 @@ func NewLoader(workingDir string) *Loader {
 	if strings.TrimSpace(workingDir) == "" {
 		workingDir = "."
 	}
-	return &Loader{workingDir: workingDir}
+	return &Loader{projectDir: workingDir}
 }
+
+// NewRemoteLoader constructs a loader that exposes built-in and user-level
+// workflows without probing a project directory on the controller machine.
+// A remote POSIX root is not a local filesystem path, and silently loading
+// .packetcode/workflows from the directory packetcode happened to launch in
+// could apply an unrelated local override to a server. Remote project workflow
+// discovery belongs in a backend-aware asynchronous loader.
+func NewRemoteLoader() *Loader { return &Loader{} }
 
 // List returns every known workflow name (built-ins plus files), sorted.
 func (l *Loader) List() []string {
@@ -86,7 +94,9 @@ func (l *Loader) dirs() []string {
 	if home, err := config.HomeDir(); err == nil {
 		dirs = append(dirs, filepath.Join(home, "workflows"))
 	}
-	dirs = append(dirs, filepath.Join(l.workingDir, ".packetcode", "workflows"))
+	if strings.TrimSpace(l.projectDir) != "" {
+		dirs = append(dirs, filepath.Join(l.projectDir, ".packetcode", "workflows"))
+	}
 	return dirs
 }
 

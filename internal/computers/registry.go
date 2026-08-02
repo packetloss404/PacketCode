@@ -1,9 +1,11 @@
 package computers
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -106,6 +108,40 @@ func (r *Registry) Get(name string) (Computer, bool) {
 		}
 	}
 	return Computer{}, false
+}
+
+// GetByID returns the computer with the exact stable id. Persisted jobs use it
+// during resubmission so a historical run is never silently rebound by name.
+func (r *Registry) GetByID(id string) (Computer, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.byID[strings.TrimSpace(id)]
+	return c, ok
+}
+
+// WorkspaceIdentity returns a stable, non-secret digest of the endpoint and
+// registered root a remote job is bound to. It deliberately excludes the
+// mutable display name and registry id while including the pinned host key, so
+// resubmission fails if a record is repointed or re-keyed under the same id.
+func WorkspaceIdentity(c Computer, workingDir string) string {
+	port := c.SSHPort
+	if port == 0 {
+		port = 22
+	}
+	root := strings.TrimSpace(workingDir)
+	if c.Kind == KindSSH {
+		root = path.Clean(root)
+	}
+	material := strings.Join([]string{
+		string(c.Kind),
+		strings.TrimSpace(c.SSHUser),
+		strings.ToLower(strings.TrimSpace(c.SSHHost)),
+		fmt.Sprintf("%d", port),
+		strings.TrimSpace(c.SSHHostFingerprint),
+		root,
+	}, "\x00")
+	sum := sha256.Sum256([]byte(material))
+	return fmt.Sprintf("pcws_sha256_%x", sum[:])
 }
 
 // Upsert validates and stores c, then persists the registry. Names are

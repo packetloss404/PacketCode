@@ -103,6 +103,19 @@ func TestStepHeaderText_ShowsVerificationAndRetries(t *testing.T) {
 	}
 }
 
+func TestRunHeaderText_ShowsResolvedComputer(t *testing.T) {
+	got := runHeaderText(workflow.RunSnapshot{
+		ID:           "wf-1",
+		Workflow:     "review",
+		Computer:     "prod-alias",
+		ComputerName: "production",
+		WorkingDir:   "/srv/app",
+	})
+	if got != "wf-1  review  @production" {
+		t.Fatalf("runHeaderText = %q", got)
+	}
+}
+
 func TestWorkflowView_LabelsVerifierRows(t *testing.T) {
 	runs := sampleRuns()
 	runs[0].Phases[0].Steps[0].Agents = []workflow.AgentSnapshot{{

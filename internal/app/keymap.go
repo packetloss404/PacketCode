@@ -56,15 +56,17 @@ var (
 	// into the input bar. Displayed by /help; the actual parsing lives
 	// in internal/app/slashcmd.go.
 	SlashCommands = []KeyHelp{
-		{"/spawn <prompt>", "Spawn a background agent"},
+		{"/spawn [--computer <name>] [--write] <prompt>", "Spawn a local or Packet Computer background agent"},
 		{"/agents", "List background agents"},
 		{"/agents <id>", "View a background agent transcript"},
 		{"/jobs", "List background jobs"},
 		{"/jobs <id>", "View a job's transcript"},
 		{"/jobs resubmit [id]", "Re-run a job abandoned by a previous app exit (new run, not a resumption)"},
 		{"/cancel <id|all>", "Cancel a job"},
-		{"/computers", "List registered Packet Computers (registry-only; nothing connects yet)"},
+		{"/computers", "List registered Packet Computers"},
 		{"/computers status <name>", "Show a registered computer's stored record"},
+		{"/computers ssh <name> <user@host> <root> --fingerprint <SHA256:...>", "Register a pinned SSH computer"},
+		{"/computers remove <name> --yes", "Remove a computer record"},
 		{"/provider [add [slug]|slug]", "Open picker, add key, or switch active"},
 		{"/providers", "Alias for /provider — open the provider picker"},
 		{"/model [id]", "List models or switch active"},
@@ -82,7 +84,7 @@ var (
 		{"/cost", "Show cost breakdown (reset --yes to clear)"},
 		{"/plan [on|off]", "Read-only research mode: propose a plan before editing"},
 		{"/loop [interval] <prompt|/cmd>", "Repeat a prompt/command (interval or self-paced); /loop list, /loop stop"},
-		{"/workflows [run <name>|validate <name>|list|stop [id|all]|<id>]", "Run, validate, and monitor multi-agent workflows"},
+		{"/workflows [run [--computer <name>] <name>|validate <name>|list|stop [id|all]|<id>]", "Run, validate, and monitor local or remote multi-agent workflows"},
 		{"/trust [on|off]", "Toggle 'bypass permissions' (auto-approve all tools; not in the Shift+Tab cycle)"},
 		{"/permissions", "Show or change tool approval policy"},
 		{"/help", "Show this help message"},

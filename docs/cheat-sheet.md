@@ -26,8 +26,8 @@ packetcode doctor --json
 | Chosen agent model | `/spawn --provider codex --model gpt-5.6-sol audit auth` |
 | Isolated write agent | `/spawn --write fix the focused tests` |
 | Agent control | `/agents`, `/agents <id>`, `/jobs [id]`, `/jobs resubmit [id]`, `/cancel <id|all>` |
-| Computers | `/computers`, `/computers status <name>` (registry-only) |
-| Workflow | `/workflows validate <name>`, `/workflows run review target="the staged diff"`, `/workflows list`, `/workflows stop all` |
+| Computers | `/computers`, `/computers ssh ...`, then `packetcode --computer <name>` |
+| Workflow | `/workflows validate <name>`, `/workflows run review target="the staged diff"`, `/workflows run --computer prod review`, `/workflows list`, `/workflows stop all` |
 | Repeat work | `/loop Continue until complete`, `/loop 10m /workflows run review`, `/loop list`, `/loop stop all` |
 | Pending prompts | `/queue`, `/queue drop <n>`, `/queue clear` |
 | Sessions/context | `/sessions`, `/sessions resume <id>`, `/sessions rename <name>`, `/compact --keep 10` |
@@ -40,4 +40,4 @@ packetcode doctor --json
 
 `Enter` send · `\` then `Enter` newline everywhere · `Ctrl+J` newline except when completion is open (moves down) · `Alt+Enter` newline when Alt is distinct · `Shift+Tab` cycle Manual → Accept Edits → Auto → Plan · `Ctrl+P` provider · `/model` model picker (`Alt+M` when Alt is distinct) · `Left` on an empty prompt agents · `Ctrl+C` cancel/clear draft/quit when empty · `Ctrl+D` quit when empty · `Ctrl+L` or `/clear` clear visible output, keep session · `/help` everything else
 
-Write agents work in separate git worktrees; their changes are not merged automatically. Completed agent results stay out of foreground context until you inject/collect them.
+Write agents work in separate local or remote git worktrees; their changes are not merged automatically. Use `/spawn --computer <name> ...` from a local session; remote sessions inherit their computer. Completed agent results stay out of foreground context until you inject/collect them.

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/procrun"
 )
 
@@ -28,18 +29,30 @@ const (
 )
 
 type ExecuteCommandTool struct {
-	Root string
+	Root       string
+	Backend    computers.RuntimeBackend
+	backendErr error
 }
 
 func NewExecuteCommandTool(root string) *ExecuteCommandTool {
-	return &ExecuteCommandTool{Root: root}
+	backend, err := computers.NewLocalBackend(root)
+	return &ExecuteCommandTool{Root: root, Backend: backend, backendErr: err}
 }
 
-func (*ExecuteCommandTool) Name() string            { return "execute_command" }
-func (*ExecuteCommandTool) RequiresApproval() bool  { return true }
-func (*ExecuteCommandTool) Schema() json.RawMessage { return executeCommandSchema() }
-func (*ExecuteCommandTool) Description() string {
-	return "Execute a shell command and capture stdout+stderr. Requires user approval. " + ExecuteRuntimeSafetyText()
+func NewExecuteCommandToolWithBackend(backend computers.RuntimeBackend) *ExecuteCommandTool {
+	if backend == nil {
+		return &ExecuteCommandTool{backendErr: fmt.Errorf("runtime backend is nil")}
+	}
+	return &ExecuteCommandTool{Root: backend.Root(), Backend: backend}
+}
+
+func (*ExecuteCommandTool) Name() string           { return "execute_command" }
+func (*ExecuteCommandTool) RequiresApproval() bool { return true }
+func (t *ExecuteCommandTool) Schema() json.RawMessage {
+	return executeCommandSchema(t.runtimeSafetyText())
+}
+func (t *ExecuteCommandTool) Description() string {
+	return "Execute a shell command and capture stdout+stderr. Requires user approval. " + t.runtimeSafetyText()
 }
 
 type executeCommandParams struct {
@@ -70,14 +83,19 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 	if strings.TrimSpace(p.Command) == "" {
 		return ToolResult{Content: "execute_command: command is empty", IsError: true}, nil
 	}
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("execute_command: %s", t.backendErr), IsError: true}, nil
+	}
 
-	cwd := t.Root
+	cwd := t.Backend.Root()
+	cwdArg := "."
 	if p.CWD != "" {
-		resolved, err := resolveExistingInRoot(t.Root, p.CWD)
+		resolved, err := t.Backend.Resolve(ctx, p.CWD, false)
 		if err != nil {
-			return ToolResult{Content: err.Error(), IsError: true}, nil
+			return ToolResult{Content: fmt.Sprintf("execute_command: %s", err), IsError: true}, nil
 		}
 		cwd = resolved
+		cwdArg = p.CWD
 	}
 
 	timeout := defaultExecTimeout
@@ -89,9 +107,6 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	cmd := buildShellCommand(cmdCtx, p.Command)
-	cmd.Dir = cwd
 
 	// The BoundedBuffer always backs the final result (capped, head-preserving).
 	// When a sink is supplied, fan output out to a live chunker as well via an
@@ -105,19 +120,13 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 		chunker = newChunkWriter(sink)
 		dst = io.MultiWriter(out, chunker)
 	}
-	cmd.Stdout = dst
-	cmd.Stderr = dst
-	runErr := cmd.Run()
+	execResult, runErr := t.Backend.Execute(cmdCtx, p.Command, cwdArg, dst)
 	if chunker != nil {
 		chunker.flush()
 	}
-	exitCode := 0
+	exitCode := execResult.ExitCode
 	if runErr != nil {
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
+		exitCode = -1
 	}
 
 	timedOut := cmdCtx.Err() == context.DeadlineExceeded
@@ -150,7 +159,10 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 		fmt.Fprintf(&b, "[exit %d]", exitCode)
 	}
 
-	isError := timedOut || canceled || exitCode != 0
+	if runErr != nil {
+		fmt.Fprintf(&b, "\n[backend error: %s]", runErr)
+	}
+	isError := timedOut || canceled || exitCode != 0 || runErr != nil
 	return ToolResult{
 		Content: b.String(),
 		IsError: isError,
@@ -162,6 +174,13 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 			"cwd":       cwd,
 		},
 	}, nil
+}
+
+func (t *ExecuteCommandTool) runtimeSafetyText() string {
+	if t.Backend != nil && t.Backend.Kind() == computers.KindSSH {
+		return "Runs through the remote host's POSIX login shell inside the pinned Packet Computer workspace. Output is truncated past 100KB."
+	}
+	return ExecuteRuntimeSafetyText()
 }
 
 // chunkWriter is an io.Writer that batches a child process's output into
@@ -226,22 +245,8 @@ func lastIndexByte(b []byte, c byte) int {
 	return -1
 }
 
-// buildShellCommand picks the right invocation per OS. We deliberately use
-// the shell rather than direct argv splitting so the LLM can use pipes,
-// redirects, env-var expansion, etc. — closer to what a developer would type.
-func buildShellCommand(ctx context.Context, command string) *exec.Cmd {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", command)
-	}
-	procrun.ConfigureTreeCancel(cmd)
-	return cmd
-}
-
-func executeCommandSchema() json.RawMessage {
-	desc := "Shell command to execute. " + ExecuteRuntimeSafetyText()
+func executeCommandSchema(safety string) json.RawMessage {
+	desc := "Shell command to execute. " + safety
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{

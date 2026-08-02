@@ -6,6 +6,18 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Foreground SSH Packet Computer workspaces: `/computers register|ssh|remove`,
+  mandatory SHA256 host-key pinning, SSH-agent or identity-file
+  authentication, one process-lifetime SSH/SFTP connection, root-confined
+  remote read/list/search/write/patch/command tools, `--computer <name>`, and
+  session-to-computer binding that refuses cross-machine resume.
+- Process-lifetime remote background agents and workflows: active remote
+  sessions inherit their computer; local sessions use `/spawn --computer` or
+  `/workflows run --computer`; jobs persist immutable endpoint/root identity,
+  own independent SSH/SFTP connections, apply restrictive computer policy,
+  and require isolated remote Git worktrees before enabling writes. Durable
+  reconnect remains PCMP9; remote `/undo`, code intelligence, hooks, and
+  heartbeat remain deferred.
 - Approved `packetcode-mcp-http-trust-v1` design gate plus a fail-closed,
   transport-independent validator for exact origins/ports, separately allowed
   network address classes, bounded bodyless same-origin GET/HEAD redirects,

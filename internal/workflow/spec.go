@@ -111,6 +111,15 @@ type Workflow struct {
 	Phases        []Phase
 }
 
+// RunOptions controls execution placement without changing the reusable
+// workflow definition. Computer is a registered Packet Computer name (or an
+// empty string to inherit the jobs.Manager's active workspace default).
+// Placement deliberately lives outside schema-versioned TOML: every work
+// attempt, retry, and verifier in one run executes against the same target.
+type RunOptions struct {
+	Computer string
+}
+
 // VerificationState is the user-visible verification outcome for a step.
 type VerificationState string
 
@@ -212,13 +221,33 @@ type PhaseSnapshot struct {
 // RunSnapshot is a safe-to-copy projection of a Run for UI consumption. The
 // engine produces a fresh RunSnapshot on every state transition.
 type RunSnapshot struct {
-	ID         string
-	Workflow   string
-	State      RunState
-	Err        string
-	Phases     []PhaseSnapshot
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID           string
+	Workflow     string
+	State        RunState
+	Err          string
+	Phases       []PhaseSnapshot
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	Computer     string // requested selector; empty means manager default
+	ComputerID   string // immutable resolved target id, populated after spawn
+	ComputerName string // resolved friendly name, populated after spawn
+	WorkingDir   string // canonical resolved workspace root
+}
+
+// TargetLabel returns a compact human-facing placement label. Before the
+// first job resolves, an explicit Computer selector remains useful; an empty
+// label means the jobs.Manager's default workspace has not resolved yet.
+func (s RunSnapshot) TargetLabel() string {
+	if s.ComputerName != "" {
+		return s.ComputerName
+	}
+	if s.Computer != "" {
+		return s.Computer
+	}
+	if s.ComputerID != "" {
+		return s.ComputerID
+	}
+	return ""
 }
 
 // RunUpdate is the payload delivered to Subscribe callbacks on every run

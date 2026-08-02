@@ -15,7 +15,7 @@ import (
 //	/workflows                 open the live run view
 //	/workflows list            list saved specs and active runs
 //	/workflows validate <name> validate a spec without executing it
-//	/workflows run <name>      start a workflow by name
+//	/workflows run [--computer <name>] <name>  start a workflow by name
 //	/workflows stop [id|all]   cancel a run (or every run)
 //	/workflows <id>            open the view focused on a run
 func (a *App) handleWorkflowCommand(args []string) (tea.Model, tea.Cmd) {
@@ -91,7 +91,7 @@ func (a *App) handleWorkflowList() (tea.Model, tea.Cmd) {
 	} else {
 		b.WriteString("\n  runs:")
 		for _, r := range runs {
-			b.WriteString(fmt.Sprintf("\n    %s  %-14s %s", r.ID, r.Workflow, r.State))
+			b.WriteString(fmt.Sprintf("\n    %s  %-14s %-10s target=%s", r.ID, r.Workflow, r.State, workflowRunTarget(r)))
 			if strings.TrimSpace(r.Err) != "" {
 				b.WriteString(" — " + firstLine(r.Err))
 			}
@@ -102,12 +102,16 @@ func (a *App) handleWorkflowList() (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleWorkflowRun(args []string) (tea.Model, tea.Cmd) {
-	if len(args) == 0 {
+	name, opts, inputArgs, parseErr := parseWorkflowRunArgs(args)
+	if parseErr != nil {
+		a.conversation.AppendSystem("workflows run: " + parseErr.Error())
+		return a, nil
+	}
+	if name == "" {
 		names := a.workflowLoader.List()
 		a.conversation.AppendSystem("workflows run: missing name. available: " + strings.Join(names, ", "))
 		return a, nil
 	}
-	name := args[0]
 	wf, err := a.workflowLoader.Load(name)
 	if err != nil {
 		a.conversation.AppendSystem("workflows run: " + err.Error())
@@ -116,7 +120,7 @@ func (a *App) handleWorkflowRun(args []string) (tea.Model, tea.Cmd) {
 
 	// Overlay key=value overrides; quote multiword values, e.g.
 	// /workflows run review target="the staged diff".
-	if overrides := parseInputOverrides(args[1:]); len(overrides) > 0 {
+	if overrides := parseInputOverrides(inputArgs); len(overrides) > 0 {
 		if wf.Inputs == nil {
 			wf.Inputs = map[string]string{}
 		}
@@ -125,12 +129,16 @@ func (a *App) handleWorkflowRun(args []string) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	run, err := a.workflow.Start(context.Background(), wf)
+	run, err := a.workflow.StartWithOptions(context.Background(), wf, opts)
 	if err != nil {
 		a.conversation.AppendSystem("workflows run: " + err.Error())
 		return a, nil
 	}
-	a.conversation.AppendSystem(fmt.Sprintf("[workflow:%s started — %s] %s", run.ID, wf.Name, workflowShape(wf)))
+	target := "active workspace"
+	if opts.Computer != "" {
+		target = opts.Computer
+	}
+	a.conversation.AppendSystem(fmt.Sprintf("[workflow:%s started — %s · target %s] %s", run.ID, wf.Name, target, workflowShape(wf)))
 	a.workflowView.ShowFocused(a.workflow.List(), run.ID)
 	return a, nil
 }
@@ -225,6 +233,48 @@ func parseInputOverrides(args []string) map[string]string {
 		out[k] = strings.TrimSpace(v)
 	}
 	return out
+}
+
+// parseWorkflowRunArgs keeps placement flags separate from workflow inputs.
+// Flags precede the workflow name so existing `run <name> key=value` syntax
+// remains byte-for-byte compatible and a workflow input cannot accidentally
+// consume a placement option.
+func parseWorkflowRunArgs(args []string) (string, workflow.RunOptions, []string, error) {
+	var opts workflow.RunOptions
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "--") {
+		switch args[i] {
+		case "--computer":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				return "", opts, nil, fmt.Errorf("--computer requires a value")
+			}
+			opts.Computer = strings.TrimSpace(args[i+1])
+			i += 2
+		default:
+			return "", opts, nil, fmt.Errorf("unknown flag %s", args[i])
+		}
+	}
+	if i >= len(args) {
+		return "", opts, nil, nil
+	}
+	name := args[i]
+	inputArgs := args[i+1:]
+	for _, arg := range inputArgs {
+		if strings.HasPrefix(arg, "--") {
+			return "", opts, nil, fmt.Errorf("placement flags must precede the workflow name")
+		}
+	}
+	return name, opts, inputArgs, nil
+}
+
+func workflowRunTarget(run workflow.RunSnapshot) string {
+	if label := run.TargetLabel(); label != "" {
+		return label
+	}
+	if run.WorkingDir != "" {
+		return "local"
+	}
+	return "default"
 }
 
 // workflowShape renders a compact phase/step outline for the start message.

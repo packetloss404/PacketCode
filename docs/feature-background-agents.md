@@ -8,6 +8,8 @@ This document describes the current shipped orchestration model. Every delegated
 /spawn inspect the authentication flow
 /spawn --provider gemini --model gemini-2.5-flash inspect the tests
 /spawn --write implement the focused fix
+/spawn --computer production inspect the server
+/spawn --computer production --write migrate the app
 ```
 
 The model can delegate through `spawn_agent` using the same manager. `wait=true` returns a compact result when the child finishes; asynchronous children can be joined with the approval-gated `collect_agent_results` tool.
@@ -36,9 +38,11 @@ branch: packetcode-job-<job-id>
 base: current HEAD
 ```
 
-Uncommitted foreground changes are not copied. If worktree creation fails, the job fails closed instead of editing the foreground checkout.
+Uncommitted foreground changes are not copied. If worktree creation fails, the job fails closed instead of editing the foreground checkout. Remote write jobs follow the same rule: they create a Git worktree under the remote user's PacketCode state directory and never fall back to the registered checkout.
 
-The active foreground permission profile is snapshotted when a job starts. `/spawn --write` can request file/command approval through the parent UI; read-only jobs reject mutations. Completed worktrees are preserved for inspection and are never merged or deleted automatically.
+The active foreground permission profile is snapshotted when a job starts. `/spawn --write` can request file/command approval through the parent UI; read-only jobs reject mutations. Remote jobs also apply the registered computer's write/shell policy as a restrictive overlay—computer `allow` never broadens the global policy, while `ask`, `deny`, and explicit approval remain floors. Completed worktrees are preserved for inspection and are never merged or deleted automatically.
+
+A remote foreground session defaults new jobs to its active Packet Computer. A local session can select one with `--computer <name>`. The resolved `ComputerID`, endpoint/root identity, and working directory are frozen into the job before it is queued. Nested jobs inherit that binding and cannot pivot to another computer. Each active remote job opens and owns a separate SSH/SFTP connection, so a long command does not serialize workflow siblings.
 
 ## Agent View
 
@@ -56,7 +60,7 @@ Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen wor
 
 ## Results and Persistence
 
-Jobs persist snapshots under `~/.packetcode/jobs/`. Queued, running, and terminal transitions are written immediately; high-frequency activity updates are coalesced and flushed at shutdown. Jobs left active by an unclean prior exit recover as cancelled; execution is not resumed yet.
+Jobs persist snapshots under `~/.packetcode/jobs/`. Queued, running, and terminal transitions are written immediately; high-frequency activity updates are coalesced and flushed at shutdown. Jobs left active by an unclean prior exit recover as cancelled/abandoned evidence; execution is not resumed yet. For SSH jobs, PacketCode cannot guarantee that a detached remote descendant stopped when the connection disappeared.
 
 Recovered jobs carry a durable `Recovered` flag (not inferred from the reason string) and can be explicitly re-run with `/jobs resubmit <id>`. That spawns a *new* job from the saved prompt and links the pair via `ResubmitOf` / `ResubmittedAs`; the abandoned job is never mutated beyond gaining the forward link, so its evidence stays intact. Resubmit is allowed once per job, rejects jobs that ended normally, and refuses a saved prompt larger than `jobs.MaxResubmitPromptBytes` (32 KiB) rather than truncating it. True reconnect-and-continue needs the Packet Computers daemon and is tracked as PCMP9 in [`packet-computers-loop.md`](packet-computers-loop.md).
 
@@ -81,12 +85,18 @@ Full logs, diffs, and files remain in the job transcript/worktree rather than be
 /workflows list
 /workflows validate focused-review
 /workflows run review
+/workflows run --computer production review
 /workflows run review target="the staged diff"
 /workflows stop <run-id>
 /workflows stop all
 ```
 
-Definitions load in precedence order: built-in, user (`~/.packetcode/workflows/*.toml`), then project (`.packetcode/workflows/*.toml`). A project file with the same name wins. Malformed higher-precedence files report an error instead of silently falling back.
+Local definitions load in precedence order: built-in, user (`~/.packetcode/workflows/*.toml`), then project (`.packetcode/workflows/*.toml`). A project file with the same name wins. Remote sessions expose built-ins plus local user definitions; remote project workflow discovery is deferred until it can be asynchronous rather than freezing the TUI on SFTP. Malformed higher-precedence files report an error instead of silently falling back.
+
+Write-enabled workflow agents keep the jobs manager's isolation contract: each
+gets a separate worktree. Later steps see bound summaries, not another job's
+unmerged files. Put one cohesive mutation in one write step; workflow-scoped
+shared workspaces are deferred.
 
 Example:
 

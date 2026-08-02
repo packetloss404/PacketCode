@@ -677,8 +677,11 @@ action = "ask"</code></pre>
         <h3 id="spawn-agents">Start bounded work</h3>
         <pre><code>/spawn inspect the authentication flow for race conditions
 /spawn --provider gemini --model gemini-2.5-flash audit the API handlers
-/spawn --write implement the focused test fix</code></pre>
-        <p>Flags must precede the prompt. Read-only jobs inspect the foreground project root. Extra jobs queue after the configured concurrency limit. A user-entered <code>/spawn</code> starts directly; spawn approval applies to the model's <code>spawn_agent</code> tool. Tools used inside either child remain governed by the child's snapshotted policy.</p>
+/spawn --write implement the focused test fix
+/spawn --computer production inspect the deployed service
+/spawn --computer production --write migrate the app</code></pre>
+        <p>Flags must precede the prompt. Read-only jobs inspect the selected project root. A remote foreground session inherits its active Packet Computer; from a local session, <code>--computer &lt;name&gt;</code> selects one. Each remote job owns a separate SSH/SFTP connection. Extra jobs queue after the configured concurrency limit. A user-entered <code>/spawn</code> starts directly; spawn approval applies to the model's <code>spawn_agent</code> tool. Tools used inside either child remain governed by the child's snapshotted policy.</p>
+        <p>The resolved computer, endpoint/root identity, and working directory are frozen before queueing. Nested agents inherit the target and cannot pivot. The computer's write/shell policy can restrict but never broaden the session policy.</p>
 
         <h3 id="agent-view">Agent View</h3>
         <p>Open <code>/agents</code>, press Left Arrow from an empty idle prompt, or open one transcript with <code>/agents &lt;id&gt;</code>.</p>
@@ -707,7 +710,7 @@ action = "ask"</code></pre>
         <pre><code>~/.packetcode/worktrees/&lt;repo-key&gt;/&lt;job-id&gt;
 branch: packetcode-job-&lt;job-id&gt;
 base: current HEAD</code></pre>
-        <p>A write job requires Git and never edits the foreground checkout. Its base is committed <code>HEAD</code>; dirty foreground changes are not copied. Worktree creation fails closed.</p>
+        <p>A write job requires Git and never edits the foreground checkout. Its base is committed <code>HEAD</code>; dirty foreground changes are not copied. On a Packet Computer, the worktree lives under the remote user's PacketCode state directory. Worktree creation fails closed instead of falling back to the registered checkout.</p>
         <pre><code># Inspect a completed job
 git -C &lt;worktree-path&gt; status --short
 git -C &lt;worktree-path&gt; diff
@@ -721,7 +724,7 @@ git cherry-pick &lt;commit&gt;</code></pre>
         </div>
 
         <h3 id="agent-limits">Limits and persistence</h3>
-        <p>Defaults are four concurrent jobs, nesting depth two, and 32 jobs per process run. Job snapshots persist under <code>~/.packetcode/jobs/</code>. Jobs active during an unclean exit recover as cancelled rather than resuming, and can be explicitly re-run with <code>/jobs resubmit</code>. Arbitrary sub-agent clarification questions and foreground streaming of sub-agent output are not implemented.</p>
+        <p>Defaults are four concurrent jobs, nesting depth two, and 32 jobs per process run. Job snapshots persist under <code>~/.packetcode/jobs/</code>. Jobs active during an unclean exit recover as cancelled rather than resuming, and can be explicitly re-run with <code>/jobs resubmit</code>. Remote jobs are process-lifetime execution: there is no daemon or SSH reconnect-and-continue loop, and detached remote descendants may require operator cleanup. Arbitrary sub-agent clarification questions and foreground streaming of sub-agent output are not implemented.</p>
       </section>
 
       <section id="workflows" aria-labelledby="workflows-title">
@@ -731,11 +734,13 @@ git cherry-pick &lt;commit&gt;</code></pre>
 /workflows list
 /workflows validate focused-review
 /workflows run review
+/workflows run --computer production review
 /workflows run review target="the staged diff"
 /workflows &lt;run-id&gt;
 /workflows stop &lt;run-id&gt;
 /workflows stop all</code></pre>
-        <p>A built-in <code>review</code> workflow is immediately available. User definitions live in <code>~/.packetcode/workflows/*.toml</code>; project definitions in <code>.packetcode/workflows/*.toml</code> take precedence.</p>
+        <p>A built-in <code>review</code> workflow is immediately available. User definitions live in <code>~/.packetcode/workflows/*.toml</code>; local project definitions in <code>.packetcode/workflows/*.toml</code> take precedence. Remote sessions load built-ins plus local user definitions; remote project discovery is deferred so workflow loading does not block the TUI on SFTP.</p>
+        <p>A remote foreground session routes the whole run to its active computer; from a local session, use <code>--computer &lt;name&gt;</code>. Every work agent, retry, and verifier uses that target. Each write-enabled workflow agent gets its own worktree, so later steps receive summaries rather than another job's unmerged files.</p>
         <pre><code>schema_version = 1
 name = "focused-review"
 
@@ -1078,9 +1083,10 @@ packetcode doctor --json</code></pre>
               <tr><td>Read-only agent</td><td><code>/spawn audit the current diff</code></td></tr>
               <tr><td>Chosen agent model</td><td><code>/spawn --provider codex --model gpt-5.6-sol audit auth</code></td></tr>
               <tr><td>Isolated write agent</td><td><code>/spawn --write fix the focused tests</code></td></tr>
+              <tr><td>Remote agent</td><td><code>/spawn --computer production inspect the service</code></td></tr>
               <tr><td>Agent control</td><td><code>/agents</code>, <code>/agents &lt;id&gt;</code>, <code>/jobs [id]</code>, <code>/jobs resubmit [id]</code>, <code>/cancel &lt;id|all&gt;</code></td></tr>
-              <tr><td>Computers</td><td><code>/computers</code>, <code>/computers status &lt;name&gt;</code> (registry-only)</td></tr>
-              <tr><td>Workflow</td><td><code>/workflows validate &lt;name&gt;</code>, <code>/workflows run review target="the staged diff"</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
+              <tr><td>Computers</td><td><code>/computers</code>, <code>/computers ssh ...</code>, <code>packetcode --computer production</code></td></tr>
+              <tr><td>Workflow</td><td><code>/workflows validate &lt;name&gt;</code>, <code>/workflows run --computer production review</code>, <code>/workflows list</code>, <code>/workflows stop all</code></td></tr>
               <tr><td>Repeat work</td><td><code>/loop Continue until complete</code>, <code>/loop 10m /workflows run review</code>, <code>/loop list</code>, <code>/loop stop all</code></td></tr>
               <tr><td>Pending prompts</td><td><code>/queue</code>, <code>/queue drop &lt;n&gt;</code>, <code>/queue clear</code></td></tr>
               <tr><td>Sessions/context</td><td><code>/sessions</code>, <code>/sessions resume &lt;id&gt;</code>, <code>/sessions rename &lt;name&gt;</code>, <code>/compact --keep 10</code></td></tr>
@@ -1100,11 +1106,11 @@ packetcode doctor --json</code></pre>
               <tr><td><code>/provider [add [slug]|slug]</code></td><td>Open picker, add/update a key, or switch.</td></tr>
               <tr><td><code>/model [id]</code></td><td>Open picker or switch model.</td></tr>
               <tr><td><code>/effort [default|low|medium|high|xhigh|max|ultra]</code></td><td>Show or set supported reasoning effort.</td></tr>
-              <tr><td><code>/spawn [--provider slug] [--model id] [--write] &lt;prompt&gt;</code></td><td>Start a background agent.</td></tr>
+              <tr><td><code>/spawn [--computer name] [--provider slug] [--model id] [--write] &lt;prompt&gt;</code></td><td>Start a local or Packet Computer background agent.</td></tr>
               <tr><td><code>/agents [id]</code>, <code>/jobs [id]</code>, <code>/cancel &lt;id|all&gt;</code></td><td>Inspect or cancel background work.</td></tr>
               <tr><td><code>/jobs resubmit [id]</code></td><td>Re-run a job abandoned by a previous app exit (new job; the original is not resumed).</td></tr>
-              <tr><td><code>/computers [status &lt;name&gt;]</code></td><td>List or inspect registered Packet Computers. Registry-only &mdash; no daemon, nothing connects yet.</td></tr>
-              <tr><td><code>/workflows [run &lt;name&gt;|validate &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Validate, run, or inspect workflows.</td></tr>
+              <tr><td><code>/computers [status &lt;name&gt;|ssh ...|remove ...]</code></td><td>Manage Packet Computers; use <code>packetcode --computer &lt;name&gt;</code> for a foreground SSH workspace.</td></tr>
+              <tr><td><code>/workflows [run [--computer name] &lt;name&gt;|validate &lt;name&gt;|list|stop [id|all]|&lt;id&gt;]</code></td><td>Validate, run, or inspect local or remote workflows.</td></tr>
               <tr><td><code>/loop [interval] &lt;prompt|/command&gt;</code></td><td>Repeat work; use <code>list</code> or <code>stop</code>.</td></tr>
               <tr><td><code>/queue [drop &lt;n&gt;|clear]</code></td><td>Manage queued foreground prompts.</td></tr>
               <tr><td><code>/sessions</code>, <code>resume</code>, <code>rename</code>, <code>delete &lt;id&gt; --yes</code></td><td>Manage saved sessions.</td></tr>

@@ -6,6 +6,7 @@
 //	packetcode                              start the TUI in the cwd
 //	packetcode --version                    print version and exit
 //	packetcode --provider gemini --model gemini-2.5-pro
+//	packetcode --computer production      work against a registered SSH computer
 //	packetcode --resume <session-id>        resume a saved session
 //	packetcode --trust                      auto-approve all tool actions
 //	packetcode --permission-mode ask        override approval profile
@@ -14,6 +15,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +26,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/packetcode/packetcode/internal/app"
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
@@ -68,6 +71,7 @@ func main() {
 	resumeFlag := flag.String("resume", "", "resume a saved session by ID")
 	trustFlag := flag.Bool("trust", false, "auto-approve all tool actions for this session")
 	permissionFlag := flag.String("permission-mode", "", "override permission profile for this session (ask, accept-edits, auto, read-only, bypass)")
+	computerFlag := flag.String("computer", "", "use a registered SSH computer as the active workspace")
 	tuiFixtureFlag := flag.String("tui-fixture", "", "render a deterministic TUI lifecycle fixture (development/testing)")
 	flag.Parse()
 
@@ -86,7 +90,7 @@ func main() {
 		os.Exit(code)
 	}
 
-	if err := run(*providerFlag, *modelFlag, *resumeFlag, *trustFlag, *permissionFlag); err != nil {
+	if err := run(*providerFlag, *modelFlag, *resumeFlag, *trustFlag, *permissionFlag, *computerFlag); err != nil {
 		fmt.Fprintf(os.Stderr, "packetcode: %s\n", err)
 		os.Exit(1)
 	}
@@ -104,7 +108,7 @@ func dispatchSubcommand(args []string, stdout, stderr io.Writer) (int, bool) {
 	}
 }
 
-func run(providerOverride, modelOverride, resumeID string, trust bool, permissionMode string) error {
+func run(providerOverride, modelOverride, resumeID string, trust bool, permissionMode, computerName string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -218,18 +222,54 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return err
 	}
 	root := git.RepoRoot(cwd)
+	computersDir, err := config.ComputersDir()
+	if err != nil {
+		return err
+	}
+	computerRegistry, err := computers.Load(computersDir)
+	if err != nil {
+		return fmt.Errorf("load computers: %w", err)
+	}
+	var runtimeBackend computers.RuntimeBackend
+	var activeComputer *computers.Computer
+	if computerName != "" {
+		computer, ok := computerRegistry.Get(computerName)
+		if !ok {
+			return fmt.Errorf("computer %q is not registered; use /computers ssh ... first", computerName)
+		}
+		if computer.Kind != computers.KindSSH {
+			return fmt.Errorf("computer %q is %s; --computer currently supports registered SSH computers", computer.Name, computer.Kind)
+		}
+		connectCtx, cancelConnect := context.WithTimeout(context.Background(), 20*time.Second)
+		backend, err := computers.NewSSHBackend(connectCtx, computer)
+		cancelConnect()
+		if err != nil {
+			return fmt.Errorf("connect computer %q: %w", computer.Name, err)
+		}
+		runtimeBackend = backend
+		activeComputer = &computer
+		root = backend.Root()
+		defer backend.Close()
+	}
 
 	// Tool registry. write_file and patch_file get a backup manager
 	// scoped to the active session — wired below once we know the ID.
 	toolReg := tools.NewRegistry()
-	toolReg.Register(tools.NewReadFileTool(root))
-	toolReg.Register(tools.NewSearchCodebaseTool(root))
-	toolReg.Register(tools.NewListDirectoryTool(root))
-	toolReg.Register(tools.NewListSymbolsTool(root))
-	toolReg.Register(tools.NewFindDefinitionTool(root))
-	toolReg.Register(tools.NewFindReferencesTool(root))
-	toolReg.Register(tools.NewGetDiagnosticsTool(root))
-	toolReg.Register(tools.NewExecuteCommandTool(root))
+	if runtimeBackend != nil {
+		toolReg.Register(tools.NewReadFileToolWithBackend(runtimeBackend))
+		toolReg.Register(tools.NewSearchCodebaseToolWithBackend(runtimeBackend))
+		toolReg.Register(tools.NewListDirectoryToolWithBackend(runtimeBackend))
+		toolReg.Register(tools.NewExecuteCommandToolWithBackend(runtimeBackend))
+	} else {
+		toolReg.Register(tools.NewReadFileTool(root))
+		toolReg.Register(tools.NewSearchCodebaseTool(root))
+		toolReg.Register(tools.NewListDirectoryTool(root))
+		toolReg.Register(tools.NewListSymbolsTool(root))
+		toolReg.Register(tools.NewFindDefinitionTool(root))
+		toolReg.Register(tools.NewFindReferencesTool(root))
+		toolReg.Register(tools.NewGetDiagnosticsTool(root))
+		toolReg.Register(tools.NewExecuteCommandTool(root))
+	}
 
 	// Sessions.
 	sessionsDir, err := config.SessionsDir()
@@ -244,6 +284,15 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		}
 		loaded, err := sessions.Load(resolvedID)
 		if err != nil {
+			return fmt.Errorf("resume %s: %w", resumeID, err)
+		}
+		computerID := ""
+		workspaceIdentity := ""
+		if activeComputer != nil {
+			computerID = activeComputer.ID
+			workspaceIdentity = computerWorkspaceIdentity(*activeComputer)
+		}
+		if err := session.ValidateWorkspace(loaded, computerID, root, workspaceIdentity); err != nil {
 			return fmt.Errorf("resume %s: %w", resumeID, err)
 		}
 		if providerOverride == "" && loaded.Provider != "" {
@@ -267,6 +316,11 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		if _, err := sessions.New(activeSlug, activeModel); err != nil {
 			return fmt.Errorf("create session: %w", err)
 		}
+		if activeComputer != nil {
+			if err := sessions.BindWorkspace(activeComputer.ID, root, computerWorkspaceIdentity(*activeComputer)); err != nil {
+				return fmt.Errorf("bind remote session: %w", err)
+			}
+		}
 	}
 
 	// Backup manager keyed by session ID.
@@ -275,10 +329,18 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return err
 	}
 	bk := session.NewBackupManager(backupsDir, sessions.Current().ID)
-	toolReg.Register(tools.NewWriteFileTool(root, bk))
-	toolReg.Register(tools.NewPatchFileTool(root, bk))
+	if runtimeBackend != nil {
+		toolReg.Register(tools.NewWriteFileToolWithBackend(runtimeBackend))
+		toolReg.Register(tools.NewPatchFileToolWithBackend(runtimeBackend))
+	} else {
+		toolReg.Register(tools.NewWriteFileTool(root, bk))
+		toolReg.Register(tools.NewPatchFileTool(root, bk))
+	}
 
-	hookRunner := hooks.New(cfg.Hooks, root)
+	var hookRunner *hooks.Runner
+	if runtimeBackend == nil {
+		hookRunner = hooks.New(cfg.Hooks, root)
+	}
 
 	// Cost tracker — pricing closure delegates to whichever provider is
 	// active *now* (post hot-switch), not the one when a token was
@@ -321,10 +383,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	}
 	defer mcpMgr.Shutdown(2 * time.Second)
 
-	// Background-agents manager. Constructed before app.New so Deps can
-	// carry it in; the Approver and SpawnTool factory are wired post-
-	// construction because they depend on pieces we won't have until
-	// app.New returns and the Manager itself exists, respectively.
+	// Background agents remain coordinated locally, but each remote job owns
+	// an independent pinned SSH/SFTP backend. This preserves workflow fan-out
+	// and avoids sharing the foreground connection's command/SFTP lock.
 	jobsDir, err := config.JobsDir()
 	if err != nil {
 		return err
@@ -332,6 +393,65 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	worktreesDir, err := config.WorktreesDir()
 	if err != nil {
 		return err
+	}
+	defaultWorkspace := jobs.Workspace{WorkingDir: root, Kind: computers.KindLocal}
+	if activeComputer != nil {
+		defaultWorkspace = jobs.Workspace{
+			ComputerID:   activeComputer.ID,
+			ComputerName: activeComputer.Name,
+			WorkingDir:   activeComputer.ProjectRoots[0],
+			Kind:         activeComputer.Kind,
+			Identity:     computerWorkspaceIdentity(*activeComputer),
+			Policy:       activeComputer.Policy,
+		}
+	}
+	lookupComputer := func(selector string) (computers.Computer, bool, error) {
+		// /computers may update the durable registry after startup. Resolve
+		// placement from a fresh snapshot so a newly registered target works
+		// immediately and a removed/re-keyed target fails closed.
+		currentRegistry, loadErr := computers.Load(computersDir)
+		if loadErr != nil {
+			return computers.Computer{}, false, loadErr
+		}
+		computer, ok := currentRegistry.Get(selector)
+		if !ok {
+			computer, ok = currentRegistry.GetByID(selector)
+		}
+		return computer, ok, nil
+	}
+	resolveWorkspace := func(selector string) (jobs.Workspace, error) {
+		computer, ok, lookupErr := lookupComputer(selector)
+		if lookupErr != nil {
+			return jobs.Workspace{}, fmt.Errorf("reload computer registry: %w", lookupErr)
+		}
+		if !ok {
+			return jobs.Workspace{}, fmt.Errorf("computer %q is not registered", selector)
+		}
+		if computer.Kind != computers.KindSSH || !computer.Reachable() {
+			return jobs.Workspace{}, fmt.Errorf("computer %q is not a reachable SSH computer", computer.Name)
+		}
+		return jobs.Workspace{
+			ComputerID:   computer.ID,
+			ComputerName: computer.Name,
+			WorkingDir:   computer.ProjectRoots[0],
+			Kind:         computer.Kind,
+			Identity:     computerWorkspaceIdentity(computer),
+			Policy:       computer.Policy,
+		}, nil
+	}
+	openBackend := func(ctx context.Context, ws jobs.Workspace) (computers.RuntimeBackend, error) {
+		computer, ok, lookupErr := lookupComputer(ws.ComputerID)
+		if lookupErr != nil {
+			return nil, fmt.Errorf("reload computer registry: %w", lookupErr)
+		}
+		if !ok {
+			return nil, fmt.Errorf("computer id %q is no longer registered", ws.ComputerID)
+		}
+		if current := computerWorkspaceIdentity(computer); current != ws.Identity {
+			return nil, fmt.Errorf("computer %q endpoint or registered root changed after this job was bound", computer.Name)
+		}
+		computer.ProjectRoots = []string{ws.WorkingDir}
+		return computers.NewSSHBackend(ctx, computer)
 	}
 	jobsMgr, recovered, err := jobs.NewManager(jobs.Config{
 		Registry:     reg,
@@ -360,9 +480,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		PermissionPolicy: permissionPolicy,
 		Root:             root,
 		Hooks:            hookRunner,
-		// Approver and SpawnTool are set below, once jobsMgr and the
-		// App's uiApprover exist. Leaving them nil here is fine: the
-		// manager guards both before use.
+		DefaultWorkspace: defaultWorkspace,
+		ResolveWorkspace: resolveWorkspace,
+		OpenBackend:      openBackend,
 	})
 	if err != nil {
 		return err
@@ -370,10 +490,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	if recovered > 0 {
 		fmt.Fprintf(os.Stderr, "packetcode: recovered %d orphan job(s) from previous run\n", recovered)
 	}
-	// Install the SpawnTool factory: each per-job tool registry gets its
-	// own spawn_agent tool bound to the spawning job's id/depth so the
-	// Manager can enforce recursion limits and annotate child-of-child
-	// approvals correctly.
 	jobsMgr.SetSpawnToolFactory(func(parentJobID string, parentDepth int, parentAllowWrite bool) tools.Tool {
 		return tools.NewBackgroundSpawnAgentTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth, parentAllowWrite)
 	})
@@ -382,11 +498,11 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	})
 	defer jobsMgr.Shutdown(5 * time.Second)
 
-	// Register spawn_agent into the main tool registry so the foreground
-	// LLM can call it too. ParentJobID="" / ParentDepth=0 for main-
-	// session spawns.
 	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))
 	toolReg.Register(tools.NewCollectAgentResultsTool(jobsMgr.AsToolsSpawner(), "", 0))
+
+	workflowEngine := workflow.NewEngine(jobsMgr)
+	workflowEngine.SetTokenBudget(cfg.Behavior.WorkflowTokenBudget)
 
 	// Register MCP tools AFTER every native tool + spawn_agent so the
 	// Agent's initial tool enumeration (on its first turn) sees them.
@@ -396,29 +512,41 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		}
 	}
 
-	// Workflow engine orchestrates multi-agent workflows over the jobs
-	// manager. It spawns ordinary background jobs, so it needs nothing
-	// beyond jobsMgr.
-	workflowEngine := workflow.NewEngine(jobsMgr)
-	workflowEngine.SetTokenBudget(cfg.Behavior.WorkflowTokenBudget)
+	activeSystemPrompt := systemPrompt
+	appBackups := bk
+	computerID := ""
+	workspaceIdentity := ""
+	if activeComputer != nil {
+		computerID = activeComputer.ID
+		workspaceIdentity = computerWorkspaceIdentity(*activeComputer)
+		activeSystemPrompt += fmt.Sprintf(
+			"\n\n# Active Packet Computer\nAll foreground workspace file and shell tools operate on SSH computer %q inside %s. Paths are relative to that remote root. Background agents and workflows inherit this computer unless explicitly targeted from a local session; every remote job gets its own SSH connection, and write jobs require an isolated remote Git worktree. Remote code-intelligence tools, local hooks, and /undo are unavailable. Remote execution lasts only while this PacketCode process and its SSH connections remain alive; it does not reconnect after restart.",
+			activeComputer.Name,
+			root,
+		)
+		appBackups = nil
+	}
 
 	a, err := app.New(app.Deps{
-		Config:           cfg,
-		Registry:         reg,
-		Tools:            toolReg,
-		Sessions:         sessions,
-		CostTracker:      tracker,
-		Jobs:             jobsMgr,
-		Workflow:         workflowEngine,
-		Backups:          bk,
-		MCP:              mcpMgr,
-		PermissionPolicy: permissionPolicy,
-		WorkingDir:       root,
-		SystemPrompt:     systemPrompt,
-		Hooks:            hookRunner,
-		Version:          welcomeVersion(),
-		Factories:        factories,
-		ResumeHydrate:    resumeID != "",
+		Config:            cfg,
+		Registry:          reg,
+		Tools:             toolReg,
+		Sessions:          sessions,
+		CostTracker:       tracker,
+		Jobs:              jobsMgr,
+		Workflow:          workflowEngine,
+		Backups:           appBackups,
+		MCP:               mcpMgr,
+		PermissionPolicy:  permissionPolicy,
+		WorkingDir:        root,
+		RemoteWorkspace:   runtimeBackend != nil,
+		ComputerID:        computerID,
+		WorkspaceIdentity: workspaceIdentity,
+		SystemPrompt:      activeSystemPrompt,
+		Hooks:             hookRunner,
+		Version:           welcomeVersion(),
+		Factories:         factories,
+		ResumeHydrate:     resumeID != "",
 	})
 	if err != nil {
 		return err
@@ -427,7 +555,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	// The App owns the uiApprover; pipe it into the jobs.Manager so
 	// destructive sub-agent tool calls (when AllowWrite is on) prompt
 	// the main user through the existing modal.
-	jobsMgr.SetApprover(a.Approver())
+	if jobsMgr != nil {
+		jobsMgr.SetApprover(a.Approver())
+	}
 
 	prog := tea.NewProgram(a) // inline rendering — native terminal scrollback, no mouse support
 	// Let the App post async messages (jobs.Manager Subscribe callbacks)
@@ -490,3 +620,18 @@ func ollamaHost(cfg *config.Config) string {
 
 // avoid "imported and not used" if filepath is conditionally referenced.
 var _ = filepath.Join
+
+// computerWorkspaceIdentity freezes the endpoint and registered root a job
+// was approved for without changing the user-facing registry ID. Removing and
+// recreating a same-named computer with a different host key/endpoint/root can
+// therefore never silently retarget a persisted job.
+func computerWorkspaceIdentity(c computers.Computer) string {
+	root := ""
+	if len(c.ProjectRoots) > 0 {
+		root = c.ProjectRoots[0]
+	}
+	material := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s",
+		c.Kind, c.SSHUser, c.SSHHost, c.SSHPort, c.SSHHostFingerprint, root)
+	sum := sha256.Sum256([]byte(material))
+	return fmt.Sprintf("pcws_sha256:%x", sum[:])
+}

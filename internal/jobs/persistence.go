@@ -7,82 +7,94 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 // persistedJob is the on-disk shape for ~/.packetcode/jobs/<id>.json.
 // Mirrors Job but uses a stable JSON form so future versions can decode
 // it without depending on Go field order.
 type persistedJob struct {
-	ID             string     `json:"id"`
-	SessionID      string     `json:"session_id"`
-	ParentJobID    string     `json:"parent_job_id,omitempty"`
-	Prompt         string     `json:"prompt"`
-	Provider       string     `json:"provider"`
-	Model          string     `json:"model"`
-	State          string     `json:"state"`
-	Seq            int64      `json:"seq,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
-	StartedAt      time.Time  `json:"started_at,omitempty"`
-	FinishedAt     time.Time  `json:"finished_at,omitempty"`
-	LastActivity   string     `json:"last_activity,omitempty"`
-	LastMessage    string     `json:"last_message,omitempty"`
-	NeedsInput     bool       `json:"needs_input,omitempty"`
-	NeedsApproval  bool       `json:"needs_approval,omitempty"`
-	Summary        string     `json:"summary,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Reason         string     `json:"reason,omitempty"`
-	InputTokens    int        `json:"input_tokens"`
-	OutputTokens   int        `json:"output_tokens"`
-	CostUSD        float64    `json:"cost_usd"`
-	Depth          int        `json:"depth"`
-	AllowWrite     bool       `json:"allow_write"`
-	ResultStatus   string     `json:"result_status,omitempty"`
-	Artifacts      []Artifact `json:"artifacts,omitempty"`
-	WorktreePath   string     `json:"worktree_path,omitempty"`
-	WorktreeBranch string     `json:"worktree_branch,omitempty"`
-	WorktreeBase   string     `json:"worktree_base,omitempty"`
-	WorktreeNote   string     `json:"worktree_note,omitempty"`
-	Recovered      bool       `json:"recovered,omitempty"`
-	ResubmitOf     string     `json:"resubmit_of,omitempty"`
-	ResubmittedAs  string     `json:"resubmitted_as,omitempty"`
+	ID                string            `json:"id"`
+	SessionID         string            `json:"session_id"`
+	ParentJobID       string            `json:"parent_job_id,omitempty"`
+	Prompt            string            `json:"prompt"`
+	Provider          string            `json:"provider"`
+	Model             string            `json:"model"`
+	State             string            `json:"state"`
+	Seq               int64             `json:"seq,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at,omitempty"`
+	StartedAt         time.Time         `json:"started_at,omitempty"`
+	FinishedAt        time.Time         `json:"finished_at,omitempty"`
+	LastActivity      string            `json:"last_activity,omitempty"`
+	LastMessage       string            `json:"last_message,omitempty"`
+	NeedsInput        bool              `json:"needs_input,omitempty"`
+	NeedsApproval     bool              `json:"needs_approval,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	Error             string            `json:"error,omitempty"`
+	Reason            string            `json:"reason,omitempty"`
+	InputTokens       int               `json:"input_tokens"`
+	OutputTokens      int               `json:"output_tokens"`
+	CostUSD           float64           `json:"cost_usd"`
+	Depth             int               `json:"depth"`
+	AllowWrite        bool              `json:"allow_write"`
+	ComputerID        string            `json:"computer_id,omitempty"`
+	ComputerName      string            `json:"computer_name,omitempty"`
+	WorkingDir        string            `json:"working_dir,omitempty"`
+	WorkspaceIdentity string            `json:"workspace_identity,omitempty"`
+	ComputerPolicy    *computers.Policy `json:"computer_policy,omitempty"`
+	ResultStatus      string            `json:"result_status,omitempty"`
+	Artifacts         []Artifact        `json:"artifacts,omitempty"`
+	WorktreePath      string            `json:"worktree_path,omitempty"`
+	WorktreeBranch    string            `json:"worktree_branch,omitempty"`
+	WorktreeBase      string            `json:"worktree_base,omitempty"`
+	WorktreeNote      string            `json:"worktree_note,omitempty"`
+	Recovered         bool              `json:"recovered,omitempty"`
+	ResubmitOf        string            `json:"resubmit_of,omitempty"`
+	ResubmittedAs     string            `json:"resubmitted_as,omitempty"`
 }
 
 func toPersisted(j *Job) persistedJob {
 	return persistedJob{
-		ID:             j.ID,
-		SessionID:      j.SessionID,
-		ParentJobID:    j.ParentJobID,
-		Prompt:         j.Prompt,
-		Provider:       j.Provider,
-		Model:          j.Model,
-		State:          j.State.String(),
-		Seq:            j.Seq,
-		CreatedAt:      j.CreatedAt,
-		UpdatedAt:      j.UpdatedAt,
-		StartedAt:      j.StartedAt,
-		FinishedAt:     j.FinishedAt,
-		LastActivity:   j.LastActivity,
-		LastMessage:    j.LastMessage,
-		NeedsInput:     j.NeedsInput,
-		NeedsApproval:  j.NeedsApproval,
-		Summary:        j.Summary,
-		Error:          j.Error,
-		Reason:         j.Reason,
-		InputTokens:    j.InputTokens,
-		OutputTokens:   j.OutputTokens,
-		CostUSD:        j.CostUSD,
-		Depth:          j.Depth,
-		AllowWrite:     j.AllowWrite,
-		ResultStatus:   normalizeResultStatus(j.ResultStatus).String(),
-		Artifacts:      cloneArtifacts(j.Artifacts),
-		WorktreePath:   j.WorktreePath,
-		WorktreeBranch: j.WorktreeBranch,
-		WorktreeBase:   j.WorktreeBase,
-		WorktreeNote:   j.WorktreeNote,
-		Recovered:      j.Recovered,
-		ResubmitOf:     j.ResubmitOf,
-		ResubmittedAs:  j.ResubmittedAs,
+		ID:                j.ID,
+		SessionID:         j.SessionID,
+		ParentJobID:       j.ParentJobID,
+		Prompt:            j.Prompt,
+		Provider:          j.Provider,
+		Model:             j.Model,
+		State:             j.State.String(),
+		Seq:               j.Seq,
+		CreatedAt:         j.CreatedAt,
+		UpdatedAt:         j.UpdatedAt,
+		StartedAt:         j.StartedAt,
+		FinishedAt:        j.FinishedAt,
+		LastActivity:      j.LastActivity,
+		LastMessage:       j.LastMessage,
+		NeedsInput:        j.NeedsInput,
+		NeedsApproval:     j.NeedsApproval,
+		Summary:           j.Summary,
+		Error:             j.Error,
+		Reason:            j.Reason,
+		InputTokens:       j.InputTokens,
+		OutputTokens:      j.OutputTokens,
+		CostUSD:           j.CostUSD,
+		Depth:             j.Depth,
+		AllowWrite:        j.AllowWrite,
+		ComputerID:        j.ComputerID,
+		ComputerName:      j.ComputerName,
+		WorkingDir:        j.WorkingDir,
+		WorkspaceIdentity: j.WorkspaceIdentity,
+		ComputerPolicy:    persistedComputerPolicy(j),
+		ResultStatus:      normalizeResultStatus(j.ResultStatus).String(),
+		Artifacts:         cloneArtifacts(j.Artifacts),
+		WorktreePath:      j.WorktreePath,
+		WorktreeBranch:    j.WorktreeBranch,
+		WorktreeBase:      j.WorktreeBase,
+		WorktreeNote:      j.WorktreeNote,
+		Recovered:         j.Recovered,
+		ResubmitOf:        j.ResubmitOf,
+		ResubmittedAs:     j.ResubmittedAs,
 	}
 }
 
@@ -123,40 +135,60 @@ func fromPersisted(p persistedJob) *Job {
 		updatedAt = p.CreatedAt
 	}
 	return &Job{
-		ID:             p.ID,
-		SessionID:      p.SessionID,
-		ParentJobID:    p.ParentJobID,
-		Prompt:         p.Prompt,
-		Provider:       p.Provider,
-		Model:          p.Model,
-		State:          parseState(p.State),
-		Seq:            p.Seq,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      updatedAt,
-		StartedAt:      p.StartedAt,
-		FinishedAt:     p.FinishedAt,
-		LastActivity:   p.LastActivity,
-		LastMessage:    p.LastMessage,
-		NeedsInput:     p.NeedsInput,
-		NeedsApproval:  p.NeedsApproval,
-		Summary:        p.Summary,
-		Error:          p.Error,
-		Reason:         p.Reason,
-		InputTokens:    p.InputTokens,
-		OutputTokens:   p.OutputTokens,
-		CostUSD:        p.CostUSD,
-		Depth:          p.Depth,
-		AllowWrite:     p.AllowWrite,
-		ResultStatus:   parseResultStatus(p.ResultStatus),
-		Artifacts:      cloneArtifacts(p.Artifacts),
-		WorktreePath:   p.WorktreePath,
-		WorktreeBranch: p.WorktreeBranch,
-		WorktreeBase:   p.WorktreeBase,
-		WorktreeNote:   p.WorktreeNote,
-		Recovered:      p.Recovered,
-		ResubmitOf:     p.ResubmitOf,
-		ResubmittedAs:  p.ResubmittedAs,
+		ID:                p.ID,
+		SessionID:         p.SessionID,
+		ParentJobID:       p.ParentJobID,
+		Prompt:            p.Prompt,
+		Provider:          p.Provider,
+		Model:             p.Model,
+		State:             parseState(p.State),
+		Seq:               p.Seq,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         updatedAt,
+		StartedAt:         p.StartedAt,
+		FinishedAt:        p.FinishedAt,
+		LastActivity:      p.LastActivity,
+		LastMessage:       p.LastMessage,
+		NeedsInput:        p.NeedsInput,
+		NeedsApproval:     p.NeedsApproval,
+		Summary:           p.Summary,
+		Error:             p.Error,
+		Reason:            p.Reason,
+		InputTokens:       p.InputTokens,
+		OutputTokens:      p.OutputTokens,
+		CostUSD:           p.CostUSD,
+		Depth:             p.Depth,
+		AllowWrite:        p.AllowWrite,
+		ComputerID:        p.ComputerID,
+		ComputerName:      p.ComputerName,
+		WorkingDir:        p.WorkingDir,
+		WorkspaceIdentity: p.WorkspaceIdentity,
+		ComputerPolicy:    computerPolicyFromPersisted(p.ComputerPolicy),
+		ResultStatus:      parseResultStatus(p.ResultStatus),
+		Artifacts:         cloneArtifacts(p.Artifacts),
+		WorktreePath:      p.WorktreePath,
+		WorktreeBranch:    p.WorktreeBranch,
+		WorktreeBase:      p.WorktreeBase,
+		WorktreeNote:      p.WorktreeNote,
+		Recovered:         p.Recovered,
+		ResubmitOf:        p.ResubmitOf,
+		ResubmittedAs:     p.ResubmittedAs,
 	}
+}
+
+func persistedComputerPolicy(j *Job) *computers.Policy {
+	if j == nil || j.ComputerID == "" {
+		return nil
+	}
+	policy := j.ComputerPolicy
+	return &policy
+}
+
+func computerPolicyFromPersisted(policy *computers.Policy) computers.Policy {
+	if policy == nil {
+		return computers.Policy{}
+	}
+	return *policy
 }
 
 // saveSnapshot persists a Job to <jobsDir>/<id>.json with atomic

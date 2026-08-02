@@ -1,0 +1,41 @@
+package computers
+
+import (
+	"context"
+	"io"
+	"io/fs"
+)
+
+// RuntimeBackend is the workspace boundary used by PacketCode's core tools.
+// Implementations may be local or remote; tools deliberately do not know
+// which transport is underneath them.
+type RuntimeBackend interface {
+	ComputerID() string
+	Kind() Kind
+	Root() string
+
+	// Resolve confines path to Root. forWrite permits a missing leaf but still
+	// requires every existing ancestor and an existing leaf to resolve inside
+	// the workspace.
+	Resolve(ctx context.Context, path string, forWrite bool) (string, error)
+	ReadFile(ctx context.Context, path string) ([]byte, error)
+	WriteFile(ctx context.Context, path string, data []byte) error
+	ReadDir(ctx context.Context, path string) ([]FileEntry, error)
+	Execute(ctx context.Context, command, cwd string, output io.Writer) (ExecResult, error)
+	Close() error
+}
+
+// FileEntry is the transport-neutral subset of fs.FileInfo needed by the
+// directory and search tools.
+type FileEntry struct {
+	Name  string
+	Size  int64
+	Mode  fs.FileMode
+	IsDir bool
+}
+
+// ExecResult describes a completed command. A non-zero exit status is a
+// normal result; transport/start failures are returned as errors.
+type ExecResult struct {
+	ExitCode int
+}

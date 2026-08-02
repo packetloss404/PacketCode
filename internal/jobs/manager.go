@@ -91,6 +91,16 @@ type Config struct {
 	// codebase.
 	Root string
 
+	// DefaultWorkspace binds top-level jobs that do not name a computer.
+	// Its zero value preserves the historical local Root behavior.
+	DefaultWorkspace Workspace
+	// ResolveWorkspace maps explicit computer selectors and persisted stable
+	// ids without performing network I/O.
+	ResolveWorkspace WorkspaceResolver
+	// OpenBackend returns a fresh independently-owned backend for one remote
+	// worker. Local jobs do not call it.
+	OpenBackend BackendOpener
+
 	// OnUpdate fires asynchronously on every state transition. The
 	// Manager invokes it from a separate goroutine so a slow
 	// subscriber can't block the worker.
@@ -122,6 +132,7 @@ type SpawnRequest struct {
 	Model        string
 	SystemPrompt string
 	AllowWrite   bool
+	Computer     string // optional registered computer name/id selector
 }
 
 // SpawnError discriminates programmatic Spawn failures so the caller
@@ -150,26 +161,30 @@ func (e *SpawnError) Error() string {
 // back to its parent and that DrainResults yields to the App for inline
 // notification.
 type Result struct {
-	JobID          string
-	Provider       string
-	Model          string
-	Summary        string
-	Error          string
-	Reason         string
-	State          State
-	Status         ResultStatus
-	DurationMS     int64
-	InputTokens    int
-	OutputTokens   int
-	CostUSD        float64
-	ParentJobID    string
-	Prompt         string
-	Depth          int
-	SessionID      string
-	Artifacts      []Artifact
-	WorktreePath   string
-	WorktreeBranch string
-	WorktreeBase   string
+	JobID             string
+	Provider          string
+	Model             string
+	Summary           string
+	Error             string
+	Reason            string
+	State             State
+	Status            ResultStatus
+	DurationMS        int64
+	InputTokens       int
+	OutputTokens      int
+	CostUSD           float64
+	ParentJobID       string
+	Prompt            string
+	Depth             int
+	SessionID         string
+	ComputerID        string
+	ComputerName      string
+	WorkingDir        string
+	WorkspaceIdentity string
+	Artifacts         []Artifact
+	WorktreePath      string
+	WorktreeBranch    string
+	WorktreeBase      string
 }
 
 // Manager owns the lifecycle of every background job. Construction is
@@ -869,26 +884,30 @@ func resultFromJob(j *Job) Result {
 		dur = j.FinishedAt.Sub(j.StartedAt).Milliseconds()
 	}
 	return Result{
-		JobID:          j.ID,
-		Provider:       j.Provider,
-		Model:          j.Model,
-		Summary:        j.Summary,
-		Error:          j.Error,
-		Reason:         j.Reason,
-		State:          j.State,
-		Status:         normalizeResultStatus(j.ResultStatus),
-		DurationMS:     dur,
-		InputTokens:    j.InputTokens,
-		OutputTokens:   j.OutputTokens,
-		CostUSD:        j.CostUSD,
-		ParentJobID:    j.ParentJobID,
-		Prompt:         j.Prompt,
-		Depth:          j.Depth,
-		SessionID:      j.SessionID,
-		Artifacts:      cloneArtifacts(j.Artifacts),
-		WorktreePath:   j.WorktreePath,
-		WorktreeBranch: j.WorktreeBranch,
-		WorktreeBase:   j.WorktreeBase,
+		JobID:             j.ID,
+		Provider:          j.Provider,
+		Model:             j.Model,
+		Summary:           j.Summary,
+		Error:             j.Error,
+		Reason:            j.Reason,
+		State:             j.State,
+		Status:            normalizeResultStatus(j.ResultStatus),
+		DurationMS:        dur,
+		InputTokens:       j.InputTokens,
+		OutputTokens:      j.OutputTokens,
+		CostUSD:           j.CostUSD,
+		ParentJobID:       j.ParentJobID,
+		Prompt:            j.Prompt,
+		Depth:             j.Depth,
+		SessionID:         j.SessionID,
+		ComputerID:        j.ComputerID,
+		ComputerName:      j.ComputerName,
+		WorkingDir:        j.WorkingDir,
+		WorkspaceIdentity: j.WorkspaceIdentity,
+		Artifacts:         cloneArtifacts(j.Artifacts),
+		WorktreePath:      j.WorktreePath,
+		WorktreeBranch:    j.WorktreeBranch,
+		WorktreeBase:      j.WorktreeBase,
 	}
 }
 
@@ -909,6 +928,11 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 		return Snapshot{}, perr
 	}
 	m.mu.Unlock()
+
+	workspace, perr := m.resolveSpawnWorkspace(req)
+	if perr != nil {
+		return Snapshot{}, perr
+	}
 
 	provSlug, modelID, perr := m.resolveProviderModel(req)
 	if perr != nil {
@@ -936,17 +960,22 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 
 	now := time.Now().UTC()
 	job := &Job{
-		ID:          id,
-		SessionID:   subID,
-		ParentJobID: req.ParentJobID,
-		Prompt:      req.Prompt,
-		Provider:    provSlug,
-		Model:       modelID,
-		State:       StateQueued,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Depth:       depth,
-		AllowWrite:  req.AllowWrite,
+		ID:                id,
+		SessionID:         subID,
+		ParentJobID:       req.ParentJobID,
+		Prompt:            req.Prompt,
+		Provider:          provSlug,
+		Model:             modelID,
+		State:             StateQueued,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		Depth:             depth,
+		AllowWrite:        req.AllowWrite,
+		ComputerID:        workspace.ComputerID,
+		ComputerName:      workspace.ComputerName,
+		WorkingDir:        workspace.WorkingDir,
+		WorkspaceIdentity: workspace.Identity,
+		ComputerPolicy:    workspace.Policy,
 	}
 	m.stampSnapshotLocked(job, now, "queued", req.Prompt, false, false)
 	// Allocate the per-job ctx and cancel func eagerly so /cancel works

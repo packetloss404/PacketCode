@@ -63,6 +63,12 @@ func (m *Manager) Resubmit(id string) (Snapshot, *SpawnError) {
 		AllowWrite:  old.AllowWrite,
 		ParentJobID: old.ParentJobID,
 	}
+	originalWorkspace := workspaceOfJob(old, m.cfg.Root)
+	if old.ComputerID != "" {
+		// Resolve by stable id, not display name. The resolver must compare the
+		// current endpoint/root identity before a new run is allowed.
+		req.Computer = old.ComputerID
+	}
 	// Spawn derives depth as ParentDepth+1 for parented jobs, so step back
 	// one to land the successor at the same depth as the original.
 	if req.ParentJobID != "" && old.Depth > 0 {
@@ -71,6 +77,48 @@ func (m *Manager) Resubmit(id string) (Snapshot, *SpawnError) {
 		req.ParentDepth = old.Depth
 	}
 	m.mu.Unlock()
+
+	if originalWorkspace.ComputerID != "" {
+		resolved, workspaceErr := m.resolveWorkspaceSelector(originalWorkspace.ComputerID)
+		if workspaceErr != nil {
+			return Snapshot{}, workspaceErr
+		}
+		if !sameWorkspace(resolved, originalWorkspace) {
+			return Snapshot{}, &SpawnError{
+				Code: "workspace_identity_mismatch",
+				Reason: fmt.Sprintf(
+					"job %s was bound to %s; the current registry resolves that id to %s",
+					id, workspaceLabel(originalWorkspace), workspaceLabel(resolved),
+				),
+			}
+		}
+	} else {
+		current, workspaceErr := m.resolveSpawnWorkspace(SpawnRequest{})
+		if workspaceErr != nil {
+			return Snapshot{}, workspaceErr
+		}
+		if current.ComputerID != "" {
+			return Snapshot{}, &SpawnError{
+				Code: "workspace_unbound",
+				Reason: fmt.Sprintf(
+					"job %s was local or has no Packet Computer binding; it cannot be resubmitted into %s",
+					id, workspaceLabel(current),
+				),
+			}
+		}
+		// Jobs created after workspace binding shipped carry a local root.
+		// Preserve it exactly; only legacy records with no root retain the
+		// historical current-local-root behavior.
+		if old.WorkingDir != "" && current.WorkingDir != old.WorkingDir {
+			return Snapshot{}, &SpawnError{
+				Code: "workspace_identity_mismatch",
+				Reason: fmt.Sprintf(
+					"job %s was bound to local root %s, not %s",
+					id, old.WorkingDir, current.WorkingDir,
+				),
+			}
+		}
+	}
 
 	if req.Prompt == "" {
 		return Snapshot{}, &SpawnError{

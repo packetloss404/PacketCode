@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 type worktreeInfo struct {
@@ -299,14 +302,30 @@ func nonEmptyString(v, fallback string) string {
 }
 
 func appendWorktreeArtifacts(ctx context.Context, artifacts []Artifact, j *Job) []Artifact {
+	return appendWorktreeArtifactsForBackend(ctx, artifacts, j, nil)
+}
+
+func appendWorktreeArtifactsForBackend(ctx context.Context, artifacts []Artifact, j *Job, backend computers.RuntimeBackend) []Artifact {
 	if j == nil || j.WorktreePath == "" || len(artifacts) >= maxArtifactsPerJob {
 		return artifacts
 	}
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		return artifacts
+	var status string
+	var err error
+	if backend != nil {
+		var out bytes.Buffer
+		var result computers.ExecResult
+		result, err = backend.Execute(ctx, "git status --porcelain", ".", &out)
+		if err == nil && result.ExitCode != 0 {
+			err = fmt.Errorf("git status exit %d", result.ExitCode)
+		}
+		status = strings.TrimSpace(out.String())
+	} else {
+		var gitPath string
+		gitPath, err = exec.LookPath("git")
+		if err == nil {
+			status, _, err = gitOutput(ctx, gitPath, j.WorktreePath, "status", "--porcelain")
+		}
 	}
-	status, _, err := gitOutput(ctx, gitPath, j.WorktreePath, "status", "--porcelain")
 	if err != nil || strings.TrimSpace(status) == "" {
 		return artifacts
 	}

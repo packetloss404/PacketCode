@@ -88,6 +88,52 @@ name = "report"
 	require.Contains(t, write.Agent.Prompt, "{{.steps.scan}}")
 }
 
+func TestRemoteLoader_UsesUserWorkflowsAndIgnoresLocalProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PACKETCODE_HOME", home)
+	userDir := filepath.Join(home, "workflows")
+	require.NoError(t, os.MkdirAll(userDir, 0o755))
+	const userSpec = `
+schema_version = 1
+name = "user-only"
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "s"
+prompt = "from user workflows"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(userDir, "user-only.toml"), []byte(userSpec), 0o644))
+
+	project := t.TempDir()
+	projectDir := filepath.Join(project, ".packetcode", "workflows")
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
+	const projectSpec = `
+schema_version = 1
+name = "project-only"
+[[phases]]
+name = "p"
+[[phases.steps]]
+name = "s"
+prompt = "must not load for a remote controller"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "project-only.toml"), []byte(projectSpec), 0o644))
+
+	// NewRemoteLoader intentionally has no project path, even when the process
+	// happens to have launched from a local checkout.
+	previousDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(project))
+	t.Cleanup(func() { _ = os.Chdir(previousDir) })
+	l := NewRemoteLoader()
+	require.Contains(t, l.List(), "review")
+	require.Contains(t, l.List(), "user-only")
+	require.NotContains(t, l.List(), "project-only")
+	_, ok := l.Get("user-only")
+	require.True(t, ok)
+	_, ok = l.Get("project-only")
+	require.False(t, ok)
+}
+
 func TestLoader_MalformedProjectOverrideDoesNotFallBack(t *testing.T) {
 	dir := t.TempDir()
 	wfDir := filepath.Join(dir, ".packetcode", "workflows")

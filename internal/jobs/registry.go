@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 )
@@ -57,6 +58,24 @@ func (m *Manager) buildJobToolRegistry(
 	extraTools []tools.Tool,
 	rootOverride ...string,
 ) *tools.Registry {
+	return m.buildJobToolRegistryForBackend(
+		parentDepth, allowWrite, jobID, backups, extraTools, nil, rootOverride...,
+	)
+}
+
+// buildJobToolRegistryForBackend is the transport-aware worker path. A nil
+// backend preserves the historical local constructors. A remote backend is
+// owned by exactly one worker and is threaded into every backend-aware core
+// tool; local-only code intelligence is deliberately omitted.
+func (m *Manager) buildJobToolRegistryForBackend(
+	parentDepth int,
+	allowWrite bool,
+	jobID string,
+	backups *session.BackupManager,
+	extraTools []tools.Tool,
+	backend computers.RuntimeBackend,
+	rootOverride ...string,
+) *tools.Registry {
 	out := tools.NewRegistry()
 
 	// Walk the main registry and emit fresh per-job copies. We don't
@@ -79,12 +98,16 @@ func (m *Manager) buildJobToolRegistry(
 		name := t.Name()
 		switch {
 		case readOnlyToolNames[name]:
-			out.Register(cloneReadOnlyTool(name, root, t))
+			if cloned := cloneReadOnlyTool(name, root, backend, t); cloned != nil {
+				out.Register(cloned)
+			}
 		case destructiveToolNames[name]:
 			if !allowWrite {
 				continue
 			}
-			out.Register(cloneDestructiveTool(name, root, backups, m, t))
+			if cloned := cloneDestructiveTool(name, root, backups, backend, m, t); cloned != nil {
+				out.Register(cloned)
+			}
 		case name == "spawn_agent":
 			// spawn_agent is wired only through extraTools, where the
 			// worker has already applied depth and parent-write gates.
@@ -105,7 +128,20 @@ func (m *Manager) buildJobToolRegistry(
 // cloneReadOnlyTool builds a fresh instance of the named read-only tool
 // against the supplied project root. Falls back to the source instance
 // if the name is unknown (forward compatibility).
-func cloneReadOnlyTool(name, root string, src tools.Tool) tools.Tool {
+func cloneReadOnlyTool(name, root string, backend computers.RuntimeBackend, src tools.Tool) tools.Tool {
+	if backend != nil {
+		switch name {
+		case "read_file":
+			return tools.NewReadFileToolWithBackend(backend)
+		case "search_codebase":
+			return tools.NewSearchCodebaseToolWithBackend(backend)
+		case "list_directory":
+			return tools.NewListDirectoryToolWithBackend(backend)
+		default:
+			// Code-intelligence tools still require a local filesystem.
+			return nil
+		}
+	}
 	switch name {
 	case "read_file":
 		return tools.NewReadFileTool(root)
@@ -129,7 +165,18 @@ func cloneReadOnlyTool(name, root string, src tools.Tool) tools.Tool {
 // tool, wired to the per-job BackupManager. write_file/patch_file are
 // further wrapped in pathLockTool so concurrent jobs writing to the same
 // absolute path serialise via Manager.acquirePathLock.
-func cloneDestructiveTool(name, root string, backups *session.BackupManager, m *Manager, src tools.Tool) tools.Tool {
+func cloneDestructiveTool(name, root string, backups *session.BackupManager, backend computers.RuntimeBackend, m *Manager, src tools.Tool) tools.Tool {
+	if backend != nil {
+		switch name {
+		case "write_file":
+			return &pathLockTool{inner: tools.NewWriteFileToolWithBackend(backend), m: m, root: root, backend: backend, paramKey: "path"}
+		case "patch_file":
+			return &pathLockTool{inner: tools.NewPatchFileToolWithBackend(backend), m: m, root: root, backend: backend, paramKey: "path"}
+		case "execute_command":
+			return tools.NewExecuteCommandToolWithBackend(backend)
+		}
+		return nil
+	}
 	switch name {
 	case "write_file":
 		return &pathLockTool{inner: tools.NewWriteFileTool(root, backups), m: m, root: root, paramKey: "path"}
@@ -156,6 +203,7 @@ type pathLockTool struct {
 	inner    tools.Tool
 	m        *Manager
 	root     string
+	backend  computers.RuntimeBackend
 	paramKey string
 }
 
@@ -185,7 +233,7 @@ func (p *pathLockTool) PreviewPatchDiff(path string, patches []tools.PatchOp) (s
 }
 
 func (p *pathLockTool) Execute(ctx context.Context, raw json.RawMessage) (tools.ToolResult, error) {
-	abs := p.extractPath(raw)
+	abs := p.extractPath(ctx, raw)
 	if abs != "" && p.m != nil {
 		mu := p.m.acquirePathLock(abs)
 		mu.Lock()
@@ -197,7 +245,7 @@ func (p *pathLockTool) Execute(ctx context.Context, raw json.RawMessage) (tools.
 // extractPath pulls the "path" param out of the raw arguments and
 // resolves it relative to root. Returns "" on parse failure or missing
 // path — the inner tool's own validation will then surface the error.
-func (p *pathLockTool) extractPath(raw json.RawMessage) string {
+func (p *pathLockTool) extractPath(ctx context.Context, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -213,7 +261,16 @@ func (p *pathLockTool) extractPath(raw json.RawMessage) string {
 	if !ok || s == "" {
 		return ""
 	}
-	abs, err := resolveAbsoluteForLock(p.root, s)
+	var abs string
+	var err error
+	if p.backend != nil {
+		abs, err = p.backend.Resolve(ctx, s, true)
+		if err == nil {
+			abs = p.backend.ComputerID() + "\x00" + abs
+		}
+	} else {
+		abs, err = resolveAbsoluteForLock(p.root, s)
+	}
 	if err != nil {
 		return ""
 	}

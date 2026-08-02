@@ -386,9 +386,13 @@ Background agents are useful for independent research, reviews, or isolated impl
 /spawn inspect the authentication flow for race conditions
 /spawn --provider gemini --model gemini-2.5-flash audit the API handlers
 /spawn --write implement the focused test fix
+/spawn --computer production inspect the deployed service
+/spawn --computer production --write migrate the app
 ```
 
-Flags must come before the prompt. A normal `/spawn` job is read-only and shares the foreground project root. `/spawn --write` requires a Git repository and creates a separate worktree and branch from the current `HEAD`:
+Flags must come before the prompt. A normal `/spawn` job is read-only and shares the selected project root. A remote foreground session inherits its active Packet Computer; from a local session, `--computer <name>` selects a registered SSH computer. Each remote job owns a separate SSH/SFTP connection so parallel agents do not serialize behind one shell.
+
+`/spawn --write` requires a Git repository and creates a separate worktree and branch from the current `HEAD`, locally or on the selected Packet Computer:
 
 ```text
 ~/.packetcode/worktrees/<repo-key>/<job-id>
@@ -396,6 +400,10 @@ branch: packetcode-job-<job-id>
 ```
 
 Uncommitted changes from the foreground checkout are not copied into that worktree. packetcode does not merge or delete completed worktrees automatically.
+
+The resolved computer, endpoint/root identity, and working directory are frozen before a remote job is queued. Nested jobs inherit that target and cannot pivot to another computer. The computer's write and shell policy is a restrictive overlay on the session policy. If a remote worktree cannot be created, the job fails closed instead of editing the registered checkout.
+
+Remote jobs are process-lifetime work, not a durable daemon service. Closing packetcode or losing SSH does not reconnect and continue an agent loop, and detached remote descendants may require operator cleanup. Saved job evidence can be inspected or explicitly resubmitted as a new run.
 
 ### Agent View
 
@@ -454,6 +462,7 @@ Workflows arrange sequential phases and parallel fan-out over the background job
 /workflows list
 /workflows validate review
 /workflows run review
+/workflows run --computer production review
 /workflows run review target="the staged diff"
 /workflows <run-id>
 /workflows stop <run-id>
@@ -462,7 +471,9 @@ Workflows arrange sequential phases and parallel fan-out over the background job
 
 `/workflow` is also accepted as an alias. Bare `/workflows` opens the run view. In that view, arrows or `j`/`k` move, `Enter`/`o` expands a row, `c` cancels the selected active run, and `Esc`/`q` returns to chat.
 
-A built-in `review` workflow is available immediately. User definitions live in `~/.packetcode/workflows/*.toml`; project definitions live in `.packetcode/workflows/*.toml` and take precedence.
+A built-in `review` workflow is available immediately. User definitions live in `~/.packetcode/workflows/*.toml`; local project definitions live in `.packetcode/workflows/*.toml` and take precedence. Remote sessions load built-ins plus local user definitions; remote project workflow discovery is deferred so workflow loading does not block the TUI on SFTP.
+
+`--computer <name>` routes the whole workflow run to one registered computer. Every work agent, retry, and verifier uses that target. Each write-enabled workflow agent receives its own worktree; later steps receive summaries, not another job's unmerged files, so keep one cohesive mutation in one write step.
 
 A compact custom example:
 
@@ -821,11 +832,14 @@ Before destructive or broad work, a safe rhythm is:
 | `/model [id]` | Open the picker or switch model. |
 | `/models` | Alias that opens the model picker. |
 | `/effort [default\|low\|medium\|high\|xhigh\|max\|ultra]` | Show or set supported reasoning effort. |
-| `/spawn [--provider slug] [--model id] [--write] <prompt>` | Start a background agent. |
+| `/spawn [--computer name] [--provider slug] [--model id] [--write] <prompt>` | Start a local or Packet Computer background agent. |
 | `/agents [id]` | Open Agent View or an agent transcript. |
 | `/jobs [id]` | List jobs or open a job transcript. |
 | `/cancel <id\|all>` | Cancel background work. |
-| `/workflows [run <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, or inspect workflows. |
+| `/computers` | List registered Packet Computers. |
+| `/computers status <name>` | Show a computer's stored record. |
+| `/computers ssh <name> <user@host> <root> --fingerprint <SHA256:...>` | Register a pinned SSH computer. |
+| `/workflows [run [--computer name] <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, or inspect local or remote workflows. |
 | `/loop [interval] <prompt\|/command>` | Repeat work; use `list` or `stop [id\|all]`. |
 | `/queue [drop <n>\|clear]` | Inspect or manage queued foreground prompts. |
 | `/sessions` | List sessions. |

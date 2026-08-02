@@ -46,6 +46,7 @@ type JobSpawnRequest struct {
 	ParentDepth  int
 	Provider     string
 	Model        string
+	Computer     string
 	SystemPrompt string
 	AllowWrite   bool
 }
@@ -67,6 +68,9 @@ type JobSpawnResult struct {
 	Model          string
 	Prompt         string
 	Depth          int
+	ComputerID     string
+	ComputerName   string
+	WorkingDir     string
 	WorktreePath   string
 	WorktreeBranch string
 }
@@ -115,6 +119,9 @@ type JobWaitResult struct {
 	Reason         string
 	State          string
 	Depth          int
+	ComputerID     string
+	ComputerName   string
+	WorkingDir     string
 	DurationMS     int64
 	InputTokens    int
 	OutputTokens   int

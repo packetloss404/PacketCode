@@ -14,6 +14,7 @@ const spawnAgentSchema = `{
     "prompt":   { "type": "string", "description": "The task for the background agent. Be specific and self-contained — the spawned agent has no shared memory with you." },
     "provider": { "type": "string", "description": "Optional registered provider slug override. Defaults to the parent's provider." },
     "model":    { "type": "string", "description": "Optional model id override. Defaults to the parent's model." },
+	"computer": { "type": "string", "description": "Optional registered Packet Computer name. Foreground calls may target it; background children normally inherit their parent's computer and cannot pivot to another one." },
     "wait":     { "type": "boolean", "description": "If true, this tool call blocks until the spawned job completes and returns its result inline. If false (default), returns the job id immediately and the result surfaces later." },
     "allow_write": { "type": "boolean", "description": "If true, opt the child job into destructive tools (write_file, patch_file, execute_command). This is independent of wait and may be unavailable from read-only parent jobs." }
   },
@@ -85,6 +86,7 @@ type spawnAgentParams struct {
 	Prompt     string `json:"prompt"`
 	Provider   string `json:"provider,omitempty"`
 	Model      string `json:"model,omitempty"`
+	Computer   string `json:"computer,omitempty"`
 	Wait       bool   `json:"wait,omitempty"`
 	AllowWrite bool   `json:"allow_write,omitempty"`
 }
@@ -123,6 +125,7 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, raw json.RawMessage) (Tool
 		Prompt:      p.Prompt,
 		Provider:    p.Provider,
 		Model:       p.Model,
+		Computer:    p.Computer,
 		ParentJobID: t.ParentJobID,
 		ParentDepth: t.ParentDepth,
 		AllowWrite:  p.AllowWrite,
@@ -152,9 +155,13 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, raw json.RawMessage) (Tool
 	}
 
 	if !p.Wait {
+		target := "local"
+		if snap.ComputerName != "" {
+			target = snap.ComputerName
+		}
 		content := fmt.Sprintf(
-			"Spawned job %s (%s). Result will appear when the job completes.",
-			snap.ID, nonEmpty(provLabel, "unknown"),
+			"Spawned job %s (%s) on %s. Result will appear when the job completes.",
+			snap.ID, nonEmpty(provLabel, "unknown"), target,
 		)
 		return ToolResult{
 			Content: content,
@@ -162,6 +169,9 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, raw json.RawMessage) (Tool
 				"job_id":          snap.ID,
 				"provider":        snap.Provider,
 				"model":           snap.Model,
+				"computer_id":     snap.ComputerID,
+				"computer_name":   snap.ComputerName,
+				"working_dir":     snap.WorkingDir,
 				"waited":          false,
 				"worktree_path":   snap.WorktreePath,
 				"worktree_branch": snap.WorktreeBranch,
@@ -247,6 +257,9 @@ func (t *SpawnAgentTool) waitAndReport(ctx context.Context, snap JobSpawnResult,
 				"state":           res.State,
 				"provider":        res.Provider,
 				"model":           res.Model,
+				"computer_id":     res.ComputerID,
+				"computer_name":   res.ComputerName,
+				"working_dir":     res.WorkingDir,
 				"duration_ms":     res.DurationMS,
 				"input_tokens":    res.InputTokens,
 				"output_tokens":   res.OutputTokens,

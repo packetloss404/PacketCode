@@ -21,13 +21,16 @@ func writeInitialSubSession(sessionsDir string, j *Job) error {
 	}
 	now := time.Now().UTC()
 	s := session.Session{
-		ID:        j.SessionID,
-		Name:      "job-" + j.ID,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Provider:  j.Provider,
-		Model:     j.Model,
-		Messages:  []provider.Message{},
+		ID:                j.SessionID,
+		Name:              "job-" + j.ID,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		Provider:          j.Provider,
+		Model:             j.Model,
+		ComputerID:        j.ComputerID,
+		WorkingDir:        j.WorkingDir,
+		WorkspaceIdentity: j.WorkspaceIdentity,
+		Messages:          []provider.Message{},
 	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"path"
 	"sort"
 	"strings"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 const listDirectorySchema = `{
@@ -27,11 +29,21 @@ const (
 )
 
 type ListDirectoryTool struct {
-	Root string
+	Root       string
+	Backend    computers.RuntimeBackend
+	backendErr error
 }
 
 func NewListDirectoryTool(root string) *ListDirectoryTool {
-	return &ListDirectoryTool{Root: root}
+	backend, err := computers.NewLocalBackend(root)
+	return &ListDirectoryTool{Root: root, Backend: backend, backendErr: err}
+}
+
+func NewListDirectoryToolWithBackend(backend computers.RuntimeBackend) *ListDirectoryTool {
+	if backend == nil {
+		return &ListDirectoryTool{backendErr: fmt.Errorf("runtime backend is nil")}
+	}
+	return &ListDirectoryTool{Root: backend.Root(), Backend: backend}
 }
 
 func (*ListDirectoryTool) Name() string            { return "list_directory" }
@@ -76,24 +88,15 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, raw json.RawMessage) (T
 		maxEntries = hardListMax
 	}
 
-	abs, err := resolveExistingInRoot(t.Root, p.Path)
-	if err != nil {
-		return ToolResult{Content: err.Error(), IsError: true}, nil
-	}
-
-	info, err := os.Stat(abs)
-	if err != nil {
-		return ToolResult{Content: fmt.Sprintf("list_directory: %s", err), IsError: true}, nil
-	}
-	if !info.IsDir() {
-		return ToolResult{Content: fmt.Sprintf("list_directory: %s is not a directory", p.Path), IsError: true}, nil
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("list_directory: %s", t.backendErr), IsError: true}, nil
 	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s/\n", p.Path)
 	totalEntries := 0
 	truncated := false
-	if err := walkTree(abs, "", depth, maxEntries, &b, &totalEntries, &truncated); err != nil {
+	if err := walkBackendTree(ctx, t.Backend, p.Path, "", depth, maxEntries, &b, &totalEntries, &truncated); err != nil {
 		return ToolResult{Content: fmt.Sprintf("list_directory: %s", err), IsError: true}, nil
 	}
 	if truncated {
@@ -112,28 +115,28 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, raw json.RawMessage) (T
 
 // walkTree renders one directory level into b using box-drawing chars and
 // recurses up to depth-1 more levels.
-func walkTree(dir, prefix string, depth, maxEntries int, b *strings.Builder, total *int, truncated *bool) error {
+func walkBackendTree(ctx context.Context, backend computers.RuntimeBackend, dir, prefix string, depth, maxEntries int, b *strings.Builder, total *int, truncated *bool) error {
 	if depth <= 0 || *truncated {
 		return nil
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := backend.ReadDir(ctx, dir)
 	if err != nil {
 		return err
 	}
 	// Filter and sort: directories first, then files; within each, alpha.
-	visible := make([]os.DirEntry, 0, len(entries))
+	visible := make([]computers.FileEntry, 0, len(entries))
 	for _, e := range entries {
-		if shouldSkipDir(e.Name()) {
+		if shouldSkipDir(e.Name) {
 			continue
 		}
 		visible = append(visible, e)
 	}
 	sort.Slice(visible, func(i, j int) bool {
-		di, dj := visible[i].IsDir(), visible[j].IsDir()
+		di, dj := visible[i].IsDir, visible[j].IsDir
 		if di != dj {
 			return di
 		}
-		return visible[i].Name() < visible[j].Name()
+		return visible[i].Name < visible[j].Name
 	})
 
 	for i, e := range visible {
@@ -149,29 +152,17 @@ func walkTree(dir, prefix string, depth, maxEntries int, b *strings.Builder, tot
 			branch = "└── "
 			nextPrefix = prefix + "    "
 		}
-		name := e.Name()
-		if e.IsDir() {
+		name := e.Name
+		if e.IsDir {
 			fmt.Fprintf(b, "%s%s%s/\n", prefix, branch, name)
-			if err := walkTree(joinPath(dir, name), nextPrefix, depth-1, maxEntries, b, total, truncated); err != nil {
+			if err := walkBackendTree(ctx, backend, path.Join(dir, name), nextPrefix, depth-1, maxEntries, b, total, truncated); err != nil {
 				return err
 			}
 		} else {
-			info, err := e.Info()
-			if err == nil {
-				fmt.Fprintf(b, "%s%s%s (%s)\n", prefix, branch, name, formatSize(info.Size()))
-			} else {
-				fmt.Fprintf(b, "%s%s%s\n", prefix, branch, name)
-			}
+			fmt.Fprintf(b, "%s%s%s (%s)\n", prefix, branch, name, formatSize(e.Size))
 		}
 	}
 	return nil
-}
-
-func joinPath(a, b string) string {
-	if strings.HasSuffix(a, "/") || strings.HasSuffix(a, "\\") {
-		return a + b
-	}
-	return a + string(os.PathSeparator) + b
 }
 
 // formatSize renders a byte count as B/KB/MB. Resolution doesn't matter

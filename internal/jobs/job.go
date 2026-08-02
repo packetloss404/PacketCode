@@ -13,6 +13,7 @@ package jobs
 import (
 	"time"
 
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/provider"
 )
 
@@ -89,37 +90,42 @@ func normalizeResultStatus(s ResultStatus) ResultStatus {
 // Manager owns the canonical Job; UI/test code should consume Snapshots
 // to avoid sharing mutable state.
 type Job struct {
-	ID             string // 8-char short id, also the subsession suffix
-	SessionID      string // full id of the job's underlying session.Session
-	ParentJobID    string // "" when spawned from the main session
-	Prompt         string // initial user message
-	Provider       string // slug; may differ from main session
-	Model          string // model id under that provider
-	State          State
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	UpdatedAt      time.Time
-	Summary        string // short result summary surfaced into main convo
-	Error          string // populated on StateFailed
-	Reason         string // free-form; "previous app exit" / "app shutdown" / etc.
-	LastActivity   string // concise activity label for dashboards
-	LastMessage    string // latest human-visible text/result snippet
-	NeedsInput     bool   // true while a job is blocked on user action
-	NeedsApproval  bool   // true while a job is blocked on tool approval
-	Seq            int64  // monotonic snapshot sequence for stale-update guards
-	InputTokens    int
-	OutputTokens   int
-	CostUSD        float64
-	Depth          int                // 0 for main-spawned, parent.Depth+1 otherwise
-	Transcript     []provider.Message // snapshot taken when state becomes terminal
-	AllowWrite     bool               // tracks whether destructive tools were enabled
-	ResultStatus   ResultStatus       // pending/seen/ignored/injected/consumed after terminal result exists
-	Artifacts      []Artifact         // bounded structured refs captured from tool execution
-	WorktreePath   string             // per-job git worktree root when write isolation is active
-	WorktreeBranch string             // branch checked out by the worktree
-	WorktreeBase   string             // base ref/SHA used to create the worktree
-	WorktreeNote   string             // fallback or setup note when no worktree was created
+	ID                string // 8-char short id, also the subsession suffix
+	SessionID         string // full id of the job's underlying session.Session
+	ParentJobID       string // "" when spawned from the main session
+	Prompt            string // initial user message
+	Provider          string // slug; may differ from main session
+	Model             string // model id under that provider
+	State             State
+	CreatedAt         time.Time
+	StartedAt         time.Time
+	FinishedAt        time.Time
+	UpdatedAt         time.Time
+	Summary           string // short result summary surfaced into main convo
+	Error             string // populated on StateFailed
+	Reason            string // free-form; "previous app exit" / "app shutdown" / etc.
+	LastActivity      string // concise activity label for dashboards
+	LastMessage       string // latest human-visible text/result snippet
+	NeedsInput        bool   // true while a job is blocked on user action
+	NeedsApproval     bool   // true while a job is blocked on tool approval
+	Seq               int64  // monotonic snapshot sequence for stale-update guards
+	InputTokens       int
+	OutputTokens      int
+	CostUSD           float64
+	Depth             int                // 0 for main-spawned, parent.Depth+1 otherwise
+	Transcript        []provider.Message // snapshot taken when state becomes terminal
+	AllowWrite        bool               // tracks whether destructive tools were enabled
+	ComputerID        string             // stable Packet Computer id; empty for local jobs
+	ComputerName      string             // display name captured at spawn time
+	WorkingDir        string             // immutable local or remote workspace root
+	WorkspaceIdentity string             // immutable endpoint+root identity for resubmit safety
+	ComputerPolicy    computers.Policy   // conservative per-computer policy captured at spawn
+	ResultStatus      ResultStatus       // pending/seen/ignored/injected/consumed after terminal result exists
+	Artifacts         []Artifact         // bounded structured refs captured from tool execution
+	WorktreePath      string             // per-job git worktree root when write isolation is active
+	WorktreeBranch    string             // branch checked out by the worktree
+	WorktreeBase      string             // base ref/SHA used to create the worktree
+	WorktreeNote      string             // fallback or setup note when no worktree was created
 
 	// Reconcile lineage. A job abandoned by a previous process exit is
 	// rewritten as Cancelled and marked Recovered; it is never resumed.
@@ -135,6 +141,8 @@ type Job struct {
 // fresh Snapshot on every state transition.
 type Snapshot struct {
 	ID, ParentJobID, Prompt, Provider, Model, Summary, Error string
+	ComputerID, ComputerName, WorkingDir                     string
+	WorkspaceIdentity                                        string
 	LastActivity, LastMessage                                string
 	State                                                    State
 	ResultStatus                                             ResultStatus
@@ -154,35 +162,39 @@ type Snapshot struct {
 // read lock (or otherwise know the Job is not being mutated).
 func snapshotOf(j *Job) Snapshot {
 	s := Snapshot{
-		ID:             j.ID,
-		ParentJobID:    j.ParentJobID,
-		Prompt:         j.Prompt,
-		Provider:       j.Provider,
-		Model:          j.Model,
-		Summary:        j.Summary,
-		Error:          j.Error,
-		State:          j.State,
-		ResultStatus:   normalizeResultStatus(j.ResultStatus),
-		CreatedAt:      j.CreatedAt,
-		StartedAt:      j.StartedAt,
-		FinishedAt:     j.FinishedAt,
-		UpdatedAt:      j.UpdatedAt,
-		CostUSD:        j.CostUSD,
-		Depth:          j.Depth,
-		LastActivity:   j.LastActivity,
-		LastMessage:    j.LastMessage,
-		NeedsInput:     j.NeedsInput,
-		NeedsApproval:  j.NeedsApproval,
-		AllowWrite:     j.AllowWrite,
-		Seq:            j.Seq,
-		Artifacts:      cloneArtifacts(j.Artifacts),
-		WorktreePath:   j.WorktreePath,
-		WorktreeBranch: j.WorktreeBranch,
-		WorktreeBase:   j.WorktreeBase,
-		WorktreeNote:   j.WorktreeNote,
-		Recovered:      j.Recovered,
-		ResubmitOf:     j.ResubmitOf,
-		ResubmittedAs:  j.ResubmittedAs,
+		ID:                j.ID,
+		ParentJobID:       j.ParentJobID,
+		Prompt:            j.Prompt,
+		Provider:          j.Provider,
+		Model:             j.Model,
+		Summary:           j.Summary,
+		Error:             j.Error,
+		State:             j.State,
+		ResultStatus:      normalizeResultStatus(j.ResultStatus),
+		CreatedAt:         j.CreatedAt,
+		StartedAt:         j.StartedAt,
+		FinishedAt:        j.FinishedAt,
+		UpdatedAt:         j.UpdatedAt,
+		CostUSD:           j.CostUSD,
+		Depth:             j.Depth,
+		LastActivity:      j.LastActivity,
+		LastMessage:       j.LastMessage,
+		NeedsInput:        j.NeedsInput,
+		NeedsApproval:     j.NeedsApproval,
+		AllowWrite:        j.AllowWrite,
+		ComputerID:        j.ComputerID,
+		ComputerName:      j.ComputerName,
+		WorkingDir:        j.WorkingDir,
+		WorkspaceIdentity: j.WorkspaceIdentity,
+		Seq:               j.Seq,
+		Artifacts:         cloneArtifacts(j.Artifacts),
+		WorktreePath:      j.WorktreePath,
+		WorktreeBranch:    j.WorktreeBranch,
+		WorktreeBase:      j.WorktreeBase,
+		WorktreeNote:      j.WorktreeNote,
+		Recovered:         j.Recovered,
+		ResubmitOf:        j.ResubmitOf,
+		ResubmittedAs:     j.ResubmittedAs,
 	}
 	s.Tokens.Input = j.InputTokens
 	s.Tokens.Output = j.OutputTokens

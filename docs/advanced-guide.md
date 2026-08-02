@@ -223,9 +223,23 @@ Use agents for independent investigations with clear deliverables. A good fan-ou
 /spawn inspect authentication correctness; report file:line findings only
 /spawn --provider codex --model gpt-5.6-sol audit concurrency and cancellation
 /spawn review docs against the current CLI and list mismatches
+/spawn --computer production inspect the deployed service
 ```
 
 `/spawn` flags must precede the prompt. Extra jobs queue when the concurrency cap is full.
+
+### Remote Packet Computer placement
+
+A remote foreground session defaults its jobs to the active Packet Computer. From a local session, place a job explicitly:
+
+```text
+/spawn --computer production audit the server configuration
+/spawn --computer production --write migrate the application
+```
+
+Packetcode resolves the computer before queueing and freezes its ID, endpoint/root identity, and working directory into the job. Nested agents inherit that binding and cannot pivot to another computer. Every active remote job owns a separate SSH/SFTP connection, preserving parallelism between workflow siblings. Computer write/shell policy only restricts the captured session policy; it never broadens it.
+
+This is process-lifetime execution. There is no remote PacketCode daemon or reconnect-and-continue loop yet. An app exit or lost SSH connection leaves local evidence that can be inspected or resubmitted as a new job, but it does not resume the original agent. Packetcode also cannot guarantee termination of detached remote descendants.
 
 ```toml
 [behavior]
@@ -289,6 +303,7 @@ Use a write job only when its file ownership is clear:
 ```text
 /spawn --write implement the parser fix and run its focused tests
 /spawn --provider codex --model gpt-5.6-sol --write update only docs/mcp.md
+/spawn --computer production --write migrate the service
 ```
 
 Write jobs require a usable git repository. They create:
@@ -299,7 +314,7 @@ branch: packetcode-job-<job-id>
 base: current HEAD
 ```
 
-The job never writes to the foreground checkout. The base is committed `HEAD`; uncommitted foreground changes are not copied into the job worktree. If worktree creation fails, the job fails closed.
+The job never writes to the foreground checkout. The base is committed `HEAD`; uncommitted foreground changes are not copied into the job worktree. On a Packet Computer, the worktree is created under that remote user's PacketCode state directory. If local or remote worktree creation fails, the job fails closed.
 
 After completion, use the path printed by `/agents` or `/jobs <id>`:
 
@@ -325,11 +340,14 @@ Workflows give repeated orchestration a declarative shape. Phases execute in ord
 /workflows list
 /workflows validate focused-review
 /workflows run review
+/workflows run --computer production review
 /workflows run review target="the staged diff"
 /workflows <run-id>
 /workflows stop <run-id>
 /workflows stop all
 ```
+
+In a remote foreground session, work agents, retries, and verifiers inherit the active computer. From a local session, `--computer <name>` routes the entire run to one registered computer. Remote sessions load built-in and local user workflow definitions; remote project definition discovery is deferred to avoid blocking the TUI on SFTP. Each write-enabled workflow agent gets a separate worktree, so later steps see its summary rather than unmerged files; use one write step for a cohesive migration.
 
 Example `.packetcode/workflows/focused-review.toml`:
 

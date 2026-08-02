@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 const patchFileSchema = `{
@@ -32,21 +33,34 @@ const patchFileSchema = `{
 }`
 
 type PatchFileTool struct {
-	Root    string
-	Backups BackupManager
+	Root       string
+	Backups    BackupManager
+	Backend    computers.RuntimeBackend
+	backendErr error
 }
 
 func NewPatchFileTool(root string, backups BackupManager) *PatchFileTool {
 	if backups == nil {
 		backups = NoopBackupManager()
 	}
-	return &PatchFileTool{Root: root, Backups: backups}
+	backend, err := computers.NewLocalBackend(root)
+	return &PatchFileTool{Root: root, Backups: backups, Backend: backend, backendErr: err}
+}
+
+func NewPatchFileToolWithBackend(backend computers.RuntimeBackend) *PatchFileTool {
+	if backend == nil {
+		return &PatchFileTool{Backups: NoopBackupManager(), backendErr: fmt.Errorf("runtime backend is nil")}
+	}
+	return &PatchFileTool{Root: backend.Root(), Backups: NoopBackupManager(), Backend: backend}
 }
 
 func (*PatchFileTool) Name() string            { return "patch_file" }
 func (*PatchFileTool) RequiresApproval() bool  { return true }
 func (*PatchFileTool) Schema() json.RawMessage { return json.RawMessage(patchFileSchema) }
-func (*PatchFileTool) Description() string {
+func (t *PatchFileTool) Description() string {
+	if t.Backend != nil && t.Backend.Kind() == computers.KindSSH {
+		return "Apply root-confined search/replace patches to a remote file over SFTP. Each search must appear exactly once. Requires user approval; remote /undo is unavailable."
+	}
 	return "Apply one or more search/replace patches to an existing file. Each search must appear exactly once. Returns a unified diff. Requires user approval."
 }
 
@@ -313,11 +327,14 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: "patch_file: at least one patch is required", IsError: true}, nil
 	}
 
-	abs, err := resolveExistingInRoot(t.Root, p.Path)
-	if err != nil {
-		return ToolResult{Content: err.Error(), IsError: true}, nil
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("patch_file: %s", t.backendErr), IsError: true}, nil
 	}
-	original, err := os.ReadFile(abs)
+	resolved, err := t.Backend.Resolve(ctx, p.Path, false)
+	if err != nil {
+		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
+	}
+	original, err := t.Backend.ReadFile(ctx, p.Path)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
 	}
@@ -330,11 +347,11 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
 	}
 
-	if err := t.Backups.Backup(abs); err != nil {
+	if err := t.Backups.Backup(resolved); err != nil {
 		return ToolResult{Content: fmt.Sprintf("patch_file: backup failed: %s", err), IsError: true}, nil
 	}
-	if err := atomicWrite(abs, []byte(updated)); err != nil {
-		rollbackBackup(t.Backups, abs)
+	if err := t.Backend.WriteFile(ctx, p.Path, []byte(updated)); err != nil {
+		rollbackBackup(t.Backups, resolved)
 		return ToolResult{Content: fmt.Sprintf("patch_file: %s", err), IsError: true}, nil
 	}
 
@@ -368,11 +385,12 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 // errors bubble out as-is so the caller can distinguish "bad patches"
 // from "diff ready".
 func (t *PatchFileTool) PreviewPatchDiff(path string, patches []PatchOp) (string, error) {
-	abs, err := resolveExistingInRoot(t.Root, path)
-	if err != nil {
-		return "", err
+	if t.backendErr != nil {
+		return "", t.backendErr
 	}
-	original, err := os.ReadFile(abs)
+	ctx, cancel := context.WithTimeout(context.Background(), approvalPreviewTimeout)
+	defer cancel()
+	original, err := t.Backend.ReadFile(ctx, path)
 	if err != nil {
 		return "", err
 	}

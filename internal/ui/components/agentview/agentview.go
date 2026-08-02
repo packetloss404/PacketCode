@@ -30,6 +30,7 @@ const (
 // jobs.Snapshot without coupling this component to manager internals.
 type Job struct {
 	ID, ParentJobID, Prompt, Provider, Model string
+	ComputerID, ComputerName, WorkingDir     string
 	State                                    string
 	ResultStatus                             string
 	Summary, Error                           string
@@ -168,6 +169,9 @@ func fromSnapshot(s jobspkg.Snapshot) Job {
 		Prompt:         s.Prompt,
 		Provider:       s.Provider,
 		Model:          s.Model,
+		ComputerID:     s.ComputerID,
+		ComputerName:   s.ComputerName,
+		WorkingDir:     s.WorkingDir,
 		State:          s.State.String(),
 		ResultStatus:   s.ResultStatus.String(),
 		Summary:        s.Summary,
@@ -594,7 +598,7 @@ func (m Model) renderJobRow(j Job, selected bool, w int) string {
 	lead := cursor + iconStyle.Render(icon) + " " + theme.StyleAccent.Render(j.ID) + "  " + theme.StylePrimary.Render(prompt)
 	space := max(1, w-lipgloss.Width(lead)-lipgloss.Width(age))
 	line := truncate(lead+strings.Repeat(" ", space)+theme.StyleDim.Render(age), w)
-	details := fmt.Sprintf("    %s · %s · api %d/%d · $%.4f", providerLabel(j), statusBadge(j), j.Tokens.Input, j.Tokens.Output, j.CostUSD)
+	details := fmt.Sprintf("    %s · %s · %s · api %d/%d · $%.4f", targetLabel(j), providerLabel(j), statusBadge(j), j.Tokens.Input, j.Tokens.Output, j.CostUSD)
 	line += "\n" + theme.StyleDim.Render(truncate(details, w))
 	if selected {
 		line = lipgloss.NewStyle().Background(theme.BaseSurfaceBright).Render(line)
@@ -693,6 +697,13 @@ func providerLabel(j Job) string {
 		return j.Provider
 	}
 	return j.Provider + "/" + j.Model
+}
+
+func targetLabel(j Job) string {
+	if strings.TrimSpace(j.ComputerName) == "" {
+		return "local"
+	}
+	return "computer:" + j.ComputerName
 }
 
 func roundedAge(j Job) string {

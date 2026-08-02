@@ -207,6 +207,30 @@ func TestGet_IsCaseInsensitive(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestGetByIDAndWorkspaceIdentity(t *testing.T) {
+	r, err := Load(t.TempDir())
+	require.NoError(t, err)
+	stored, err := r.Upsert(Computer{
+		ID: "pc_stable", Name: "Build", Kind: KindSSH,
+		SSHUser: "deploy", SSHHost: "BUILD.EXAMPLE", SSHPort: 22,
+		SSHHostFingerprint: "SHA256:key", ProjectRoots: []string{"/srv/app"},
+	})
+	require.NoError(t, err)
+
+	got, ok := r.GetByID("pc_stable")
+	require.True(t, ok)
+	assert.Equal(t, stored.Name, got.Name)
+	_, ok = r.GetByID("PC_STABLE")
+	assert.False(t, ok, "stable ids are exact, unlike display names")
+
+	identity := WorkspaceIdentity(stored, "/srv/app")
+	assert.Equal(t, identity, WorkspaceIdentity(stored, "/srv/app/"))
+	repointed := stored
+	repointed.SSHHostFingerprint = "SHA256:replacement"
+	assert.NotEqual(t, identity, WorkspaceIdentity(repointed, "/srv/app"))
+	assert.NotEqual(t, identity, WorkspaceIdentity(stored, "/srv/other"))
+}
+
 func TestRemove(t *testing.T) {
 	dir := t.TempDir()
 	r, err := Load(dir)
@@ -285,7 +309,12 @@ func TestList_SortedByName(t *testing.T) {
 
 func TestReachable(t *testing.T) {
 	assert.True(t, Computer{Kind: KindLocal}.Reachable())
-	assert.True(t, Computer{Kind: KindSSH, SSHHost: "h"}.Reachable())
+	assert.True(t, Computer{
+		Kind: KindSSH, SSHHost: "h", SSHUser: "deploy",
+		SSHHostFingerprint: "SHA256:key", ProjectRoots: []string{"/srv/app"},
+	}.Reachable())
+	assert.False(t, Computer{Kind: KindSSH, SSHHost: "h"}.Reachable(),
+		"an incomplete legacy SSH record must remain stored but cannot connect")
 	assert.False(t, Computer{Kind: KindSSH}.Reachable())
 	assert.False(t, Computer{Kind: KindManaged}.Reachable(),
 		"managed computers cannot be reached until provisioning exists")

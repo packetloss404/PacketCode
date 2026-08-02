@@ -1,11 +1,4 @@
-// Package computers holds the Packet Computers registry: the durable record
-// of machines packetcode may eventually delegate work to.
-//
-// Milestone A is deliberately data-only. There is no daemon, no RPC client,
-// no transport, and no job routing — a Computer here is a description the
-// user maintains and packetcode reads. Nothing in this package opens a
-// socket or executes a command, and nothing should until the daemon and
-// policy contracts in PACKETCOMPUTERS.md are settled.
+// Package computers holds Packet Computer records and runtime backends.
 package computers
 
 import (
@@ -167,11 +160,20 @@ type Computer struct {
 	Policy       Policy       `json:"policy"`
 
 	// SSHHost/SSHPort/SSHUser describe how to reach a KindSSH computer.
-	// Credentials are deliberately absent: this file is not a place for
-	// secrets, and Milestone A never connects anyway.
+	// Passwords and private-key contents are deliberately absent: this file is
+	// not a place for secrets.
 	SSHHost string `json:"ssh_host,omitempty"`
 	SSHPort int    `json:"ssh_port,omitempty"`
 	SSHUser string `json:"ssh_user,omitempty"`
+
+	// SSHIdentityFile is an optional path to a private key on the local
+	// computer. It is configuration, not key material; private keys are never
+	// copied into the registry. When empty, the SSH backend tries SSH_AUTH_SOCK
+	// and the conventional ~/.ssh identity files.
+	SSHIdentityFile string `json:"ssh_identity_file,omitempty"`
+	// SSHHostFingerprint is the exact SHA256 host-key fingerprint approved by
+	// the user. SSH connections fail closed when it is absent or changes.
+	SSHHostFingerprint string `json:"ssh_host_fingerprint,omitempty"`
 
 	// DaemonVersion is recorded once a daemon reports in. It stays empty
 	// through Milestone A and is a reliable "never contacted" signal.
@@ -222,6 +224,9 @@ func (c Computer) normalize(now time.Time) (Computer, error) {
 	if c.Kind == KindSSH && (c.SSHPort < 0 || c.SSHPort > 65535) {
 		return Computer{}, &ErrInvalid{Reason: fmt.Sprintf("ssh_port %d out of range", c.SSHPort)}
 	}
+	if c.Kind == KindSSH && c.SSHPort == 0 {
+		c.SSHPort = 22
+	}
 	if c.ID == "" {
 		c.ID = "pc_" + strings.ToLower(c.Name)
 	}
@@ -248,7 +253,10 @@ func (c Computer) Reachable() bool {
 	case KindLocal:
 		return true
 	case KindSSH:
-		return strings.TrimSpace(c.SSHHost) != ""
+		return strings.TrimSpace(c.SSHHost) != "" &&
+			strings.TrimSpace(c.SSHUser) != "" &&
+			len(c.ProjectRoots) > 0 &&
+			strings.TrimSpace(c.SSHHostFingerprint) != ""
 	default:
 		return false
 	}

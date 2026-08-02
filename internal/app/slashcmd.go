@@ -56,11 +56,32 @@ func slashCommandArguments(text, cmd string) string {
 //
 //	--provider <slug>
 //	--model    <id>
+//	--computer <name>
 //	--write
 //
 // After the last flag value, every remaining token (joined by single
 // spaces) forms the prompt. An empty prompt is a user error.
 func ParseSpawnFlags(args []string) (provSlug, modelID string, allowWrite bool, prompt string, err error) {
+	opts, err := ParseSpawnOptions(args)
+	return opts.Provider, opts.Model, opts.AllowWrite, opts.Prompt, err
+}
+
+// SpawnOptions is the complete placement/model tail accepted by /spawn.
+// ParseSpawnFlags remains as a compatibility wrapper for callers that do not
+// need the Packet Computer selector.
+type SpawnOptions struct {
+	Provider   string
+	Model      string
+	Computer   string
+	AllowWrite bool
+	Prompt     string
+}
+
+// ParseSpawnOptions parses /spawn flags, including an optional Packet
+// Computer name. Flags must precede the prompt; once prompt text starts,
+// later flag-looking tokens are preserved verbatim.
+func ParseSpawnOptions(args []string) (SpawnOptions, error) {
+	var opts SpawnOptions
 	var rest []string
 	i := 0
 	for i < len(args) {
@@ -68,18 +89,24 @@ func ParseSpawnFlags(args []string) (provSlug, modelID string, allowWrite bool, 
 		switch a {
 		case "--provider":
 			if i+1 >= len(args) {
-				return "", "", false, "", errors.New("--provider requires a value")
+				return SpawnOptions{}, errors.New("--provider requires a value")
 			}
-			provSlug = args[i+1]
+			opts.Provider = args[i+1]
 			i += 2
 		case "--model":
 			if i+1 >= len(args) {
-				return "", "", false, "", errors.New("--model requires a value")
+				return SpawnOptions{}, errors.New("--model requires a value")
 			}
-			modelID = args[i+1]
+			opts.Model = args[i+1]
+			i += 2
+		case "--computer":
+			if i+1 >= len(args) {
+				return SpawnOptions{}, errors.New("--computer requires a value")
+			}
+			opts.Computer = args[i+1]
 			i += 2
 		case "--write":
-			allowWrite = true
+			opts.AllowWrite = true
 			i++
 		default:
 			// First non-flag token starts the prompt. Everything after
@@ -89,11 +116,11 @@ func ParseSpawnFlags(args []string) (provSlug, modelID string, allowWrite bool, 
 			i = len(args)
 		}
 	}
-	prompt = strings.TrimSpace(strings.Join(rest, " "))
-	if prompt == "" {
-		return "", "", false, "", errors.New("prompt is required")
+	opts.Prompt = strings.TrimSpace(strings.Join(rest, " "))
+	if opts.Prompt == "" {
+		return SpawnOptions{}, errors.New("prompt is required")
 	}
-	return provSlug, modelID, allowWrite, prompt, nil
+	return opts, nil
 }
 
 const defaultCompactKeep = 10

@@ -297,7 +297,14 @@ func runHeaderText(run workflow.RunSnapshot) string {
 	if name == "" {
 		name = "(workflow)"
 	}
-	return fmt.Sprintf("%s  %s", run.ID, name)
+	target := run.TargetLabel()
+	if target == "" && run.WorkingDir != "" {
+		target = "local"
+	}
+	if target == "" {
+		target = "default"
+	}
+	return fmt.Sprintf("%s  %s  @%s", run.ID, name, target)
 }
 
 func stepHeaderText(st workflow.StepSnapshot) string {

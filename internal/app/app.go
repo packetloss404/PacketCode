@@ -117,21 +117,24 @@ type mcpRestartedMsg struct {
 // Deps bundles everything App needs from main(). main() owns the lifecycle
 // of these objects; App just borrows them.
 type Deps struct {
-	Config           *config.Config
-	Registry         *provider.Registry
-	Tools            *tools.Registry
-	Sessions         *session.Manager
-	CostTracker      *cost.Tracker
-	Jobs             *jobs.Manager
-	Workflow         *workflow.Engine
-	Backups          *session.BackupManager
-	MCP              *mcp.Manager
-	PermissionPolicy *permissions.Policy
-	WorkingDir       string
-	SystemPrompt     string
-	Hooks            *hooks.Runner
-	Version          string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
-	ResumeHydrate    bool   // render the current session transcript at startup
+	Config            *config.Config
+	Registry          *provider.Registry
+	Tools             *tools.Registry
+	Sessions          *session.Manager
+	CostTracker       *cost.Tracker
+	Jobs              *jobs.Manager
+	Workflow          *workflow.Engine
+	Backups           *session.BackupManager
+	MCP               *mcp.Manager
+	PermissionPolicy  *permissions.Policy
+	WorkingDir        string
+	RemoteWorkspace   bool   // true when workspace I/O is provided by a non-local backend
+	ComputerID        string // non-empty for a remote Packet Computer session
+	WorkspaceIdentity string // immutable endpoint/root binding for remote session resume
+	SystemPrompt      string
+	Hooks             *hooks.Runner
+	Version           string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
+	ResumeHydrate     bool   // render the current session transcript at startup
 
 	// Factories maps provider slug → constructor. Used at runtime when
 	// the user sets or updates an API key through the provider picker,
@@ -348,7 +351,7 @@ func New(deps Deps) (*App, error) {
 	ctxMgr := agent.NewContextManager(threshold)
 
 	var statusRunner *statusline.Runner
-	if deps.Config != nil {
+	if deps.Config != nil && !deps.RemoteWorkspace {
 		statusRunner = statusline.New(deps.Config.StatusLine, deps.WorkingDir)
 	}
 
@@ -357,6 +360,12 @@ func New(deps Deps) (*App, error) {
 	inputModel := input.New()
 	if deps.Config != nil {
 		inputModel.SetMaxRows(deps.Config.Behavior.MaxInputRows)
+	}
+	workflowLoader := workflow.NewLoader(deps.WorkingDir)
+	if deps.RemoteWorkspace {
+		// Remote project workflow files require asynchronous backend loading;
+		// until that exists, expose only built-ins and local user definitions.
+		workflowLoader = workflow.NewRemoteLoader()
 	}
 	app := &App{
 		deps:                 deps,
@@ -379,7 +388,7 @@ func New(deps Deps) (*App, error) {
 		permissionBase:       basePolicy,
 		jobs:                 deps.Jobs,
 		workflow:             deps.Workflow,
-		workflowLoader:       workflow.NewLoader(deps.WorkingDir),
+		workflowLoader:       workflowLoader,
 		backups:              deps.Backups,
 		mcp:                  deps.MCP,
 		contextMgr:           ctxMgr,
@@ -1043,6 +1052,12 @@ func (a *App) refreshAutocomplete() {
 		a.autocomplete.Close()
 		return
 	}
+	if a.deps.RemoteWorkspace {
+		// @file expansion currently reads local files. Remote workspaces use
+		// read_file explicitly until mention indexing is backend-aware.
+		a.autocomplete.Close()
+		return
+	}
 	if !a.fileIndexBuilt {
 		a.fileIndex = buildMentionEntries(a.deps.WorkingDir)
 		a.fileIndexBuilt = true
@@ -1345,6 +1360,9 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 }
 
 func (a *App) refreshGitBranch() tea.Cmd {
+	if a.deps.RemoteWorkspace {
+		return nil
+	}
 	if a.gitBranchInFlight || (!a.gitBranchLastRun.IsZero() && time.Since(a.gitBranchLastRun) < gitBranchRefreshInterval) {
 		return nil
 	}
@@ -1374,9 +1392,13 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	// mentions and the plan-mode instruction must count toward the upcoming
 	// request even though the visible user message keeps the original text.
 	turnText := text
-	expanded, attached := expandFileMentions(text, a.deps.WorkingDir)
-	if len(attached) > 0 {
-		turnText = expanded
+	var attached []string
+	if !a.deps.RemoteWorkspace {
+		expanded, files := expandFileMentions(text, a.deps.WorkingDir)
+		attached = files
+		if len(attached) > 0 {
+			turnText = expanded
+		}
 	}
 	if a.planMode {
 		turnText = planModeInstruction + turnText
@@ -1776,8 +1798,12 @@ func formatTerminalJobLine(snap jobs.Snapshot) string {
 			prov = snap.Model
 		}
 	}
-	head := fmt.Sprintf("[job:%s — %s · %s · %s · $%.4f]",
-		snap.ID, label, roundedDuration(dur), prov, snap.CostUSD)
+	target := "local"
+	if snap.ComputerName != "" {
+		target = snap.ComputerName
+	}
+	head := fmt.Sprintf("[job:%s — %s · %s · %s · %s · $%.4f]",
+		snap.ID, label, roundedDuration(dur), target, prov, snap.CostUSD)
 	body := strings.TrimSpace(snap.Summary)
 	if snap.State == jobs.StateFailed && snap.Error != "" {
 		if body != "" {
@@ -1830,7 +1856,11 @@ func formatAgentPeek(snap jobs.Snapshot) string {
 		}
 		body += "Artifacts:\n" + manifest
 	}
-	head := fmt.Sprintf("[agent:%s — %s · %s]", snap.ID, snap.State.String(), prov)
+	target := "local"
+	if snap.ComputerName != "" {
+		target = snap.ComputerName
+	}
+	head := fmt.Sprintf("[agent:%s — %s · %s · %s]", snap.ID, snap.State.String(), target, prov)
 	if body == "" {
 		return head
 	}
@@ -1868,6 +1898,9 @@ func agentResultBody(r jobs.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Background job %s handoff]\n", r.JobID)
 	fmt.Fprintf(&b, "Outcome: %s\n", r.State.String())
+	if r.ComputerName != "" {
+		fmt.Fprintf(&b, "Computer: %s (%s)\n", r.ComputerName, r.WorkingDir)
+	}
 	fmt.Fprintf(&b, "Summary: %s", summary)
 	if r.WorktreePath != "" {
 		b.WriteString("\n")
@@ -2007,18 +2040,19 @@ func (a *App) handleSpawnCommand(args []string) (tea.Model, tea.Cmd) {
 		a.conversation.AppendSystem("spawn: background jobs are disabled (no jobs.Manager wired)")
 		return a, nil
 	}
-	provSlug, modelID, allowWrite, prompt, err := ParseSpawnFlags(args)
+	opts, err := ParseSpawnOptions(args)
 	if err != nil {
 		a.conversation.AppendSystem("spawn: " + err.Error())
 		return a, nil
 	}
 	snap, spawnErr := a.jobs.Spawn(jobs.SpawnRequest{
-		Prompt:      prompt,
-		Provider:    provSlug,
-		Model:       modelID,
+		Prompt:      opts.Prompt,
+		Provider:    opts.Provider,
+		Model:       opts.Model,
+		Computer:    opts.Computer,
 		ParentJobID: "",
 		ParentDepth: 0,
-		AllowWrite:  allowWrite,
+		AllowWrite:  opts.AllowWrite,
 	})
 	if spawnErr != nil {
 		a.conversation.AppendSystem(fmt.Sprintf("spawn failed: %s", spawnErr.Error()))
@@ -2033,10 +2067,14 @@ func (a *App) handleSpawnCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 	}
 	mode := "read-only"
-	if allowWrite {
+	if opts.AllowWrite {
 		mode = "write · worktree pending"
 	}
-	a.conversation.AppendSystem(fmt.Sprintf("[job:%s queued — %s · %s] %s", snap.ID, prov, mode, snap.Prompt))
+	target := "local"
+	if snap.ComputerName != "" {
+		target = snap.ComputerName
+	}
+	a.conversation.AppendSystem(fmt.Sprintf("[job:%s queued — %s · %s · %s] %s", snap.ID, prov, target, mode, snap.Prompt))
 	// Reflect the new job on the top bar immediately. The Subscribe
 	// fanout will do this too, but asynchronously on a goroutine —
 	// bumping the counter here is synchronous and matches the user's
@@ -2277,7 +2315,7 @@ func renderJobsTable(snaps []jobs.Snapshot) string {
 		return snaps[i].CreatedAt.After(snaps[j].CreatedAt)
 	})
 	var b strings.Builder
-	b.WriteString("ID    STATE      ROOT      PROV/MODEL              AGE    TOK(IN/OUT)  PROMPT\n")
+	b.WriteString("ID    STATE      TARGET       ROOT      PROV/MODEL              AGE    TOK(IN/OUT)  PROMPT\n")
 	now := time.Now()
 	for _, s := range snaps {
 		prov := s.Provider
@@ -2308,8 +2346,12 @@ func renderJobsTable(snaps []jobs.Snapshot) string {
 				rootMode = "pending"
 			}
 		}
-		fmt.Fprintf(&b, "%-5s %-10s %-9s %-23s %-6s %-12s %s\n",
-			trunc(s.ID, 5), trunc(s.State.String(), 10), trunc(rootMode, 9), trunc(prov, 23), age, trunc(tok, 12), prompt)
+		target := "local"
+		if s.ComputerName != "" {
+			target = s.ComputerName
+		}
+		fmt.Fprintf(&b, "%-5s %-10s %-12s %-9s %-23s %-6s %-12s %s\n",
+			trunc(s.ID, 5), trunc(s.State.String(), 10), trunc(target, 12), trunc(rootMode, 9), trunc(prov, 23), age, trunc(tok, 12), prompt)
 		if wt := worktreeSummary(s); wt != "" {
 			fmt.Fprintf(&b, "      %s\n", wt)
 		}

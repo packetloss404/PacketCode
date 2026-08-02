@@ -280,7 +280,7 @@ func TestSpawnAgentTool_Schema(t *testing.T) {
 	if !ok {
 		t.Fatalf("schema missing properties")
 	}
-	for _, name := range []string{"prompt", "provider", "model", "wait", "allow_write"} {
+	for _, name := range []string{"prompt", "provider", "model", "computer", "wait", "allow_write"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("schema missing property %q", name)
 		}
@@ -294,6 +294,26 @@ func TestSpawnAgentTool_Schema(t *testing.T) {
 	}
 	if !foundPrompt {
 		t.Fatalf("schema required should include 'prompt': %v", required)
+	}
+}
+
+func TestSpawnAgentTool_ComputerSelector(t *testing.T) {
+	f := &fakeSpawner{
+		spawnResult: JobSpawnResult{
+			ID: "abc123", Provider: "gemini", Model: "flash",
+			ComputerID: "pc_production", ComputerName: "production", WorkingDir: "/srv/app",
+		},
+	}
+	tool := NewSpawnAgentTool(f, "", 0)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"prompt":"inspect","computer":"production"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("Execute = (%+v, %v)", res, err)
+	}
+	if f.lastReq.Computer != "production" {
+		t.Fatalf("Computer = %q, want production", f.lastReq.Computer)
+	}
+	if got := res.Metadata["computer_id"]; got != "pc_production" {
+		t.Fatalf("computer_id = %v", got)
 	}
 }
 

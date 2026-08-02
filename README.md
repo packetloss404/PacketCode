@@ -86,6 +86,41 @@ The `codex` provider is the zero-key path for an OpenAI Codex ChatGPT subscripti
 
 See [Providers and models](docs/providers.md) for authentication, model discovery, local Ollama, and custom endpoints.
 
+## SSH Packet Computers
+
+PacketCode can use a registered SSH server as the foreground project
+workspace. First verify the server's host-key fingerprint through a trusted
+channel, then register it from a normal PacketCode session:
+
+```text
+/computers ssh production deploy@example.com /srv/apps/widget --fingerprint SHA256:... --identity ~/.ssh/id_ed25519
+```
+
+Start a new remote session:
+
+```bash
+packetcode --computer production --provider minimax --model MiniMax-M3
+```
+
+The process keeps one pinned SSH connection and SFTP client open. Reading,
+searching, listing, writing, patching, and shell commands operate inside the
+registered remote root; command `cwd` values remain root-confined. SSH agent
+authentication works on Unix and with the Windows OpenSSH agent pipe; explicit
+unencrypted identity files and conventional `~/.ssh` keys are also supported.
+
+Remote background agents and workflows are available for process-lifetime
+server engineering. A remote foreground session inherits its active computer;
+from a local session use `/spawn --computer production ...` or `/workflows run
+--computer production review`. Every remote job owns an SSH connection, and a
+write job fails closed unless it can create an isolated remote Git worktree.
+
+This is not daemon durability: closing PacketCode does not reconnect or resume
+agent loops and cannot guarantee supervision of detached remote descendants.
+Remote `/undo`, code-intelligence tools, `@file` expansion, project hooks, and
+live heartbeat/status remain unavailable.
+See [Packet Computers](docs/feature-packet-computers.md) for security details
+and exact boundaries.
+
 ## Terminal Workflow
 
 Type a prompt and press `Enter`; use `Ctrl+J` or `\` then `Enter` for a portable newline. `Alt+Enter` also works when the terminal reports Alt distinctly. `Shift+Enter` works only where the terminal maps it to `Ctrl+J`; true shifted-key reporting is reserved for the Bubble Tea v2 migration. Finalized turns are committed to native terminal scrollback while the active response remains in a small live region.
@@ -105,7 +140,7 @@ Type a prompt and press `Enter`; use `Ctrl+J` or `\` then `Enter` for a portable
 
 If a prompt is submitted during an active turn or compaction, packetcode queues it and runs it afterward. `/queue` lists queued prompts; `/queue drop <n>` and `/queue clear` manage them.
 
-Typing `@` at a token boundary opens project-file completion. The selected `@path` is expanded into bounded, root-scoped file context when the prompt is sent. Typing `/` opens slash-command completion.
+Typing `@` at a token boundary opens project-file completion. The selected `@path` is expanded into bounded, root-scoped file context when the prompt is sent. `@file` expansion is disabled for SSH Packet Computer sessions; use `read_file` there. Typing `/` opens slash-command completion.
 
 ## Permission Modes
 
@@ -131,7 +166,7 @@ revokes remembered/session rules and restores the startup policy. See
 
 ## Background Agents and Workflows
 
-`/spawn <prompt>` starts a read-only background agent. `/spawn --write <prompt>` creates an isolated git worktree under `~/.packetcode/worktrees/` before allowing writes or commands. Write jobs never edit the foreground checkout directly.
+`/spawn <prompt>` starts a read-only background agent. `/spawn --write <prompt>` creates an isolated git worktree before allowing writes or commands. Use `--computer <name>` from a local session; remote sessions inherit their active computer. Write jobs never edit the foreground checkout directly.
 
 `/agents` opens the full-screen Agent workspace. It groups agents by needs-input, working, and completed states; supports task entry directly from the bottom prompt; and exposes peek, transcript, cancel, inject, and ignore actions. Results are not silently added to foreground context.
 
@@ -139,13 +174,14 @@ revokes remembered/session rules and restores the startup policy. See
 
 ```text
 /workflows run review
+/workflows run --computer production review
 /workflows run review target="the staged diff"
 /workflows validate review
 /workflows list
 /workflows stop all
 ```
 
-User workflows live in `~/.packetcode/workflows/*.toml`; project workflows live in `.packetcode/workflows/*.toml` and take precedence.
+User workflows live in `~/.packetcode/workflows/*.toml`; local project workflows live in `.packetcode/workflows/*.toml` and take precedence. Remote sessions load built-ins and local user definitions; loading project definitions over SFTP is deferred so the TUI never blocks on workflow discovery.
 Workflow TOML is schema-versioned. Optional step verifiers use a fail-closed
 structured verdict and bounded retries; verifier jobs and retries count toward
 the same agent and token budgets. See [Workflows](docs/workflows.md).
@@ -173,14 +209,17 @@ See [Background agents](docs/feature-background-agents.md) and [Agent View](docs
 | `/provider [add [slug]\|slug]` | Open the provider picker, add/update a key, or switch. |
 | `/model [id]` | Open the model picker or switch models. |
 | `/effort [default\|low\|medium\|high\|xhigh\|max\|ultra]` | Show or set reasoning effort for models that expose it. |
-| `/spawn [--write] <prompt>` | Start a background agent. |
+| `/spawn [--computer <name>] [--write] <prompt>` | Start a local or remote background agent. |
 | `/agents [id]` | Open Agent View or one transcript. |
 | `/jobs [id]` | List jobs or open one transcript. |
 | `/jobs resubmit [id]` | Re-run a job abandoned by a previous app exit (new job; the original is not resumed). |
 | `/cancel <id\|all>` | Cancel background jobs. |
-| `/computers` | List registered Packet Computers (registry-only; no daemon yet). |
+| `/computers` | List registered Packet Computers. |
 | `/computers status <name>` | Show one computer's stored record. |
-| `/workflows [run <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, and inspect workflows. |
+| `/computers register <name> <root>` | Register a local computer record. |
+| `/computers ssh <name> <user@host> <root> --fingerprint <SHA256:...>` | Register a pinned SSH computer. |
+| `/computers remove <name> --yes` | Remove a computer record. |
+| `/workflows [run [--computer <name>] <name>\|validate <name>\|list\|stop [id\|all]\|<id>]` | Validate, run, and inspect local or remote workflows. |
 | `/loop [interval] <prompt\|/command>` | Repeat work; use `list` or `stop`. |
 | `/plan [on\|off]` | Toggle read-only planning mode. |
 | `/queue [drop <n>\|clear]` | Inspect or manage queued prompts. |

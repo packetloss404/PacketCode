@@ -94,6 +94,24 @@ func TestParseSlashCommand_Spawn(t *testing.T) {
 			t.Fatalf("prompt = %q", prompt)
 		}
 	})
+
+	t.Run("computer placement", func(t *testing.T) {
+		opts, err := ParseSpawnOptions([]string{
+			"--computer", "production", "--write", "migrate", "the", "app",
+		})
+		if err != nil {
+			t.Fatalf("ParseSpawnOptions: %v", err)
+		}
+		if opts.Computer != "production" || !opts.AllowWrite || opts.Prompt != "migrate the app" {
+			t.Fatalf("unexpected options: %+v", opts)
+		}
+	})
+
+	t.Run("computer without value", func(t *testing.T) {
+		if _, err := ParseSpawnOptions([]string{"--computer"}); err == nil {
+			t.Fatal("expected missing --computer value error")
+		}
+	})
 }
 
 // TestParseSlashCommand_Jobs exercises /jobs list/detail parsing.

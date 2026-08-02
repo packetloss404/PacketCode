@@ -96,6 +96,11 @@ type Run struct {
 	Workflow   string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	Computer   string // requested selector; empty inherits manager default
+	ComputerID string
+	// ComputerName and WorkingDir are resolved from the first spawned job.
+	ComputerName string
+	WorkingDir   string
 
 	mu        sync.Mutex
 	state     RunState
@@ -106,10 +111,17 @@ type Run struct {
 	children  map[string]struct{}
 }
 
-// Start validates wf, registers a new run, and launches its driver goroutine.
-// The driver context is a child of ctx; cancelling ctx (or calling
-// Engine.Cancel) aborts the run.
+// Start validates wf, registers a new run, and launches its driver goroutine
+// against the jobs.Manager's default workspace. It remains the compatibility
+// entry point for callers that do not need explicit placement.
 func (e *Engine) Start(ctx context.Context, wf Workflow) (*Run, error) {
+	return e.StartWithOptions(ctx, wf, RunOptions{})
+}
+
+// StartWithOptions starts a workflow with run-level execution placement. The
+// selector is forwarded to every work attempt, retry, and verifier; the first
+// queued job stamps the run with resolved target identity and working dir.
+func (e *Engine) StartWithOptions(ctx context.Context, wf Workflow, opts RunOptions) (*Run, error) {
 	if e.jobs == nil {
 		return nil, fmt.Errorf("workflow: no jobs manager configured")
 	}
@@ -124,6 +136,7 @@ func (e *Engine) Start(ctx context.Context, wf Workflow) (*Run, error) {
 	run := &Run{
 		ID:        newRunID(),
 		Workflow:  wf.Name,
+		Computer:  strings.TrimSpace(opts.Computer),
 		StartedAt: time.Now().UTC(),
 		state:     RunPending,
 		cancel:    cancel,
@@ -437,6 +450,7 @@ func (e *Engine) runWorkAttempt(
 			Prompt:       prompt,
 			Provider:     st.Agent.Provider,
 			Model:        st.Agent.Model,
+			Computer:     run.Computer,
 			SystemPrompt: st.Agent.SystemPrompt,
 			AllowWrite:   st.Agent.AllowWrite,
 		})
@@ -446,6 +460,7 @@ func (e *Engine) runWorkAttempt(
 			attempt.Err = fmt.Errorf("step %q: spawn failed: %s", st.Name, spawnErr.Error())
 			return attempt
 		}
+		run.bindWorkspace(snap.ComputerID, snap.ComputerName, snap.WorkingDir)
 		ids = append(ids, snap.ID)
 		(*spawned)++
 		attempt.JobIDs = append([]string(nil), ids...)
@@ -509,12 +524,14 @@ func (e *Engine) runVerifier(
 		Prompt:       prompt,
 		Provider:     st.Verify.Provider,
 		Model:        st.Verify.Model,
+		Computer:     run.Computer,
 		SystemPrompt: st.Verify.SystemPrompt,
 		AllowWrite:   false,
 	})
 	if spawnErr != nil {
 		return jobs.Result{}, "", fmt.Errorf("step %q: verifier spawn failed: %s", st.Name, spawnErr.Error())
 	}
+	run.bindWorkspace(snap.ComputerID, snap.ComputerName, snap.WorkingDir)
 	(*spawned)++
 	if run.registerChild(snap.ID) {
 		e.cancelAndDrain([]string{snap.ID})
@@ -753,11 +770,15 @@ func (e *Engine) snapshot(run *Run) RunSnapshot {
 	defer run.mu.Unlock()
 
 	rs := RunSnapshot{
-		ID:         run.ID,
-		Workflow:   run.Workflow,
-		State:      run.state,
-		StartedAt:  run.StartedAt,
-		FinishedAt: run.FinishedAt,
+		ID:           run.ID,
+		Workflow:     run.Workflow,
+		State:        run.state,
+		StartedAt:    run.StartedAt,
+		FinishedAt:   run.FinishedAt,
+		Computer:     run.Computer,
+		ComputerID:   run.ComputerID,
+		ComputerName: run.ComputerName,
+		WorkingDir:   run.WorkingDir,
 	}
 	if run.err != nil {
 		rs.Err = run.err.Error()
@@ -831,6 +852,23 @@ func (r *Run) setStep(pi, si int, sr StepResult) {
 		r.phases[pi].Steps[si] = sr
 	}
 	r.mu.Unlock()
+}
+
+// bindWorkspace records the immutable placement resolved by jobs.Manager.
+// Parallel fan-out jobs should all resolve identically; once a non-empty
+// field is stamped it is never replaced by a later snapshot.
+func (r *Run) bindWorkspace(computerID, computerName, workingDir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ComputerID == "" {
+		r.ComputerID = computerID
+	}
+	if r.ComputerName == "" {
+		r.ComputerName = computerName
+	}
+	if r.WorkingDir == "" {
+		r.WorkingDir = workingDir
+	}
 }
 
 // childIDsLocked returns every registered child. Caller holds r.mu.

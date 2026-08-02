@@ -72,6 +72,11 @@ func (a *App) handleSessionsCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("sessions: " + loadErr.Error())
 			return a, nil
 		}
+		if workspaceErr := session.ValidateWorkspace(s, a.deps.ComputerID, a.deps.WorkingDir, a.deps.WorkspaceIdentity); workspaceErr != nil {
+			a.restorePreviousSession(prev)
+			a.conversation.AppendSystem("sessions: " + workspaceErr.Error())
+			return a, nil
+		}
 		if s.Provider == "" || s.Model == "" {
 			a.restorePreviousSession(prev)
 			a.conversation.AppendSystem("sessions: resumed session has no provider/model metadata")
@@ -123,6 +128,12 @@ func (a *App) handleSessionsCommand(args []string) (tea.Model, tea.Cmd) {
 			if newErr != nil {
 				a.conversation.AppendSystem("sessions: create replacement session: " + newErr.Error())
 				return a, nil
+			}
+			if a.deps.ComputerID != "" {
+				if bindErr := a.deps.Sessions.BindWorkspace(a.deps.ComputerID, a.deps.WorkingDir, a.deps.WorkspaceIdentity); bindErr != nil {
+					a.conversation.AppendSystem("sessions: bind replacement workspace: " + bindErr.Error())
+					return a, nil
+				}
 			}
 		}
 		if delErr := a.deps.Sessions.Delete(fullID); delErr != nil {

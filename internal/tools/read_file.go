@@ -2,12 +2,14 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 const readFileSchema = `{
@@ -26,10 +28,22 @@ const (
 )
 
 type ReadFileTool struct {
-	Root string
+	Root       string
+	Backend    computers.RuntimeBackend
+	backendErr error
 }
 
-func NewReadFileTool(root string) *ReadFileTool { return &ReadFileTool{Root: root} }
+func NewReadFileTool(root string) *ReadFileTool {
+	backend, err := computers.NewLocalBackend(root)
+	return &ReadFileTool{Root: root, Backend: backend, backendErr: err}
+}
+
+func NewReadFileToolWithBackend(backend computers.RuntimeBackend) *ReadFileTool {
+	if backend == nil {
+		return &ReadFileTool{backendErr: fmt.Errorf("runtime backend is nil")}
+	}
+	return &ReadFileTool{Root: backend.Root(), Backend: backend}
+}
 
 func (*ReadFileTool) Name() string            { return "read_file" }
 func (*ReadFileTool) RequiresApproval() bool  { return false }
@@ -49,16 +63,13 @@ func (t *ReadFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolRe
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return ToolResult{}, fmt.Errorf("read_file: parse params: %w", err)
 	}
-	abs, err := resolveExistingInRoot(t.Root, p.Path)
-	if err != nil {
-		return ToolResult{Content: err.Error(), IsError: true}, nil
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("read_file: %s", t.backendErr), IsError: true}, nil
 	}
-
-	f, err := os.Open(abs)
+	data, err := t.Backend.ReadFile(ctx, p.Path)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("read_file: %s", err), IsError: true}, nil
 	}
-	defer f.Close()
 
 	start, requestedEnd := 1, 0
 	if p.StartLine > 0 {
@@ -77,7 +88,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolRe
 		requestedEnd = start + maxReadFileLines - 1
 	}
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxReadFileLineLength)
 	var lines []string
 	total := 0

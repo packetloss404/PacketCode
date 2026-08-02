@@ -34,15 +34,18 @@ Slash commands are parsed and handled locally before a prompt reaches the model.
 
 | Command | Action |
 | --- | --- |
-| `/spawn [--provider P] [--model M] [--write] <prompt>` | Start a background job. |
+| `/spawn [--computer C] [--provider P] [--model M] [--write] <prompt>` | Start a local or Packet Computer background job. |
 | `/agents [id]` | Open Agent View or a transcript. |
 | `/jobs [id]` | List jobs or open a transcript. |
 | `/jobs resubmit [id]` | Re-run a job abandoned by a previous app exit. Starts a new job; the original is not resumed. |
 | `/cancel <id\|all>` | Cancel jobs. |
-| `/computers` | List registered Packet Computers (registry-only; nothing connects yet). |
+| `/computers` | List registered Packet Computers. |
 | `/computers status <name>` | Show one computer's stored record. |
+| `/computers register <name> <root>` | Register a local computer record. |
+| `/computers ssh <name> <user@host> <root> --fingerprint <SHA256:...>` | Register a pinned SSH computer for `packetcode --computer <name>`. |
+| `/computers remove <name> --yes` | Remove a computer record. |
 | `/workflows` | Open Workflow View. |
-| `/workflows run <name> [key=value...]` | Start a workflow. |
+| `/workflows run [--computer C] <name> [key=value...]` | Start a local or Packet Computer workflow. |
 | `/workflows validate <name>` | Validate schema and templates without starting agents. |
 | `/workflows list` | List definitions/runs. |
 | `/workflows stop [id\|all]` | Cancel workflows. |

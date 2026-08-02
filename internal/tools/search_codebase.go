@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
 
 const searchCodebaseSchema = `{
@@ -30,7 +33,8 @@ const (
 )
 
 type SearchCodebaseTool struct {
-	Root string
+	Root    string
+	Backend computers.RuntimeBackend
 	// rgPath caches the ripgrep binary lookup. Empty until first use.
 	rgPath string
 	rgOnce sync.Once
@@ -40,10 +44,20 @@ func NewSearchCodebaseTool(root string) *SearchCodebaseTool {
 	return &SearchCodebaseTool{Root: root}
 }
 
+func NewSearchCodebaseToolWithBackend(backend computers.RuntimeBackend) *SearchCodebaseTool {
+	if backend == nil {
+		return &SearchCodebaseTool{}
+	}
+	return &SearchCodebaseTool{Root: backend.Root(), Backend: backend}
+}
+
 func (*SearchCodebaseTool) Name() string            { return "search_codebase" }
 func (*SearchCodebaseTool) RequiresApproval() bool  { return false }
 func (*SearchCodebaseTool) Schema() json.RawMessage { return json.RawMessage(searchCodebaseSchema) }
-func (*SearchCodebaseTool) Description() string {
+func (t *SearchCodebaseTool) Description() string {
+	if t.Backend != nil && t.Backend.Kind() == computers.KindSSH {
+		return "Regex-search the remote codebase through the root-confined filesystem backend. Results are formatted as path:line:match."
+	}
 	return "Regex-search the codebase. Uses ripgrep when available (much faster) and a Go fallback otherwise. Results are formatted as path:line:match."
 }
 
@@ -68,6 +82,9 @@ func (t *SearchCodebaseTool) Execute(ctx context.Context, raw json.RawMessage) (
 	if limit > maxSearchMax {
 		limit = maxSearchMax
 	}
+	if t.Backend != nil {
+		return t.searchWithBackend(ctx, p.Pattern, p.FileGlob, limit)
+	}
 
 	if rg := t.ripgrepPath(); rg != "" {
 		out, err := t.searchWithRipgrep(ctx, rg, p.Pattern, p.FileGlob, limit)
@@ -77,6 +94,83 @@ func (t *SearchCodebaseTool) Execute(ctx context.Context, raw json.RawMessage) (
 		// Fall through to Go-native fallback on rg failure.
 	}
 	return t.searchWithGo(ctx, p.Pattern, p.FileGlob, limit)
+}
+
+func (t *SearchCodebaseTool) searchWithBackend(ctx context.Context, pattern, glob string, limit int) (ToolResult, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return ToolResult{Content: fmt.Sprintf("search_codebase: invalid regex: %s", err), IsError: true}, nil
+	}
+	var matches []string
+	var walk func(string) error
+	walk = func(dir string) error {
+		if ctx.Err() != nil || len(matches) >= limit {
+			return ctx.Err()
+		}
+		entries, err := t.Backend.ReadDir(ctx, dir)
+		if err != nil {
+			return nil // match the local fallback: unreadable paths are skipped
+		}
+		for _, entry := range entries {
+			if ctx.Err() != nil || len(matches) >= limit {
+				return ctx.Err()
+			}
+			rel := path.Join(dir, entry.Name)
+			if strings.HasPrefix(rel, "./") {
+				rel = strings.TrimPrefix(rel, "./")
+			}
+			if entry.IsDir {
+				if shouldSkipDir(entry.Name) {
+					continue
+				}
+				if err := walk(rel); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+				continue
+			}
+			if entry.Mode&fs.ModeSymlink != 0 || entry.Size > 1024*1024 {
+				continue
+			}
+			if glob != "" {
+				matched, matchErr := matchSearchGlob(glob, rel, entry.Name)
+				if matchErr != nil || !matched {
+					continue
+				}
+			}
+			data, readErr := t.Backend.ReadFile(ctx, rel)
+			if readErr != nil {
+				continue
+			}
+			for i, line := range strings.Split(string(data), "\n") {
+				if re.MatchString(line) {
+					matches = append(matches, fmt.Sprintf("%s:%d:%s", rel, i+1, line))
+					if len(matches) >= limit {
+						break
+					}
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk("."); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return ToolResult{Content: fmt.Sprintf("search_codebase: %s", err), IsError: true}, nil
+	}
+	if ctx.Err() != nil {
+		return ToolResult{}, ctx.Err()
+	}
+	if len(matches) == 0 {
+		return ToolResult{Content: fmt.Sprintf("No matches for /%s/.", pattern)}, nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Found %d match(es) for /%s/ (remote filesystem search):\n\n", len(matches), pattern)
+	for _, match := range matches {
+		b.WriteString(match)
+		b.WriteByte('\n')
+	}
+	return ToolResult{Content: b.String(), Metadata: map[string]any{
+		"match_count": len(matches),
+		"engine":      "remote-filesystem",
+	}}, nil
 }
 
 func (t *SearchCodebaseTool) ripgrepPath() string {

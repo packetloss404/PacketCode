@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
+
+	"github.com/packetcode/packetcode/internal/computers"
 )
+
+const approvalPreviewTimeout = 10 * time.Second
 
 const writeFileSchema = `{
   "type": "object",
@@ -21,21 +26,34 @@ const writeFileSchema = `{
 }`
 
 type WriteFileTool struct {
-	Root    string
-	Backups BackupManager
+	Root       string
+	Backups    BackupManager
+	Backend    computers.RuntimeBackend
+	backendErr error
 }
 
 func NewWriteFileTool(root string, backups BackupManager) *WriteFileTool {
 	if backups == nil {
 		backups = NoopBackupManager()
 	}
-	return &WriteFileTool{Root: root, Backups: backups}
+	backend, err := computers.NewLocalBackend(root)
+	return &WriteFileTool{Root: root, Backups: backups, Backend: backend, backendErr: err}
+}
+
+func NewWriteFileToolWithBackend(backend computers.RuntimeBackend) *WriteFileTool {
+	if backend == nil {
+		return &WriteFileTool{Backups: NoopBackupManager(), backendErr: fmt.Errorf("runtime backend is nil")}
+	}
+	return &WriteFileTool{Root: backend.Root(), Backups: NoopBackupManager(), Backend: backend}
 }
 
 func (*WriteFileTool) Name() string            { return "write_file" }
 func (*WriteFileTool) RequiresApproval() bool  { return true }
 func (*WriteFileTool) Schema() json.RawMessage { return json.RawMessage(writeFileSchema) }
-func (*WriteFileTool) Description() string {
+func (t *WriteFileTool) Description() string {
+	if t.Backend != nil && t.Backend.Kind() == computers.KindSSH {
+		return "Write a complete remote file using SFTP temp-file plus rename. Requires user approval. Remote /undo is unavailable."
+	}
 	return "Write a complete file (creating it or overwriting an existing file). Requires user approval. Backs up the previous contents so /undo can revert."
 }
 
@@ -52,17 +70,20 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return ToolResult{}, fmt.Errorf("write_file: parse params: %w", err)
 	}
-	abs, err := resolveWritePath(t.Root, p.Path)
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("write_file: %s", t.backendErr), IsError: true}, nil
+	}
+	resolved, err := t.Backend.Resolve(ctx, p.Path, true)
 	if err != nil {
-		return ToolResult{Content: err.Error(), IsError: true}, nil
+		return ToolResult{Content: fmt.Sprintf("write_file: %s", err), IsError: true}, nil
 	}
 
-	if err := t.Backups.Backup(abs); err != nil {
+	if err := t.Backups.Backup(resolved); err != nil {
 		return ToolResult{Content: fmt.Sprintf("write_file: backup failed: %s", err), IsError: true}, nil
 	}
 
-	if err := atomicWrite(abs, []byte(p.Content)); err != nil {
-		rollbackBackup(t.Backups, abs)
+	if err := t.Backend.WriteFile(ctx, p.Path, []byte(p.Content)); err != nil {
+		rollbackBackup(t.Backups, resolved)
 		return ToolResult{Content: fmt.Sprintf("write_file: %s", err), IsError: true}, nil
 	}
 
@@ -94,11 +115,12 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 // Mirrors read_file's binary guard so approval never attempts to
 // render an invalid-UTF-8 diff.
 func (t *WriteFileTool) PreviewDiff(path, content string) (string, bool, error) {
-	abs, err := resolveWritePath(t.Root, path)
-	if err != nil {
-		return "", false, err
+	if t.backendErr != nil {
+		return "", false, t.backendErr
 	}
-	data, err := os.ReadFile(abs)
+	ctx, cancel := context.WithTimeout(context.Background(), approvalPreviewTimeout)
+	defer cancel()
+	data, err := t.Backend.ReadFile(ctx, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", true, nil

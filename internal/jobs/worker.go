@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
@@ -28,9 +29,13 @@ const summaryMaxLen = 280
 // registered into m.cancel) so /cancel works while the job is still
 // queued for a sem slot.
 func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
+	var runtimeBackend computers.RuntimeBackend
 	defer m.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
+			if runtimeBackend != nil {
+				_ = runtimeBackend.Close()
+			}
 			stack := string(debug.Stack())
 			m.markTerminal(j, StateFailed,
 				"", fmt.Sprintf("worker panic: %v\n%s", r, stack), "panic",
@@ -65,20 +70,40 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	}
 
 	m.markRunning(j)
-	worktree, worktreeErr := m.prepareWorktree(jobCtx, j)
-	if worktreeErr != nil {
-		if jobCtx.Err() != nil {
-			m.markTerminal(j, StateCancelled, "", "", jobCtx.Err().Error(),
+	jobRoot := m.cfg.Root
+	if j.ComputerID != "" {
+		var backendErr error
+		runtimeBackend, backendErr = m.prepareRemoteBackend(jobCtx, j)
+		if backendErr != nil {
+			if jobCtx.Err() != nil {
+				m.markTerminal(j, StateCancelled, "", "", jobCtx.Err().Error(),
+					j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
+				return
+			}
+			m.markTerminal(j, StateFailed, "", "prepare remote workspace: "+backendErr.Error(), "",
 				j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
 			return
 		}
-		m.markTerminal(j, StateFailed, "", "prepare worktree: "+worktreeErr.Error(), "",
-			j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
-		return
-	}
-	jobRoot := worktree.Root
-	if jobRoot == "" {
-		jobRoot = m.cfg.Root
+		defer runtimeBackend.Close()
+		stopBackendWatcher := closeBackendOnCancel(jobCtx, runtimeBackend)
+		defer stopBackendWatcher()
+		jobRoot = runtimeBackend.Root()
+	} else {
+		worktree, worktreeErr := m.prepareWorktree(jobCtx, j)
+		if worktreeErr != nil {
+			if jobCtx.Err() != nil {
+				m.markTerminal(j, StateCancelled, "", "", jobCtx.Err().Error(),
+					j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
+				return
+			}
+			m.markTerminal(j, StateFailed, "", "prepare worktree: "+worktreeErr.Error(), "",
+				j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
+			return
+		}
+		jobRoot = worktree.Root
+		if jobRoot == "" {
+			jobRoot = m.cfg.Root
+		}
 	}
 
 	// Build the per-job dependencies.
@@ -111,7 +136,15 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	hookRunner := m.cfg.Hooks
 	maxDepth := m.cfg.MaxDepth
 	m.mu.RUnlock()
-	hookRunner = hookRunner.WithCWD(jobRoot)
+	if runtimeBackend != nil {
+		// Hook commands are local processes and must never be pointed at a
+		// remote POSIX path or implied to execute on the Packet Computer.
+		hookRunner = nil
+	} else {
+		if hookRunner != nil {
+			hookRunner = hookRunner.WithCWD(jobRoot)
+		}
+	}
 
 	// Conditionally include spawn_agent only when the new job's depth
 	// is below MaxDepth-1 (so its children would still be inside the
@@ -127,15 +160,21 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 			extraTools = append(extraTools, t)
 		}
 	}
-	toolReg := m.buildJobToolRegistry(j.Depth, j.AllowWrite, j.ID, backups, extraTools, jobRoot)
+	toolReg := m.buildJobToolRegistryForBackend(j.Depth, j.AllowWrite, j.ID, backups, extraTools, runtimeBackend, jobRoot)
 
 	systemPrompt := req.SystemPrompt
 	if systemPrompt == "" && systemPromptFor != nil {
 		systemPrompt = systemPromptFor(j.Depth)
 	}
+	if runtimeBackend != nil {
+		systemPrompt += fmt.Sprintf(
+			"\n\n# Remote Packet Computer Job\nAll workspace file and shell tools target Packet Computer %q. The registered source root is %s; this job's active root is %s. Paths are relative to the active root. Local hooks, code-intelligence tools, MCP tools, and /undo are unavailable. This SSH execution is process-lifetime only: it does not survive PacketCode exit, SSH loss, or restart.",
+			j.ComputerName, j.WorkingDir, jobRoot,
+		)
+	}
 
 	approver := NewJobApprover(parentApprover, j.ID, j.AllowWrite)
-	policy := permissionPolicy
+	policy := policyForWorkspace(permissionPolicy, workspaceOfJob(j, m.cfg.Root))
 
 	a := agent.New(agent.Config{
 		Registry:     subRegistry,
@@ -150,14 +189,14 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	})
 
 	events := a.Run(jobCtx, j.Prompt)
-	m.consumeEvents(j, jobCtx, events, subSession)
+	m.consumeEvents(j, jobCtx, events, subSession, runtimeBackend)
 }
 
 // consumeEvents drains the agent event channel, updating job
 // counters as usage events arrive and recording the final assistant
 // text for the summary. On EventDone we mark Completed; on EventError
 // we mark Failed; on ctx cancellation we mark Cancelled.
-func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent.AgentEvent, sess *session.Manager) {
+func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent.AgentEvent, sess *session.Manager, runtimeBackend computers.RuntimeBackend) {
 	var lastAssistantText strings.Builder
 	var inflightAssistant strings.Builder
 	var inflightReasoning strings.Builder
@@ -215,7 +254,13 @@ func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent
 	}
 
 	transcript := snapshotTranscript(sess)
-	artifacts = appendWorktreeArtifacts(ctx, artifacts, j)
+	artifacts = appendWorktreeArtifactsForBackend(ctx, artifacts, j, runtimeBackend)
+	// A terminal snapshot is an ownership boundary: publish it only after the
+	// job-owned remote transport has been closed. This prevents callers from
+	// observing "completed" while its SSH/SFTP connection is still live.
+	if runtimeBackend != nil {
+		_ = runtimeBackend.Close()
+	}
 
 	// Order of precedence for terminal state:
 	//   1. ctx cancelled (Cancel/CancelAll/Shutdown) → Cancelled
