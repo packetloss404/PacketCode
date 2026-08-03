@@ -92,6 +92,17 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- MiniMax interleaved-thinking models (M2.x/M3) keep their reasoning chain
+  across tool calls. Their thinking arrives inline in `content` wrapped in
+  `<think>` blocks; it was rendered as ordinary assistant text and then
+  discarded on every tool-calling turn, which MiniMax's tool-use guide warns
+  degrades multi-turn tool use. Reasoning is now split out of the transcript
+  into the reasoning stream, persisted on the assistant message, and replayed
+  on the next request with the tags preserved exactly. Content sharing a frame
+  with a tool call is no longer dropped on these providers. Other
+  OpenAI-compatible backends are unaffected: a literal `<think>` in prose stays
+  visible, and stored reasoning is never sent to a provider that did not
+  produce it.
 - Context gauges now show current context occupancy instead of cumulative session input, keeping the native and custom statuslines aligned and allowing occupancy to drop after compaction.
 - Foreground permission-policy swaps are synchronized with the running agent; background job policy startup reads are synchronized as well.
 - Workflow cancellation closes spawn/register races, cancels sibling fan-out jobs on failure, drains terminal states with bounded waits, and reports malformed workflow files instead of silently falling back.

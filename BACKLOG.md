@@ -56,6 +56,21 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 - Expand Ollama pull progress, cancellation, and model-removal management.
 - Add optional MLX/local-runtime backends only if they can match the native tool and streaming contracts without weakening Ollama's zero-config path.
 - Add provider-specific output/reasoning controls to the model picker when the upstream catalog exposes them.
+- Verify the MiniMax reasoning wire shape against a live key. The inline
+  `<think>` path is implemented from the published tool-use guide, not from an
+  observed response; confirm it, then decide whether to adopt
+  `reasoning_split=true` + verbatim `reasoning_details` echo instead of
+  reconstructing the tags.
+- Track MiniMax cached-input and long-context billing. `/cost` currently bills
+  M3 at a flat $0.30/$1.20: cached input reads are cheaper, and a request over
+  512K tokens bills entirely at the 2x long-context tier, so long sessions on a
+  1M window are under-reported. Needs `usage` cache fields parsed into
+  `provider.Usage` and a tiered entry in the MiniMax pricing table.
+- Map `/effort` onto MiniMax `thinking.type=disabled` so thinking can be turned
+  off for cheap turns; MiniMax does not implement `ReasoningEffortController`.
+- Evaluate `api.minimax.io/anthropic` as an alternate MiniMax transport, where
+  thinking blocks are first-class and the existing Anthropic parser already
+  handles them. Trade-off: MiniMax stops sharing `openaicompat`.
 
 ## Packet Computers
 
