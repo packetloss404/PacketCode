@@ -49,6 +49,13 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	// Reasoning holds an assistant turn's thinking chain, stripped out of
+	// Content so it never renders as ordinary text. Interleaved-thinking
+	// models require it to be fed back on the next request or multi-turn tool
+	// use degrades; providers that only expose reasoning *summaries* (Codex)
+	// record it for display and never echo it. Each provider decides whether
+	// and how to send it back — see openaicompat.Client.SendReasoning.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // ToolDefinition is sent to the LLM to declare an available tool. Parameters

@@ -32,8 +32,17 @@ func New(apiKey string) *Provider {
 	return NewWithBaseURL(defaultBaseURL, apiKey)
 }
 
+// NewWithBaseURL builds the client with interleaved thinking enabled. MiniMax's
+// M2.x/M3 models reason between tool calls and return that chain inline in
+// <think> blocks; their tool-use guide requires the complete response —
+// thinking included — to be appended to the conversation history, preserving
+// the tags exactly. Without this the reasoning chain both leaks into the
+// visible transcript and is lost on every tool-calling turn.
 func NewWithBaseURL(baseURL, apiKey string) *Provider {
-	return &Provider{client: openaicompat.NewClient(baseURL, apiKey)}
+	client := openaicompat.NewClient(baseURL, apiKey)
+	client.InterleavedThinking = true
+	client.SendReasoning = true
+	return &Provider{client: client}
 }
 
 func (p *Provider) Name() string               { return displayName }

@@ -240,6 +240,7 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 
 	asm := newCallAssembler()
 	var fullText string
+	var fullReasoning string
 	var lastUsage *provider.Usage
 
 	for ev := range stream {
@@ -249,8 +250,12 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 			events <- AgentEvent{Type: EventTextDelta, Text: ev.TextDelta}
 
 		case provider.EventReasoningDelta:
-			// Reasoning is display-only: streamed to the UI but not added to
-			// fullText or persisted as part of the assistant message.
+			// Reasoning is never part of fullText — it must not render as
+			// ordinary assistant output. It is recorded separately so
+			// interleaved-thinking models can be handed their own chain back on
+			// the next request; providers that expose only reasoning summaries
+			// store it for display and never echo it.
+			fullReasoning += ev.TextDelta
 			events <- AgentEvent{Type: EventReasoningDelta, Text: ev.TextDelta}
 
 		case provider.EventToolCallStart:
@@ -279,8 +284,11 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 		}
 	}
 
-	if fullText != "" || len(calls) > 0 {
-		// Persist the assistant message (text + completed tool calls).
+	if fullText != "" || fullReasoning != "" || len(calls) > 0 {
+		// Persist the assistant message (text + reasoning + completed tool
+		// calls). Reasoning is stored even on tool-calling turns, where the
+		// visible content is deliberately dropped: for interleaved-thinking
+		// models the chain is exactly what the next request has to replay.
 		content := fullText
 		if len(calls) > 0 {
 			content = ""
@@ -288,6 +296,7 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 		assistantMsg := provider.Message{
 			Role:      provider.RoleAssistant,
 			Content:   content,
+			Reasoning: fullReasoning,
 			ToolCalls: calls,
 		}
 		if err := a.session.AddMessage(assistantMsg); err != nil {

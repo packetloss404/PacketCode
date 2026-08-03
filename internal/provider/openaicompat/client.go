@@ -35,6 +35,20 @@ type Client struct {
 	// ExtraHeaders is invoked just before each request is sent. Wrappers
 	// use it to add provider-specific headers without mutating Client state.
 	ExtraHeaders HeaderFunc
+	// InterleavedThinking enables <think>-block handling for backends whose
+	// models stream their reasoning chain inline in `content` (MiniMax M2.x/M3).
+	// When set, reasoning is split out of the visible transcript and reported as
+	// EventReasoningDelta, and SendReasoning governs echoing it back.
+	//
+	// Off by default: OpenAI and OpenRouter do not use this convention, and a
+	// literal "<think>" in ordinary prose must stay visible for them.
+	InterleavedThinking bool
+	// SendReasoning re-wraps Message.Reasoning in <think> tags on outbound
+	// assistant messages, which is how the OpenAI-native format preserves an
+	// interleaved-thinking chain across tool calls. Kept separate from
+	// InterleavedThinking so a session that switches providers never ships
+	// one backend's reasoning to another that would reject it.
+	SendReasoning bool
 }
 
 // NewClient returns a Client with a sensible default HTTP client. A nil
@@ -191,12 +205,20 @@ type wireToolSchema struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-func toWireMessages(msgs []provider.Message) []wireMessage {
+// toWireMessages converts unified messages to the wire format. When
+// sendReasoning is set, an assistant turn's stored reasoning is re-wrapped in
+// <think> tags and prepended to its content, reconstructing the exact shape the
+// model emitted so the reasoning chain stays intact across tool calls.
+func toWireMessages(msgs []provider.Message, sendReasoning bool) []wireMessage {
 	out := make([]wireMessage, 0, len(msgs))
 	for _, m := range msgs {
+		content := m.Content
+		if sendReasoning && m.Role == provider.RoleAssistant && m.Reasoning != "" {
+			content = openTag + m.Reasoning + closeTag + content
+		}
 		wm := wireMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
+			Content:    content,
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
@@ -242,7 +264,7 @@ func toWireTools(tools []provider.ToolDefinition) []wireTool {
 func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	body := chatRequestBody{
 		Model:         req.Model,
-		Messages:      toWireMessages(req.Messages),
+		Messages:      toWireMessages(req.Messages, c.SendReasoning),
 		Tools:         toWireTools(req.Tools),
 		Stream:        true,
 		StreamOptions: &wireStreamOpts{IncludeUsage: true},
@@ -282,7 +304,11 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
-	go parseSSE(ctx, sctx, guard, resp.Body, ch)
+	var filter *thinkFilter
+	if c.InterleavedThinking {
+		filter = &thinkFilter{}
+	}
+	go parseSSE(ctx, sctx, guard, resp.Body, ch, filter)
 	return ch, nil
 }
 
@@ -330,9 +356,14 @@ type chatStreamChunk struct {
 }
 
 type chatStreamDelta struct {
-	Role      string               `json:"role,omitempty"`
-	Content   string               `json:"content,omitempty"`
-	ToolCalls []chatStreamToolCall `json:"tool_calls,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+	// ReasoningContent is the out-of-band reasoning field used by some
+	// OpenAI-compatible backends instead of inline <think> blocks. It is
+	// surfaced for display only: we did not receive it as part of `content`,
+	// so we do not synthesise a <think> wrapper to echo back.
+	ReasoningContent string               `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatStreamToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatStreamToolCall struct {
@@ -360,10 +391,50 @@ type chatUsage struct {
 // body close from bufio.Scanner. On cancel we emit EventError with the
 // ctx.Err() cause (context.Canceled / DeadlineExceeded) so the agent
 // path surfaces the friendlier "turn cancelled" rendering.
-func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.ReadCloser, ch chan<- provider.StreamEvent) {
+// filter is non-nil only for interleaved-thinking backends; it splits inline
+// <think> blocks out of the content stream.
+func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.ReadCloser, ch chan<- provider.StreamEvent, filter *thinkFilter) {
 	defer close(ch)
 	defer body.Close()
 	defer guard.Stop()
+
+	// emitContent routes one content delta. Without a filter this preserves the
+	// original behaviour exactly, including suppressing text that shares a frame
+	// with tool calls. With a filter, text is never suppressed: a frame that
+	// carries both a closing </think> and a tool call is normal for M3, and
+	// dropping it would lose the tail of the reasoning chain.
+	emitContent := func(text string, hasToolCalls bool) {
+		if text == "" {
+			return
+		}
+		if filter == nil {
+			if !hasToolCalls {
+				ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: text}
+			}
+			return
+		}
+		visible, reasoning := filter.Write(text)
+		if reasoning != "" {
+			ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: reasoning}
+		}
+		if visible != "" {
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: visible}
+		}
+	}
+
+	// flushFilter drains any text held back as a possible partial tag.
+	flushFilter := func() {
+		if filter == nil {
+			return
+		}
+		visible, reasoning := filter.Flush()
+		if reasoning != "" {
+			ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: reasoning}
+		}
+		if visible != "" {
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: visible}
+		}
+	}
 
 	// activeCalls tracks which indices we've already emitted Start for.
 	activeCalls := map[int]bool{}
@@ -386,6 +457,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		guard.Tick()
 		if data == "[DONE]" {
+			flushFilter()
 			// End any tool calls still open (defensive — most providers
 			// emit finish_reason before [DONE]).
 			for idx := range activeCalls {
@@ -406,12 +478,13 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 
 		for _, choice := range chunk.Choices {
 			hasToolCalls := len(choice.Delta.ToolCalls) > 0
-			if choice.Delta.Content != "" && !hasToolCalls {
+			if choice.Delta.ReasoningContent != "" {
 				ch <- provider.StreamEvent{
-					Type:      provider.EventTextDelta,
-					TextDelta: choice.Delta.Content,
+					Type:      provider.EventReasoningDelta,
+					TextDelta: choice.Delta.ReasoningContent,
 				}
 			}
+			emitContent(choice.Delta.Content, hasToolCalls)
 			for _, tc := range choice.Delta.ToolCalls {
 				if !activeCalls[tc.Index] {
 					ch <- provider.StreamEvent{
@@ -457,6 +530,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		}
 
 		if chunk.Usage != nil {
+			flushFilter()
 			ch <- provider.StreamEvent{
 				Type: provider.EventDone,
 				Usage: &provider.Usage{
@@ -479,5 +553,6 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream ended before completion")}
 		return
 	}
+	flushFilter()
 	ch <- provider.StreamEvent{Type: provider.EventDone}
 }

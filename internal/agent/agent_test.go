@@ -965,3 +965,66 @@ func TestAgent_BuildMessagesNormalizesSplitToolCallGroups(t *testing.T) {
 		assert.Empty(t, msg.ToolCalls)
 	}
 }
+
+// Interleaved-thinking models (MiniMax M2.x/M3) reason between tool calls and
+// require their own chain to be replayed on the next request; stripping it
+// degrades multi-turn tool use. The visible content of a tool-calling turn is
+// deliberately dropped, so reasoning has to be persisted in its own field and
+// carried into the follow-up request.
+func TestAgent_PersistsReasoningAcrossToolCall(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventReasoningDelta, TextDelta: "I need to "},
+			{Type: provider.EventReasoningDelta, TextDelta: "run the tool"},
+			{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "do_thing"}},
+			{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{}`}},
+			{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+			{Type: provider.EventDone},
+		},
+		{
+			{Type: provider.EventTextDelta, TextDelta: "All done"},
+			{Type: provider.EventDone},
+		},
+	}}
+	rt := &recordingTool{name: "do_thing", approval: false}
+	a, sm, _ := newAgentRig(t, prov, rt)
+
+	collect(a.Run(context.Background(), "do the thing"))
+
+	cur := sm.Current()
+	require.GreaterOrEqual(t, len(cur.Messages), 2)
+	assistant := cur.Messages[1]
+	require.Equal(t, provider.RoleAssistant, assistant.Role)
+	require.Len(t, assistant.ToolCalls, 1)
+	assert.Equal(t, "I need to run the tool", assistant.Reasoning,
+		"reasoning must be persisted on a tool-calling turn, not discarded with the content")
+
+	// The follow-up request must carry it back to the model.
+	var replayed string
+	for _, m := range prov.lastRequest.Messages {
+		if m.Role == provider.RoleAssistant && m.Reasoning != "" {
+			replayed = m.Reasoning
+		}
+	}
+	assert.Equal(t, "I need to run the tool", replayed,
+		"the reasoning chain must be replayed on the next request")
+}
+
+// Reasoning must never be folded into the assistant's visible text.
+func TestAgent_ReasoningIsNotVisibleContent(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventReasoningDelta, TextDelta: "thinking out loud"},
+			{Type: provider.EventTextDelta, TextDelta: "Here is the answer."},
+			{Type: provider.EventDone},
+		},
+	}}
+	a, sm, _ := newAgentRig(t, prov)
+
+	collect(a.Run(context.Background(), "question"))
+
+	cur := sm.Current()
+	require.Len(t, cur.Messages, 2)
+	assert.Equal(t, "Here is the answer.", cur.Messages[1].Content)
+	assert.Equal(t, "thinking out loud", cur.Messages[1].Reasoning)
+}
