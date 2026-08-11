@@ -9,7 +9,7 @@ import (
 
 // displayOrder controls the order providers appear in the selector modal.
 // It matches the order in the vision doc so the UI feels consistent.
-var displayOrder = []string{"openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"}
+var displayOrder = []string{"sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"}
 
 // DisplayOrder returns the canonical provider display order used by the TUI.
 func DisplayOrder() []string {

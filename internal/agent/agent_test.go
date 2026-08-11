@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
@@ -229,6 +228,26 @@ func TestAgent_TextOnlyTurn(t *testing.T) {
 	assert.Equal(t, provider.RoleAssistant, cur.Messages[1].Role)
 	assert.Equal(t, "Hello there", cur.Messages[1].Content)
 	assert.Equal(t, 10, cur.TokenUsage.TotalInput)
+}
+
+func TestAgent_AttachesStableSessionCacheMetadata(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{{{Type: provider.EventDone}}}}
+	a, sm, _ := newAgentRig(t, prov, &recordingTool{name: "zeta"}, &recordingTool{name: "alpha"})
+	a.systemPrompt = "stable system"
+	collect(a.Run(context.Background(), "hi"))
+
+	cache := prov.lastRequest.SugarCache
+	require.NotNil(t, cache)
+	assert.Equal(t, sm.Current().ID, cache.ConversationID)
+	assert.Equal(t, 0, cache.CompactionGeneration)
+	assert.Equal(t, 1, cache.StablePrefixMessages)
+	assert.Equal(t, provider.SugarCacheAuto, cache.Mode)
+	assert.Equal(t, provider.SugarCacheProviderDefault, cache.Retention)
+	assert.Equal(t, provider.SugarPrivacyStandard, cache.Privacy)
+	assert.Equal(t, provider.CachePrefixFingerprint("stable system", prov.lastRequest.Tools), cache.PrefixFingerprint)
+	require.Len(t, prov.lastRequest.Tools, 2)
+	assert.Equal(t, "alpha", prov.lastRequest.Tools[0].Name)
+	assert.Equal(t, "zeta", prov.lastRequest.Tools[1].Name)
 }
 
 func TestAgent_ToolCallApprovedAndExecuted(t *testing.T) {
@@ -908,33 +927,57 @@ func TestContextManager_CompactTailStartingOnToolMessageKeepsGroup(t *testing.T)
 	assert.Equal(t, "done", out[4].Content)
 }
 
-func TestCompactOlderToolResultsPreservesNewestExchangeAndOrdering(t *testing.T) {
-	largeOld := strings.Repeat("old", 10000)
-	largeRecent := strings.Repeat("recent", 6000)
-	messages := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "run", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "old", Name: "run", Content: largeOld},
-		{Role: provider.RoleAssistant, Content: "continue"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "run", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "new", Name: "run", Content: largeRecent},
-	}
+func TestAgentBuildMessagesKeepsToolProjectionImmutableAcrossTurns(t *testing.T) {
+	sm := session.NewManager(t.TempDir())
+	_, err := sm.New("scripted", "scripted-model")
+	require.NoError(t, err)
+	large := strings.Repeat("old", 30000)
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "run", Arguments: `{}`}}}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleTool, ToolCallID: "old", Name: "run", Content: large}))
 
-	got := compactOlderToolResults(messages, 1024)
-	require.Len(t, got, len(messages))
-	assert.Contains(t, got[1].Content, "tool result truncated")
-	assert.Contains(t, got[1].Content, "original_bytes=30000")
-	assert.Less(t, len(got[1].Content), len(largeOld)/10)
-	assert.Equal(t, largeRecent, got[4].Content)
-	assert.Equal(t, "old", got[1].ToolCallID)
-	assert.Equal(t, "new", got[4].ToolCallID)
-	assert.Equal(t, largeOld, messages[1].Content, "persisted/source transcript must remain complete")
+	a := New(Config{Session: sm})
+	first := a.buildMessages()
+	require.Len(t, first, 2)
+	projected := first[1].Content
+	assert.Contains(t, projected, "tool result truncated")
+
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "run", Arguments: `{}`}}}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleTool, ToolCallID: "new", Name: "run", Content: "recent"}))
+	second := a.buildMessages()
+	require.Len(t, second, 4)
+	assert.Equal(t, projected, second[1].Content, "an older result's model-facing bytes must not change")
+
+	stored := sm.Current()
+	require.NotNil(t, stored)
+	assert.Equal(t, large, stored.Messages[1].Content, "full local/UI result must remain available")
+	assert.Equal(t, projected, stored.Messages[1].ModelContent)
 }
 
-func TestCompactToolResultPreservesUTF8(t *testing.T) {
-	content := strings.Repeat("界", 2000)
-	got := compactToolResult(content, 1024)
-	assert.True(t, utf8.ValidString(got))
-	assert.Contains(t, got, "tool result truncated")
+func TestContextManagerCompactUsesProjectionButPreservesFullTail(t *testing.T) {
+	sm := session.NewManager(t.TempDir())
+	_, err := sm.New("scripted", "scripted-model")
+	require.NoError(t, err)
+	large := strings.Repeat("head", 12000) + "SECRET_MIDDLE_SENTINEL" + strings.Repeat("tail", 12000)
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleUser, Content: "run the tool"}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "run", Arguments: `{}`}}}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleTool, ToolCallID: "call-1", Name: "run", Content: large}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleAssistant, Content: "tool complete"}))
+	require.NoError(t, sm.AddMessage(provider.Message{Role: provider.RoleUser, Content: "next"}))
+
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{{
+		{Type: provider.EventTextDelta, TextDelta: "summary"},
+		{Type: provider.EventDone},
+	}}}
+	_, _, err = NewContextManager(80).CompactWithUsage(context.Background(), prov, "scripted-model", sm.Current().Messages, 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, prov.lastRequest.Messages)
+	summaryPrompt := prov.lastRequest.Messages[0].Content
+	assert.Contains(t, summaryPrompt, "tool result truncated")
+	assert.NotContains(t, summaryPrompt, "SECRET_MIDDLE_SENTINEL")
+
+	// Preparing the model summary must not alter the authoritative local/UI
+	// transcript while it creates the projected prompt.
+	assert.Equal(t, large, sm.Current().Messages[2].Content)
 }
 
 func TestAgent_BuildMessagesNormalizesSplitToolCallGroups(t *testing.T) {

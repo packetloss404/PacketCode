@@ -113,7 +113,7 @@ func (a *App) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		return a.startNextQueuedInput()
 	}
 
-	if saveErr := a.deps.Sessions.ReplaceMessages(msg.after); saveErr != nil {
+	if saveErr := a.deps.Sessions.ReplaceMessagesAfterCompaction(msg.after); saveErr != nil {
 		a.conversation.AppendSystem("compact: save failed: " + saveErr.Error())
 		return a.startNextQueuedInput()
 	}

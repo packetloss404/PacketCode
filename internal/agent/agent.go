@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/hooks"
@@ -73,29 +72,33 @@ type AgentEvent struct {
 // Run() is safe to call repeatedly but not concurrently — the conversation
 // is intrinsically serial.
 type Agent struct {
-	registry     *provider.Registry
-	toolRegistry *tools.Registry
-	session      *session.Manager
-	costTracker  *cost.Tracker
-	approver     Approver
-	policyMu     sync.RWMutex
-	policy       *permissions.Policy
-	systemPrompt string
-	hooks        *hooks.Runner
-	tokenBudget  int
+	registry      *provider.Registry
+	toolRegistry  *tools.Registry
+	session       *session.Manager
+	costTracker   *cost.Tracker
+	approver      Approver
+	policyMu      sync.RWMutex
+	policy        *permissions.Policy
+	systemPrompt  string
+	hooks         *hooks.Runner
+	tokenBudget   int
+	sugarCache    SugarCacheConfig
+	conduitShadow ConduitShadowConfig
 }
 
 // Config bundles the agent's required dependencies.
 type Config struct {
-	Registry     *provider.Registry
-	Tools        *tools.Registry
-	Session      *session.Manager
-	CostTracker  *cost.Tracker
-	Approver     Approver
-	Policy       *permissions.Policy
-	SystemPrompt string
-	Hooks        *hooks.Runner
-	TokenBudget  int // input+output tokens; zero disables the boundary check
+	Registry      *provider.Registry
+	Tools         *tools.Registry
+	Session       *session.Manager
+	CostTracker   *cost.Tracker
+	Approver      Approver
+	Policy        *permissions.Policy
+	SystemPrompt  string
+	Hooks         *hooks.Runner
+	TokenBudget   int // input+output tokens; zero disables the boundary check
+	SugarCache    SugarCacheConfig
+	ConduitShadow ConduitShadowConfig
 }
 
 // New constructs an Agent. Approver defaults to AutoReject if omitted —
@@ -107,16 +110,27 @@ func New(cfg Config) *Agent {
 	if cfg.Policy == nil {
 		cfg.Policy = permissions.DefaultPolicy()
 	}
+	if cfg.SugarCache.Mode == "" {
+		cfg.SugarCache.Mode = provider.SugarCacheAuto
+	}
+	if cfg.SugarCache.Retention == "" {
+		cfg.SugarCache.Retention = provider.SugarCacheProviderDefault
+	}
+	if cfg.SugarCache.Privacy == "" {
+		cfg.SugarCache.Privacy = provider.SugarPrivacyStandard
+	}
 	return &Agent{
-		registry:     cfg.Registry,
-		toolRegistry: cfg.Tools,
-		session:      cfg.Session,
-		costTracker:  cfg.CostTracker,
-		approver:     cfg.Approver,
-		policy:       cfg.Policy,
-		systemPrompt: cfg.SystemPrompt,
-		hooks:        cfg.Hooks,
-		tokenBudget:  cfg.TokenBudget,
+		registry:      cfg.Registry,
+		toolRegistry:  cfg.Tools,
+		session:       cfg.Session,
+		costTracker:   cfg.CostTracker,
+		approver:      cfg.Approver,
+		policy:        cfg.Policy,
+		systemPrompt:  cfg.SystemPrompt,
+		hooks:         cfg.Hooks,
+		tokenBudget:   cfg.TokenBudget,
+		sugarCache:    cfg.SugarCache,
+		conduitShadow: cfg.ConduitShadow,
 	}
 }
 
@@ -184,9 +198,10 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 		events <- AgentEvent{Type: EventError, Error: fmt.Errorf("save user message: %w", err)}
 		return
 	}
+	shadow := newConduitShadowState(a.conduitShadow, a.session, userMessage)
 
 	for iter := 0; iter < maxToolIterations; iter++ {
-		more, err := a.oneTurn(ctx, events)
+		more, err := a.oneTurn(ctx, events, shadow)
 		if err != nil {
 			events <- AgentEvent{Type: EventError, Error: err}
 			return
@@ -213,7 +228,7 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 // Returns (true, nil) if more turns are needed (i.e. tool calls were
 // executed and the LLM should respond to their results), (false, nil) if
 // the LLM emitted no tool calls (turn complete), or (_, err) on failure.
-func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, error) {
+func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *conduitShadowState) (bool, error) {
 	prov, modelID := a.registry.Active()
 	if prov == nil {
 		return false, errors.New("no active provider")
@@ -225,16 +240,33 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 		Stream:   true,
 	}
 	if prov.SupportsTools(modelID) {
-		req.Tools = a.toolRegistry.Definitions()
+		req.Tools = provider.CanonicalToolDefinitions(a.toolRegistry.Definitions())
 	} else if a.toolRegistry != nil && len(a.toolRegistry.Definitions()) > 0 {
 		req.Messages = append([]provider.Message{{
 			Role:    provider.RoleSystem,
 			Content: unsupportedToolsMessage(prov.Name(), modelID),
 		}}, req.Messages...)
 	}
+	if cur := a.session.Current(); cur != nil {
+		stablePrefixMessages := 0
+		if a.systemPrompt != "" {
+			stablePrefixMessages = 1
+		}
+		req.SugarCache = &provider.SugarCacheMetadata{
+			ConversationID:       cur.ID,
+			PrefixFingerprint:    provider.CachePrefixFingerprint(a.systemPrompt, req.Tools),
+			StablePrefixMessages: stablePrefixMessages,
+			CompactionGeneration: cur.Cache.CompactionGeneration,
+			Mode:                 a.sugarCache.Mode,
+			Retention:            a.sugarCache.Retention,
+			Privacy:              a.sugarCache.Privacy,
+		}
+	}
+	shadow.start(ctx, prov, req)
 
 	stream, err := prov.ChatCompletion(ctx, req)
 	if err != nil {
+		shadow.providerFailure(ctx, err)
 		return false, fmt.Errorf("chat completion: %w", err)
 	}
 
@@ -273,6 +305,7 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 			}
 
 		case provider.EventError:
+			shadow.providerFailure(ctx, ev.Error)
 			return false, ev.Error
 		}
 	}
@@ -322,7 +355,7 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent) (bool, er
 	}
 
 	for _, call := range calls {
-		if err := a.handleToolCall(ctx, call, events); err != nil {
+		if err := a.handleToolCall(ctx, call, events, shadow); err != nil {
 			return false, err
 		}
 	}
@@ -336,7 +369,7 @@ func unsupportedToolsMessage(providerName, modelID string) string {
 // handleToolCall runs the approval flow and either executes the tool or
 // records a rejection message. Either way a tool-role message is appended
 // to the session so the LLM has full visibility into what happened.
-func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, events chan<- AgentEvent) error {
+func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, events chan<- AgentEvent, shadow *conduitShadowState) error {
 	events <- AgentEvent{Type: EventToolCallProposed, ToolCall: call}
 
 	tool, ok := a.toolRegistry.Get(call.Name)
@@ -346,6 +379,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			Content: fmt.Sprintf("unknown tool: %s", call.Name),
 			IsError: true,
 		}}
+		shadow.toolResult(ctx, call, tools.ToolResult{Content: "unknown tool", IsError: true})
 		return a.session.AddMessage(provider.Message{
 			Role:       provider.RoleTool,
 			ToolCallID: call.ID,
@@ -363,6 +397,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 	if policyResult.Decision == permissions.DecisionDeny {
 		rejection := "permission denied: " + policyResult.Reason
 		events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
+		shadow.blocked(ctx, call, rejection)
 		return a.session.AddMessage(provider.Message{
 			Role:       provider.RoleTool,
 			ToolCallID: call.ID,
@@ -383,6 +418,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 				rejection += "\n" + preOut
 			}
 			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
+			shadow.blocked(ctx, call, rejection)
 			return a.session.AddMessage(provider.Message{
 				Role:       provider.RoleTool,
 				ToolCallID: call.ID,
@@ -403,12 +439,16 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 				rejection = "user rejected the proposed action"
 			}
 			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
+			shadow.blocked(ctx, call, rejection)
 			return a.session.AddMessage(provider.Message{
 				Role:       provider.RoleTool,
 				ToolCallID: call.ID,
 				Name:       call.Name,
 				Content:    rejection,
 			})
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		events <- AgentEvent{Type: EventToolCallApproved, ToolCall: call}
 		if len(decision.EditedParams) > 0 {
@@ -421,6 +461,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			if editedPolicyResult.Decision == permissions.DecisionDeny {
 				rejection := "permission denied after approval edit: " + editedPolicyResult.Reason
 				events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
+				shadow.blocked(ctx, call, rejection)
 				return a.session.AddMessage(provider.Message{
 					Role:       provider.RoleTool,
 					ToolCallID: call.ID,
@@ -431,6 +472,9 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	executedCall := call
 	executedCall.Arguments = string(params)
 	res, err := a.executeTool(ctx, tool, call.ID, params, events)
@@ -460,6 +504,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		}
 	}
 	events <- AgentEvent{Type: EventToolCallExecuted, ToolCall: executedCall, ToolResult: res}
+	shadow.toolResult(ctx, executedCall, res)
 	return a.session.AddMessage(provider.Message{
 		Role:       provider.RoleTool,
 		ToolCallID: call.ID,
@@ -558,11 +603,9 @@ func validateToolCall(call provider.ToolCall) error {
 	return nil
 }
 
-const olderToolResultLimit = 16 * 1024
-
 // buildMessages assembles the message array sent to the provider. Persisted
-// history remains complete; only older oversized tool results are compacted on
-// the model-facing copy. The newest complete tool exchange stays verbatim.
+// history remains complete; oversized tool results use the immutable bounded
+// projection recorded when the result first entered the session.
 func (a *Agent) buildMessages() []provider.Message {
 	cur := a.session.Current()
 	var msgs []provider.Message
@@ -573,48 +616,10 @@ func (a *Agent) buildMessages() []provider.Message {
 		})
 	}
 	if cur != nil {
-		transcript := normalizeToolTranscript(cur.Messages)
-		msgs = append(msgs, compactOlderToolResults(transcript, olderToolResultLimit)...)
+		transcript := normalizeToolTranscript(session.ModelMessages(cur.Messages))
+		msgs = append(msgs, transcript...)
 	}
 	return msgs
-}
-
-func compactOlderToolResults(messages []provider.Message, limit int) []provider.Message {
-	out := append([]provider.Message(nil), messages...)
-	if limit <= 0 {
-		return out
-	}
-	preserveFrom := len(out)
-	groups := completeToolGroups(out)
-	if len(groups) > 0 {
-		preserveFrom = groups[len(groups)-1].start
-	}
-	for i := 0; i < preserveFrom; i++ {
-		if out[i].Role == provider.RoleTool && len(out[i].Content) > limit {
-			out[i].Content = compactToolResult(out[i].Content, limit)
-		}
-	}
-	return out
-}
-
-func compactToolResult(content string, limit int) string {
-	markerReserve := 256
-	kept := limit - markerReserve
-	if kept < 2 {
-		kept = 2
-	}
-	head := kept * 2 / 3
-	tail := kept - head
-	for head > 0 && !utf8.ValidString(content[:head]) {
-		head--
-	}
-	tailStart := len(content) - tail
-	for tailStart < len(content) && !utf8.RuneStart(content[tailStart]) {
-		tailStart++
-	}
-	tail = len(content) - tailStart
-	omitted := len(content) - head - tail
-	return content[:head] + fmt.Sprintf("\n\n[tool result truncated: original_bytes=%d kept_head_bytes=%d kept_tail_bytes=%d omitted_bytes=%d; full result remains in session/UI]\n\n", len(content), head, tail, omitted) + content[tailStart:]
 }
 
 // ────────────────────────────────────────────────────────────────────────────

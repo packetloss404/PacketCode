@@ -56,9 +56,10 @@ func TestRegistry_ListUsesDisplayOrder(t *testing.T) {
 	r.Register(&fakeProvider{slug: "gemini"})
 	r.Register(&fakeProvider{slug: "anthropic"})
 	r.Register(&fakeProvider{slug: "openai"})
+	r.Register(&fakeProvider{slug: "sugar"})
 
 	got := r.Slugs()
-	assert.Equal(t, []string{"openai", "anthropic", "gemini", "minimax", "openrouter", "ollama", "zzz-extra"}, got)
+	assert.Equal(t, []string{"sugar", "openai", "anthropic", "gemini", "minimax", "openrouter", "ollama", "zzz-extra"}, got)
 }
 
 func TestRegistry_SetActiveAtomic(t *testing.T) {

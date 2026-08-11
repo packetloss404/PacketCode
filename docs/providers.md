@@ -4,6 +4,7 @@ packetcode supports these provider slugs:
 
 | Slug | Needs key | Notes |
 | --- | --- | --- |
+| `sugar` | Yes | Uses the private Sugar service. Lists Conduit and every directly selectable Sugar model live from the authenticated API. |
 | `openai` | Yes | Uses the OpenAI API. |
 | `codex` | No | Uses an OpenAI Codex ChatGPT subscription via `~/.codex/auth.json`. See [Codex subscription](#codex-subscription). |
 | `anthropic` | Yes | Uses the Anthropic Claude Messages API with an API key. |
@@ -80,6 +81,35 @@ provider; configure an API key or choose another provider.
 
 ## Configure Keys
 
+### Sugar
+
+Sugar is a built-in provider. Connect it with member-approved device sign-in:
+
+```text
+packetcode sugar login --server https://your-sugar-service.up.railway.app --name your-name
+```
+
+Packetcode requests a short-lived device code, opens Sugar's approval page, and polls only at the interval Sugar returns. After the signed-in member confirms the code and device name, Sugar atomically issues a revocable API key owned by that member. Packetcode validates the key, saves the service URL, and pulls the current model catalog from Sugar's authenticated `/models` endpoint. The default model is `sugar/conduit`, which lets Conduit pick the stable model for each task. Use `--no-browser` to open the printed HTTPS URL yourself.
+
+Open `/model` at any time to pin a live direct lane such as `sugar/kimi`, `sugar/glm`, `sugar/deepseek`, or `sugar/minimax`. The list comes from Sugar on startup, so newly supplied models appear without a Packetcode release.
+
+For a key that was issued elsewhere, set `PACKETCODE_SUGAR_API_KEY`. Override the saved service URL for one machine with `PACKETCODE_SUGAR_BASE_URL`.
+
+```toml
+[default]
+provider = "sugar"
+model = "sugar/conduit"
+
+[providers.sugar]
+api_key = "sgr_..."
+base_url = "https://your-sugar-service.up.railway.app/api/v1"
+default_model = "sugar/conduit"
+```
+
+Sugar's service meters upstream Runpod usage. Packetcode therefore reports `$0` as a local provider cost rather than showing a second, misleading API bill.
+
+## Configure Other Provider Keys
+
 First run configures one provider. To add or update another provider later:
 
 1. Open the provider picker with `Ctrl+P` or `/provider`.
@@ -95,6 +125,7 @@ You can also set keys with environment variables:
 
 ```text
 PACKETCODE_OPENAI_API_KEY
+PACKETCODE_SUGAR_API_KEY
 PACKETCODE_ANTHROPIC_API_KEY
 PACKETCODE_GEMINI_API_KEY
 PACKETCODE_MINIMAX_API_KEY
@@ -125,8 +156,13 @@ When switching providers, packetcode uses that provider's saved `default_model`.
 
 ```toml
 [default]
-provider = "openai"
-model = "gpt-5.6-sol"
+provider = "sugar"
+model = "sugar/conduit"
+
+[providers.sugar]
+api_key = "sgr_..."
+base_url = "https://your-sugar-service.up.railway.app/api/v1"
+default_model = "sugar/conduit"
 
 [providers.openai]
 api_key = "sk-..."

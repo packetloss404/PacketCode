@@ -325,14 +325,16 @@ func New(deps Deps) (*App, error) {
 	approver.SetPermissionPolicy(policy)
 
 	a := agent.New(agent.Config{
-		Registry:     deps.Registry,
-		Tools:        deps.Tools,
-		Session:      deps.Sessions,
-		CostTracker:  deps.CostTracker,
-		Approver:     approver,
-		Policy:       policy,
-		SystemPrompt: deps.SystemPrompt,
-		Hooks:        deps.Hooks,
+		Registry:      deps.Registry,
+		Tools:         deps.Tools,
+		Session:       deps.Sessions,
+		CostTracker:   deps.CostTracker,
+		Approver:      approver,
+		Policy:        policy,
+		SystemPrompt:  deps.SystemPrompt,
+		Hooks:         deps.Hooks,
+		SugarCache:    sugarCacheAgentConfig(deps.Config),
+		ConduitShadow: conduitShadowAgentConfig(deps.Config),
 	})
 
 	conv := conversation.New()
@@ -428,6 +430,28 @@ func New(deps Deps) (*App, error) {
 		}
 	}
 	return app, nil
+}
+
+func sugarCacheAgentConfig(cfg *config.Config) agent.SugarCacheConfig {
+	if cfg == nil {
+		return agent.SugarCacheConfig{}
+	}
+	return agent.SugarCacheConfig{
+		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
+		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
+		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
+	}
+}
+
+func conduitShadowAgentConfig(cfg *config.Config) agent.ConduitShadowConfig {
+	if cfg == nil {
+		return agent.ConduitShadowConfig{}
+	}
+	return agent.ConduitShadowConfig{
+		Enabled:         cfg.Conduit.ShadowEnabled,
+		Timeout:         time.Duration(cfg.Conduit.TimeoutMS) * time.Millisecond,
+		CapsuleMaxBytes: cfg.Conduit.CapsuleMaxBytes,
+	}
 }
 
 // SetSendFunc wires the tea.Program.Send bridge. Host (main.go) calls
@@ -2452,7 +2476,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 		return nil
 	}
 	var out []string
-	for _, slug := range []string{"openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"} {
+	for _, slug := range []string{"sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"} {
 		if _, exists := a.deps.Factories[slug]; exists {
 			out = append(out, slug)
 		}
@@ -2463,7 +2487,7 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 			continue
 		}
 		switch slug {
-		case "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama":
+		case "sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama":
 			continue
 		default:
 			customSlugs = append(customSlugs, slug)

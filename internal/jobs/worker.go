@@ -177,15 +177,17 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	policy := policyForWorkspace(permissionPolicy, workspaceOfJob(j, m.cfg.Root))
 
 	a := agent.New(agent.Config{
-		Registry:     subRegistry,
-		Tools:        toolReg,
-		Session:      subSession,
-		CostTracker:  m.cfg.CostTracker,
-		Approver:     approver,
-		Policy:       policy,
-		SystemPrompt: systemPrompt,
-		Hooks:        hookRunner,
-		TokenBudget:  m.cfg.TokenBudget,
+		Registry:      subRegistry,
+		Tools:         toolReg,
+		Session:       subSession,
+		CostTracker:   m.cfg.CostTracker,
+		Approver:      approver,
+		Policy:        policy,
+		SystemPrompt:  systemPrompt,
+		Hooks:         hookRunner,
+		TokenBudget:   m.cfg.TokenBudget,
+		SugarCache:    m.cfg.SugarCache,
+		ConduitShadow: m.cfg.ConduitShadow,
 	})
 
 	events := a.Run(jobCtx, j.Prompt)

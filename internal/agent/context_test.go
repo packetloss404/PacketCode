@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/session"
 )
 
 func representativeRequest() (string, []provider.Message, []provider.ToolDefinition) {
@@ -74,7 +75,7 @@ func TestOlderToolResultCompactionReducesEstimatedRequest(t *testing.T) {
 	)
 	cm := NewContextManager(80)
 	before := cm.EstimateRequest(system, messages, tools)
-	afterMessages := compactOlderToolResults(messages, olderToolResultLimit)
+	afterMessages := persistedModelMessages(t, messages)
 	after := cm.EstimateRequest(system, afterMessages, tools)
 	if after.Total >= before.Total {
 		t.Fatalf("request estimate did not shrink: before=%+v after=%+v", before, after)
@@ -95,7 +96,7 @@ func BenchmarkRequestTokenAccounting(b *testing.B) {
 		provider.Message{Role: provider.RoleTool, ToolCallID: "call-2", Name: "read_file", Content: "recent result remains verbatim"},
 	)
 	before := cm.EstimateRequest(system, messages, tools)
-	afterMessages := compactOlderToolResults(messages, olderToolResultLimit)
+	afterMessages := persistedModelMessages(b, messages)
 	after := cm.EstimateRequest(system, afterMessages, tools)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -109,4 +110,18 @@ func BenchmarkRequestTokenAccounting(b *testing.B) {
 	b.ReportMetric(float64(after.Total), "after/total_tokens")
 	b.ReportMetric(float64(before.Total-after.Total), "saved_tokens")
 	_ = fmt.Sprintf("%d", after.Total)
+}
+
+func persistedModelMessages(tb testing.TB, messages []provider.Message) []provider.Message {
+	tb.Helper()
+	manager := session.NewManager(tb.TempDir())
+	if _, err := manager.New("test", "test"); err != nil {
+		tb.Fatal(err)
+	}
+	for _, message := range messages {
+		if err := manager.AddMessage(message); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	return session.ModelMessages(manager.Current().Messages)
 }

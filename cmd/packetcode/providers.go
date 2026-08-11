@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
 	"strings"
+	"time"
 
+	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/app"
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -17,7 +20,30 @@ import (
 	"github.com/packetcode/packetcode/internal/provider/ollama"
 	"github.com/packetcode/packetcode/internal/provider/openai"
 	"github.com/packetcode/packetcode/internal/provider/openrouter"
+	"github.com/packetcode/packetcode/internal/provider/sugar"
 )
+
+func packetcodeSugarCacheConfig(cfg *config.Config) agent.SugarCacheConfig {
+	if cfg == nil {
+		return agent.SugarCacheConfig{}
+	}
+	return agent.SugarCacheConfig{
+		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
+		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
+		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
+	}
+}
+
+func packetcodeConduitShadowConfig(cfg *config.Config) agent.ConduitShadowConfig {
+	if cfg == nil {
+		return agent.ConduitShadowConfig{}
+	}
+	return agent.ConduitShadowConfig{
+		Enabled:         cfg.Conduit.ShadowEnabled,
+		Timeout:         time.Duration(cfg.Conduit.TimeoutMS) * time.Millisecond,
+		CapsuleMaxBytes: cfg.Conduit.CapsuleMaxBytes,
+	}
+}
 
 func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 	factories := app.FactoryMap{
@@ -29,7 +55,14 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		"grok":       func(key string) provider.Provider { return grok.New(key) },
 		"mistral":    func(key string) provider.Provider { return mistral.New(key) },
 		"openrouter": func(key string) provider.Provider { return openrouter.New(key) },
-		"ollama":     func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
+		"sugar": func(key string) provider.Provider {
+			p := sugar.NewWithBaseURL(sugarBaseURL(cfg), key)
+			if cfg != nil && cfg.Conduit.ShadowEnabled {
+				p.SetRuntimeHooks(sugar.NewRuntimeClient(sugarBaseURL(cfg), key, nil, true))
+			}
+			return p
+		},
+		"ollama": func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
 		"codex": func(_ string) provider.Provider {
 			p := codex.New(codexAuthPath(cfg))
 			if cfg != nil {
@@ -122,7 +155,19 @@ func providerRequiresAPIKey(cfg *config.Config, slug string) bool {
 }
 
 func builtInProviderSlugs() []string {
-	return []string{"openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"}
+	return []string{"sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"}
+}
+
+func sugarBaseURL(cfg *config.Config) string {
+	if base := strings.TrimSpace(os.Getenv("PACKETCODE_SUGAR_BASE_URL")); base != "" {
+		return sugar.NormalizeBaseURL(base)
+	}
+	if cfg != nil {
+		if pc, ok := cfg.Providers["sugar"]; ok && strings.TrimSpace(pc.BaseURL) != "" {
+			return sugar.NormalizeBaseURL(pc.BaseURL)
+		}
+	}
+	return sugar.DefaultBaseURL
 }
 
 // codexAuthPath resolves the Codex auth.json location. An explicit

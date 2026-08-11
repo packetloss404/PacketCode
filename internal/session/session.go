@@ -19,26 +19,41 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/packetcode/packetcode/internal/handoff"
 	"github.com/packetcode/packetcode/internal/provider"
 )
 
 // Session is the in-memory + on-disk record of a single conversation.
 type Session struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Provider   string    `json:"provider"`
-	Model      string    `json:"model"`
-	ComputerID string    `json:"computer_id,omitempty"`
-	WorkingDir string    `json:"working_dir,omitempty"`
+	FormatVersion int       `json:"format_version,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Provider      string    `json:"provider"`
+	Model         string    `json:"model"`
+	ComputerID    string    `json:"computer_id,omitempty"`
+	WorkingDir    string    `json:"working_dir,omitempty"`
 	// WorkspaceIdentity binds new remote sessions to endpoint, pinned host
 	// key, and registered root in addition to the user-facing computer id.
 	// Legacy sessions may omit it and retain the older id/root validation.
 	WorkspaceIdentity string             `json:"workspace_identity,omitempty"`
 	Messages          []provider.Message `json:"messages"`
-	TokenUsage        TokenUsage         `json:"token_usage"`
-	Cost              CostInfo           `json:"cost"`
+	Cache             CacheState         `json:"cache,omitempty"`
+	// SpecialistCapsule is local-only handoff state. It is not part of the
+	// model transcript or Sugar Conduit telemetry.
+	SpecialistCapsule *handoff.SpecialistCapsule `json:"specialist_capsule,omitempty"`
+	TokenUsage        TokenUsage                 `json:"token_usage"`
+	Cost              CostInfo                   `json:"cost"`
+}
+
+const currentFormatVersion = 2
+
+// CacheState is the persisted cache lineage for a conversation. The session
+// ID remains stable across resumes; only explicit transcript compaction
+// advances the generation.
+type CacheState struct {
+	CompactionGeneration int `json:"compaction_generation,omitempty"`
 }
 
 type TokenUsage struct {
@@ -74,13 +89,23 @@ type Summary struct {
 // Manager owns the active session and reads/writes session files.
 // Methods on Manager are safe for concurrent use.
 type Manager struct {
-	dir     string
-	mu      sync.RWMutex
-	current *Session
+	dir                  string
+	modelToolResultLimit int
+	mu                   sync.RWMutex
+	current              *Session
 }
 
 func NewManager(dir string) *Manager {
-	return &Manager{dir: dir}
+	return NewManagerWithModelToolResultLimit(dir, configuredModelToolResultLimit())
+}
+
+// NewManagerWithModelToolResultLimit is primarily an evaluation/testing seam.
+// Production uses NewManager and PACKETCODE_MODEL_TOOL_RESULT_LIMIT_BYTES.
+func NewManagerWithModelToolResultLimit(dir string, limit int) *Manager {
+	if limit <= 0 {
+		limit = DefaultModelToolResultLimit
+	}
+	return &Manager{dir: dir, modelToolResultLimit: limit}
 }
 
 // New creates a fresh session with a UUID and the given provider/model
@@ -88,13 +113,14 @@ func NewManager(dir string) *Manager {
 func (m *Manager) New(providerSlug, model string) (*Session, error) {
 	now := time.Now().UTC()
 	s := &Session{
-		ID:        uuid.NewString(),
-		Name:      "untitled",
-		CreatedAt: now,
-		UpdatedAt: now,
-		Provider:  providerSlug,
-		Model:     model,
-		Messages:  []provider.Message{},
+		FormatVersion: currentFormatVersion,
+		ID:            uuid.NewString(),
+		Name:          "untitled",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Provider:      providerSlug,
+		Model:         model,
+		Messages:      []provider.Message{},
 	}
 	m.mu.Lock()
 	m.current = s
@@ -186,6 +212,13 @@ func (m *Manager) Load(id string) (*Session, error) {
 	if s.ID != id {
 		return nil, fmt.Errorf("decode session: id mismatch %q != %q", s.ID, id)
 	}
+	if migrateSession(&s, m.modelToolResultLimit) {
+		// Persist the additive projection/version upgrade without making an old
+		// conversation appear newly active in the session list.
+		if err := writeSessionFile(m.dir, &s); err != nil {
+			return nil, fmt.Errorf("migrate session: %w", err)
+		}
+	}
 	m.mu.Lock()
 	m.current = &s
 	m.mu.Unlock()
@@ -200,41 +233,13 @@ func (m *Manager) Save() error {
 	if s == nil {
 		return fmt.Errorf("save session: no current session")
 	}
-	if err := validateSessionID(s.ID); err != nil {
-		return fmt.Errorf("save session: %w", err)
-	}
-	if err := os.MkdirAll(m.dir, 0o700); err != nil {
-		return err
-	}
 	s.UpdatedAt = time.Now().UTC()
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(m.dir, s.ID+".json")
-	tmp, err := os.CreateTemp(m.dir, ".session.*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return writeSessionFile(m.dir, s)
 }
 
 // AddMessage appends m to the current session and auto-saves.
 func (m *Manager) AddMessage(msg provider.Message) error {
+	ensureMessageModelProjection(&msg, m.modelToolResultLimit)
 	m.mu.Lock()
 	if m.current == nil {
 		m.mu.Unlock()
@@ -287,16 +292,69 @@ func (m *Manager) SetContextTokens(tokens int) error {
 	return m.Save()
 }
 
+// SetSpecialistCapsule persists bounded, local-only handoff state without
+// changing Messages or cache lineage.
+func (m *Manager) SetSpecialistCapsule(capsule handoff.SpecialistCapsule, maxBytes int) error {
+	normalized := handoff.Normalize(capsule, maxBytes)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current == nil {
+		return fmt.Errorf("set specialist capsule: no current session")
+	}
+	previous := m.current.SpecialistCapsule
+	previousUpdatedAt := m.current.UpdatedAt
+	m.current.SpecialistCapsule = &normalized
+	m.current.UpdatedAt = time.Now().UTC()
+	if err := writeSessionFile(m.dir, m.current); err != nil {
+		m.current.SpecialistCapsule = previous
+		m.current.UpdatedAt = previousUpdatedAt
+		return err
+	}
+	return nil
+}
+
 // ReplaceMessages swaps the current session transcript and saves it.
 func (m *Manager) ReplaceMessages(messages []provider.Message) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.current == nil {
-		m.mu.Unlock()
 		return fmt.Errorf("replace messages: no current session")
 	}
+	previousMessages := m.current.Messages
+	previousUpdatedAt := m.current.UpdatedAt
 	m.current.Messages = cloneMessages(messages)
-	m.mu.Unlock()
-	return m.Save()
+	ensureModelProjections(m.current.Messages, m.modelToolResultLimit)
+	m.current.UpdatedAt = time.Now().UTC()
+	if err := writeSessionFile(m.dir, m.current); err != nil {
+		m.current.Messages = previousMessages
+		m.current.UpdatedAt = previousUpdatedAt
+		return err
+	}
+	return nil
+}
+
+// ReplaceMessagesAfterCompaction atomically swaps the transcript and advances
+// its cache lineage. A failed disk write rolls both changes back in memory.
+func (m *Manager) ReplaceMessagesAfterCompaction(messages []provider.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current == nil {
+		return fmt.Errorf("replace messages after compaction: no current session")
+	}
+	previousMessages := m.current.Messages
+	previousCache := m.current.Cache
+	previousUpdatedAt := m.current.UpdatedAt
+	m.current.Messages = cloneMessages(messages)
+	ensureModelProjections(m.current.Messages, m.modelToolResultLimit)
+	m.current.Cache.CompactionGeneration++
+	m.current.UpdatedAt = time.Now().UTC()
+	if err := writeSessionFile(m.dir, m.current); err != nil {
+		m.current.Messages = previousMessages
+		m.current.Cache = previousCache
+		m.current.UpdatedAt = previousUpdatedAt
+		return err
+	}
+	return nil
 }
 
 // List returns every session sorted newest-first.
@@ -445,6 +503,17 @@ func cloneSession(s *Session) *Session {
 	}
 	out := *s
 	out.Messages = cloneMessages(s.Messages)
+	if s.SpecialistCapsule != nil {
+		capsule := *s.SpecialistCapsule
+		capsule.Constraints = append([]string(nil), s.SpecialistCapsule.Constraints...)
+		capsule.ChangeBuckets = append([]string(nil), s.SpecialistCapsule.ChangeBuckets...)
+		capsule.Changes = append([]handoff.Change(nil), s.SpecialistCapsule.Changes...)
+		capsule.FailedGates = append([]handoff.FailedGate(nil), s.SpecialistCapsule.FailedGates...)
+		capsule.ChangedAPIsSchemas = append([]string(nil), s.SpecialistCapsule.ChangedAPIsSchemas...)
+		capsule.UnresolvedDecisions = append([]string(nil), s.SpecialistCapsule.UnresolvedDecisions...)
+		capsule.Evidence = append([]handoff.Evidence(nil), s.SpecialistCapsule.Evidence...)
+		out.SpecialistCapsule = &capsule
+	}
 	return &out
 }
 
@@ -460,4 +529,37 @@ func cloneMessages(messages []provider.Message) []provider.Message {
 		}
 	}
 	return out
+}
+
+func writeSessionFile(dir string, s *Session) error {
+	if err := validateSessionID(s.ID); err != nil {
+		return fmt.Errorf("save session: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, s.ID+".json")
+	tmp, err := os.CreateTemp(dir, ".session.*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }

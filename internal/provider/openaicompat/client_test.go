@@ -2,6 +2,7 @@ package openaicompat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,6 +49,62 @@ func TestChatCompletionStreamsText(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("expected an EventDone")
+	}
+}
+
+func TestChatCompletionDoesNotLeakSugarCacheWithoutSugarAdapter(t *testing.T) {
+	requestBody := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		requestBody <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test")
+	events, err := client.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "direct-model",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		SugarCache: &provider.SugarCacheMetadata{
+			ConversationID:    "session-1",
+			PrefixFingerprint: provider.CachePrefixFingerprint("", nil),
+			Mode:              provider.SugarCacheAuto,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+	for range events {
+	}
+	body := <-requestBody
+	if _, leaked := body["sugar_cache"]; leaked {
+		t.Fatal("Sugar-only cache metadata leaked through the generic OpenAI-compatible client")
+	}
+}
+
+func TestMarshalChatRequestCanonicalizesExactToolWirePrefix(t *testing.T) {
+	left := provider.ChatRequest{Model: "model", Tools: []provider.ToolDefinition{
+		{Name: "zeta", Parameters: json.RawMessage(`{"type":"object","properties":{"b":{"type":"string"},"a":{"type":"integer"}}}`)},
+		{Name: "alpha", Parameters: json.RawMessage(`{"required":["path"],"type":"object"}`)},
+	}}
+	right := provider.ChatRequest{Model: "model", Tools: []provider.ToolDefinition{
+		{Name: "alpha", Parameters: json.RawMessage(`{ "type": "object", "required": ["path"] }`)},
+		{Name: "zeta", Parameters: json.RawMessage(`{"properties":{"a":{"type":"integer"},"b":{"type":"string"}},"type":"object"}`)},
+	}}
+	leftJSON, err := MarshalChatRequest(left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightJSON, err := MarshalChatRequest(right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(leftJSON) != string(rightJSON) {
+		t.Fatalf("canonical wire differs:\n%s\n%s", leftJSON, rightJSON)
 	}
 }
 

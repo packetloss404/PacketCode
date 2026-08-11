@@ -26,6 +26,12 @@ import (
 // HTTP-Referer and X-Title) on every outbound request.
 type HeaderFunc func(req *http.Request)
 
+// ExtraChatFieldsFunc lets a wrapper add explicitly provider-scoped top-level
+// request fields. The generic client never reflects arbitrary ChatRequest
+// metadata onto the wire, which prevents Sugar-only governor data leaking to
+// other OpenAI-compatible vendors.
+type ExtraChatFieldsFunc func(req provider.ChatRequest) (map[string]any, error)
+
 // Client speaks the OpenAI chat-completions protocol against a configurable
 // base URL. It is safe for concurrent use.
 type Client struct {
@@ -35,6 +41,9 @@ type Client struct {
 	// ExtraHeaders is invoked just before each request is sent. Wrappers
 	// use it to add provider-specific headers without mutating Client state.
 	ExtraHeaders HeaderFunc
+	// ExtraChatFields is nil for ordinary OpenAI-compatible providers. Sugar
+	// uses it to serialize its validated private cache envelope.
+	ExtraChatFields ExtraChatFieldsFunc
 	// InterleavedThinking enables <think>-block handling for backends whose
 	// models stream their reasoning chain inline in `content` (MiniMax M2.x/M3).
 	// When set, reasoning is split out of the visible transcript and reported as
@@ -205,6 +214,24 @@ type wireToolSchema struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
+func chatBody(req provider.ChatRequest) chatRequestBody {
+	return chatRequestBody{
+		Model:         req.Model,
+		Messages:      toWireMessages(req.Messages, false),
+		Tools:         toWireTools(req.Tools),
+		Stream:        true,
+		StreamOptions: &wireStreamOpts{IncludeUsage: true},
+	}
+}
+
+// MarshalChatRequest serializes the standard OpenAI-compatible chat body and
+// deliberately excludes provider-private metadata such as SugarCache. The
+// disabled-by-default Sugar shadow client uses this to mirror the exact
+// model/messages/tools request shape only when a caller explicitly opts in.
+func MarshalChatRequest(req provider.ChatRequest) ([]byte, error) {
+	return marshalChatRequest(chatBody(req), nil)
+}
+
 // toWireMessages converts unified messages to the wire format. When
 // sendReasoning is set, an assistant turn's stored reasoning is re-wrapped in
 // <think> tags and prepended to its content, reconstructing the exact shape the
@@ -244,6 +271,7 @@ func toWireTools(tools []provider.ToolDefinition) []wireTool {
 	if len(tools) == 0 {
 		return nil
 	}
+	tools = provider.CanonicalToolDefinitions(tools)
 	out := make([]wireTool, len(tools))
 	for i, t := range tools {
 		out[i] = wireTool{
@@ -262,14 +290,19 @@ func toWireTools(tools []provider.ToolDefinition) []wireTool {
 // closed when the stream terminates. Errors before the first byte arrives
 // are returned synchronously; errors mid-stream surface as EventError.
 func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
-	body := chatRequestBody{
-		Model:         req.Model,
-		Messages:      toWireMessages(req.Messages, c.SendReasoning),
-		Tools:         toWireTools(req.Tools),
-		Stream:        true,
-		StreamOptions: &wireStreamOpts{IncludeUsage: true},
+	body := chatBody(req)
+	if c.SendReasoning {
+		body.Messages = toWireMessages(req.Messages, true)
 	}
-	buf, err := json.Marshal(body)
+	var extraFields map[string]any
+	var err error
+	if c.ExtraChatFields != nil {
+		extraFields, err = c.ExtraChatFields(req)
+		if err != nil {
+			return nil, fmt.Errorf("chat request fields: %w", err)
+		}
+	}
+	buf, err := marshalChatRequest(body, extraFields)
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat request: %w", err)
 	}
@@ -310,6 +343,27 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 	}
 	go parseSSE(ctx, sctx, guard, resp.Body, ch, filter)
 	return ch, nil
+}
+
+func marshalChatRequest(body chatRequestBody, extra map[string]any) ([]byte, error) {
+	if len(extra) == 0 {
+		return json.Marshal(body)
+	}
+	base, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]any
+	if err := json.Unmarshal(base, &object); err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		if _, exists := object[key]; exists {
+			return nil, fmt.Errorf("extra chat field %q conflicts with the base request", key)
+		}
+		object[key] = value
+	}
+	return json.Marshal(object)
 }
 
 // extractAPIErrorMessage pulls the human-readable message out of a JSON

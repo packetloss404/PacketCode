@@ -44,11 +44,16 @@ type ReasoningEffort struct {
 // share this struct: assistant messages may carry ToolCalls; tool messages
 // carry ToolCallID + Name + textual Content.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role    Role   `json:"role"`
+	Content string `json:"content,omitempty"`
+	// ModelContent is an immutable, bounded projection used only when this
+	// message is sent back to a model. Content remains the authoritative full
+	// result for local persistence and UI rendering. Older session files omit
+	// this additive field and are upgraded by the session package.
+	ModelContent string     `json:"model_content,omitempty"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID   string     `json:"tool_call_id,omitempty"`
+	Name         string     `json:"name,omitempty"`
 	// Reasoning holds an assistant turn's thinking chain, stripped out of
 	// Content so it never renders as ordinary text. Interleaved-thinking
 	// models require it to be fed back on the next request or multi-turn tool
@@ -83,6 +88,51 @@ type ChatRequest struct {
 	Messages []Message
 	Tools    []ToolDefinition
 	Stream   bool
+	// SugarCache carries member/session cache-affinity and governor hints to
+	// Sugar. Generic and direct provider adapters deliberately ignore it.
+	SugarCache *SugarCacheMetadata `json:"-"`
+}
+
+// SugarCacheMode controls Sugar's provider-aware prompt-cache behavior.
+type SugarCacheMode string
+
+const (
+	SugarCacheAuto SugarCacheMode = "auto"
+	SugarCacheOff  SugarCacheMode = "off"
+)
+
+// SugarCacheRetention requests a provider-supported cache lifetime. Sugar is
+// responsible for rejecting or adapting combinations a selected provider
+// cannot honor.
+type SugarCacheRetention string
+
+const (
+	SugarCacheProviderDefault SugarCacheRetention = "provider_default"
+	SugarCache5Minutes        SugarCacheRetention = "5m"
+	SugarCache1Hour           SugarCacheRetention = "1h"
+	SugarCache30Minutes       SugarCacheRetention = "30m"
+)
+
+// SugarPrivacyMode is fail-closed routing policy, not a claim that every
+// provider supports zero-data-retention requests.
+type SugarPrivacyMode string
+
+const (
+	SugarPrivacyStandard    SugarPrivacyMode = "standard"
+	SugarPrivacyZDRRequired SugarPrivacyMode = "zdr_required"
+)
+
+// SugarCacheMetadata is private Packetcode-to-Sugar request metadata. It must
+// never be blindly serialized by OpenAI-compatible adapters; Sugar's adapter
+// validates and maps it to the `sugar_cache` wire object explicitly.
+type SugarCacheMetadata struct {
+	ConversationID       string
+	PrefixFingerprint    string
+	StablePrefixMessages int
+	CompactionGeneration int
+	Mode                 SugarCacheMode
+	Retention            SugarCacheRetention
+	Privacy              SugarPrivacyMode
 }
 
 // EventType discriminates StreamEvent payloads. Providers emit a sequence

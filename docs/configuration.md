@@ -80,6 +80,16 @@ workflow_token_budget = 0
 provider_max_retries = 3
 provider_stall_timeout = 60
 
+[sugar]
+cache_mode = "auto"                 # auto or off
+cache_retention = "provider_default" # provider_default, 5m, 30m, or 1h
+privacy = "standard"                # standard or zdr_required
+
+[conduit]
+shadow_enabled = false # explicit opt-in; never changes the live model
+timeout_ms = 1500
+capsule_max_bytes = 8192
+
 [permissions]
 profile = "balanced"
 
@@ -122,6 +132,30 @@ timeout_sec = 10
 `[providers.<slug>]` stores API keys, saved default models, the Ollama host, and custom OpenAI-compatible endpoint settings. `codex` reuses the Codex CLI OAuth store and `ollama` is keyless; hosted API providers require their own API key. `PACKETCODE_OLLAMA_HOST` overrides `[providers.ollama].host` at runtime. Custom providers use `type = "openai_compatible"`, `base_url`, optional `api_key_env`, optional `api_key_required = false` for keyless local endpoints, optional `headers`, and optional `[[providers.<slug>.models]]` fallback metadata.
 
 `[behavior]` controls trust mode, input height, automatic compaction, provider resilience, and background/workflow limits. Context occupancy includes the system prompt, transcript, tool schemas, and pending input estimate; compaction runs automatically before an over-threshold turn when enough history exists.
+
+`[sugar]` controls the private cache-affinity envelope sent only to Sugar. The
+client defaults are `auto`, `provider_default`, and `standard`. A Sugar
+workspace may enforce stricter retention or privacy server-side; Packetcode's
+settings cannot weaken that policy. Environment variables override TOML:
+
+- `PACKETCODE_SUGAR_CACHE_MODE`
+- `PACKETCODE_SUGAR_CACHE_RETENTION`
+- `PACKETCODE_SUGAR_PRIVACY`
+
+`[conduit]` controls the optional Conduit shadow governor. It is off by
+default. `PACKETCODE_CONDUIT_SHADOW=true|false` overrides only
+`shadow_enabled`; timeout and capsule limits remain explicit TOML settings.
+When enabled, Packetcode starts one shadow run only for an active Sugar
+`sugar/conduit` turn, reports ordered coarse outcomes, and records Continue
+recommendations as local telemetry. Recommendations never switch the live
+provider/model or alter a chat request. Missing or unavailable shadow endpoints
+make the hooks inert while normal chat continues.
+
+The specialist capsule is stored only in the local session JSON and capped by
+`capsule_max_bytes` (2,048–65,536). It contains a redacted task summary,
+constraints, normalized relative paths and bounded patch/gate evidence for a
+future explicit local handoff. It never enters Conduit runtime event JSON and
+contains no full transcript, tool arguments, absolute paths, or environment.
 
 Background-agent settings affect both `/spawn` and the `spawn_agent` tool:
 

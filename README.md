@@ -66,10 +66,21 @@ The first run asks for a provider, API key when required, and model, then writes
 `PACKETCODE_HOME` to isolate all PacketCode configuration and state in another
 data directory.
 
+To connect the built-in Sugar provider and pull its live Conduit/direct-model catalog:
+
+```text
+packetcode sugar login --server https://your-sugar-service.up.railway.app --name your-name
+```
+
+Packetcode opens Sugar's approval page and prints the same short code in the terminal. Sign in as yourself, confirm the code and device name, then approve. Packetcode polls at Sugar's required interval, saves the member-owned revocable key with user-only file permissions, and pulls the live catalog. Add `--no-browser` when you want to open the printed URL manually.
+
+Sugar defaults to `sugar/conduit`; `/model` can pin any model Sugar currently supplies.
+
 ## Providers
 
 | Slug | Authentication | Notes |
 | --- | --- | --- |
+| `sugar` | Member-approved device sign-in | Live Conduit and direct-model catalog from the private Sugar service. |
 | `codex` | Existing Codex CLI ChatGPT login | Reuses `~/.codex/auth.json`; no API key. |
 | `openai` | API key | OpenAI API. |
 | `anthropic` | API key | Anthropic Messages API. |

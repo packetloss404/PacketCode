@@ -1,10 +1,14 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +45,82 @@ func TestManager_RoundTrip(t *testing.T) {
 	assert.Equal(t, s.ID, loaded.ID)
 	require.Len(t, loaded.Messages, 2)
 	assert.Equal(t, "refactor-the-auth-middleware-to-jwt", loaded.Name)
+}
+
+func TestManager_MigratesLegacyToolResultProjectionWithoutLosingFullContent(t *testing.T) {
+	dir := t.TempDir()
+	large := strings.Repeat("界", 30_000)
+	legacy := Session{
+		ID:        "legacy-session",
+		Name:      "legacy",
+		CreatedAt: time.Unix(1, 0).UTC(),
+		UpdatedAt: time.Unix(2, 0).UTC(),
+		Provider:  "sugar",
+		Model:     "sugar/conduit",
+		Messages:  []provider.Message{{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read", Content: large}},
+	}
+	data, err := json.MarshalIndent(legacy, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacy.ID+".json"), data, 0o600))
+
+	manager := NewManager(dir)
+	loaded, err := manager.Load(legacy.ID)
+	require.NoError(t, err)
+	assert.Equal(t, currentFormatVersion, loaded.FormatVersion)
+	require.Len(t, loaded.Messages, 1)
+	assert.Equal(t, large, loaded.Messages[0].Content)
+	assert.Contains(t, loaded.Messages[0].ModelContent, "tool result truncated")
+	assert.True(t, utf8.ValidString(loaded.Messages[0].ModelContent))
+	assert.Equal(t, legacy.UpdatedAt, loaded.UpdatedAt, "migration must not make a legacy session appear newly active")
+
+	projected := ModelMessages(loaded.Messages)
+	assert.Equal(t, loaded.Messages[0].ModelContent, projected[0].Content)
+	assert.Empty(t, projected[0].ModelContent)
+
+	reloaded, err := NewManager(dir).Load(legacy.ID)
+	require.NoError(t, err)
+	assert.Equal(t, loaded.Messages[0].ModelContent, reloaded.Messages[0].ModelContent)
+}
+
+func TestManager_ModelProjectionLimitIsConfigurableForNewResults(t *testing.T) {
+	content := strings.Repeat("x", 40_000)
+	low := NewManagerWithModelToolResultLimit(filepath.Join(t.TempDir(), "low"), 16*1024)
+	_, err := low.New("sugar", "sugar/conduit")
+	require.NoError(t, err)
+	require.NoError(t, low.AddMessage(provider.Message{Role: provider.RoleTool, Content: content}))
+	assert.NotEmpty(t, low.Current().Messages[0].ModelContent)
+	assert.Equal(t, content, low.Current().Messages[0].Content)
+
+	high := NewManagerWithModelToolResultLimit(filepath.Join(t.TempDir(), "high"), 128*1024)
+	_, err = high.New("sugar", "sugar/conduit")
+	require.NoError(t, err)
+	require.NoError(t, high.AddMessage(provider.Message{Role: provider.RoleTool, Content: content}))
+	assert.Empty(t, high.Current().Messages[0].ModelContent)
+	assert.Equal(t, content, ModelMessages(high.Current().Messages)[0].Content)
+}
+
+func TestManager_CompactionGenerationPersistsAcrossResume(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(dir)
+	created, err := manager.New("sugar", "sugar/conduit")
+	require.NoError(t, err)
+	require.NoError(t, manager.ReplaceMessagesAfterCompaction([]provider.Message{{Role: provider.RoleAssistant, Content: "summary"}}))
+
+	current := manager.Current()
+	require.NotNil(t, current)
+	assert.Equal(t, created.ID, current.ID)
+	assert.Equal(t, 1, current.Cache.CompactionGeneration)
+
+	reloaded, err := NewManager(dir).Load(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, reloaded.ID)
+	assert.Equal(t, 1, reloaded.Cache.CompactionGeneration)
+
+	reloadManager := NewManager(dir)
+	_, err = reloadManager.Load(created.ID)
+	require.NoError(t, err)
+	require.NoError(t, reloadManager.ReplaceMessages([]provider.Message{{Role: provider.RoleAssistant, Content: "ordinary replacement"}}))
+	assert.Equal(t, 1, reloadManager.Current().Cache.CompactionGeneration, "ordinary replacement is not a compaction")
 }
 
 func TestManager_UpdateUsageComputesCost(t *testing.T) {

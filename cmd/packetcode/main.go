@@ -103,6 +103,14 @@ func dispatchSubcommand(args []string, stdout, stderr io.Writer) (int, bool) {
 	switch args[0] {
 	case "doctor":
 		return runDoctorCommand(args[1:], stdout, stderr), true
+	case "acp":
+		return runACPCommand(args[1:], os.Stdin, stdout, stderr), true
+	case "sugar":
+		if len(args) >= 2 && args[1] == "login" {
+			return runSugarLoginCommand(args[2:], stdout, stderr), true
+		}
+		fmt.Fprintln(stderr, "usage: packetcode sugar login [--server URL] [--name NAME] [--no-browser]")
+		return 2, true
 	default:
 		return 0, false
 	}
@@ -475,6 +483,8 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		MaxDepth:         cfg.Behavior.BackgroundMaxDepth,
 		MaxTotal:         cfg.Behavior.BackgroundMaxTotal,
 		TokenBudget:      cfg.Behavior.BackgroundTokenBudget,
+		SugarCache:       packetcodeSugarCacheConfig(cfg),
+		ConduitShadow:    packetcodeConduitShadowConfig(cfg),
 		DefaultProvider:  cfg.Behavior.BackgroundDefaultProvider,
 		DefaultModel:     cfg.Behavior.BackgroundDefaultModel,
 		PermissionPolicy: permissionPolicy,

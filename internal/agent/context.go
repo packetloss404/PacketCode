@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/session"
 )
 
 // charsPerToken is the heuristic the context manager uses to estimate
@@ -136,19 +137,24 @@ func (cm *ContextManager) CompactWithUsage(
 	messages []provider.Message,
 	keepRecent int,
 ) ([]provider.Message, *provider.Usage, error) {
+	// Summarization is another model request. Use the same persisted immutable
+	// projection as normal turns; never re-expand full local/UI tool output.
+	modelMessages := session.ModelMessages(messages)
 	// Identify the system prompt (if any) and the tail to preserve.
 	var systemMsgs []provider.Message
 	body := messages
+	modelBody := modelMessages
 	if len(messages) > 0 && messages[0].Role == provider.RoleSystem {
 		systemMsgs = []provider.Message{messages[0]}
 		body = messages[1:]
+		modelBody = modelMessages[1:]
 	}
 	if len(body) <= keepRecent {
 		return normalizeToolTranscript(messages), nil, nil
 	}
-	toSummarize := body[:len(body)-keepRecent]
-	tailStart := compactTailStart(body, len(body)-keepRecent)
-	toSummarize = body[:tailStart]
+	toSummarize := modelBody[:len(modelBody)-keepRecent]
+	tailStart := compactTailStart(modelBody, len(modelBody)-keepRecent)
+	toSummarize = modelBody[:tailStart]
 	tail := body[tailStart:]
 
 	prompt := buildSummaryPrompt(toSummarize)

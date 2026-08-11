@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -22,6 +23,25 @@ type Config struct {
 	MCP         map[string]MCPServerConfig `toml:"mcp"`
 	StatusLine  StatusLineConfig           `toml:"statusline"`
 	Hooks       HooksConfig                `toml:"hooks"`
+	Sugar       SugarConfig                `toml:"sugar"`
+	Conduit     ConduitConfig              `toml:"conduit"`
+}
+
+// SugarConfig controls Packetcode's private cache/governor envelope. Sugar
+// may enforce stricter workspace policy server-side; these values are requests,
+// never a way for the client to weaken that policy.
+type SugarConfig struct {
+	CacheMode      string `toml:"cache_mode"`
+	CacheRetention string `toml:"cache_retention"`
+	Privacy        string `toml:"privacy"`
+}
+
+// ConduitConfig controls the optional, decision-only shadow runtime. It is
+// disabled by default and never changes the live provider or model choice.
+type ConduitConfig struct {
+	ShadowEnabled   bool `toml:"shadow_enabled"`
+	TimeoutMS       int  `toml:"timeout_ms"`
+	CapsuleMaxBytes int  `toml:"capsule_max_bytes"`
 }
 
 // MCPServerConfig is the per-server entry for [mcp.<name>] in the user's
@@ -114,7 +134,7 @@ func (c ProviderConfig) RequiresAPIKey(slug string) bool {
 
 func isReservedHostedProvider(slug string) bool {
 	switch slug {
-	case "openai", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter":
+	case "sugar", "openai", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter":
 		return true
 	default:
 		return false
@@ -224,14 +244,16 @@ func Load() (*Config, error) {
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return Default(), nil
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config: %w", err)
 		}
-		return nil, fmt.Errorf("read config: %w", err)
+		data = nil
 	}
 	cfg := Default()
-	if err := toml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
@@ -245,7 +267,58 @@ func LoadFrom(path string) (*Config, error) {
 	if cfg.Permissions.Profiles == nil {
 		cfg.Permissions.Profiles = map[string]PermissionProfile{}
 	}
+	if err := applySugarEnvironment(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateSugarAndConduit(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+func applySugarEnvironment(cfg *Config) error {
+	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_CACHE_MODE"); ok {
+		cfg.Sugar.CacheMode = strings.TrimSpace(value)
+	}
+	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_CACHE_RETENTION"); ok {
+		cfg.Sugar.CacheRetention = strings.TrimSpace(value)
+	}
+	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_PRIVACY"); ok {
+		cfg.Sugar.Privacy = strings.TrimSpace(value)
+	}
+	if value, ok := os.LookupEnv("PACKETCODE_CONDUIT_SHADOW"); ok {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("PACKETCODE_CONDUIT_SHADOW must be true or false")
+		}
+		cfg.Conduit.ShadowEnabled = enabled
+	}
+	return nil
+}
+
+func validateSugarAndConduit(cfg *Config) error {
+	switch cfg.Sugar.CacheMode {
+	case "auto", "off":
+	default:
+		return fmt.Errorf("sugar.cache_mode must be auto or off")
+	}
+	switch cfg.Sugar.CacheRetention {
+	case "provider_default", "5m", "30m", "1h":
+	default:
+		return fmt.Errorf("sugar.cache_retention must be provider_default, 5m, 30m, or 1h")
+	}
+	switch cfg.Sugar.Privacy {
+	case "standard", "zdr_required":
+	default:
+		return fmt.Errorf("sugar.privacy must be standard or zdr_required")
+	}
+	if cfg.Conduit.TimeoutMS < 100 || cfg.Conduit.TimeoutMS > 30_000 {
+		return fmt.Errorf("conduit.timeout_ms must be between 100 and 30000")
+	}
+	if cfg.Conduit.CapsuleMaxBytes < 2_048 || cfg.Conduit.CapsuleMaxBytes > 64*1024 {
+		return fmt.Errorf("conduit.capsule_max_bytes must be between 2048 and 65536")
+	}
+	return nil
 }
 
 // Save writes the config to ~/.packetcode/config.toml atomically with 0600 perms.

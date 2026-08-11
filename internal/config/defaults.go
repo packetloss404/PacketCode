@@ -15,6 +15,16 @@ func Default() *Config {
 			Command:    "",
 			TimeoutSec: 2,
 		},
+		Sugar: SugarConfig{
+			CacheMode:      "auto",
+			CacheRetention: "provider_default",
+			Privacy:        "standard",
+		},
+		Conduit: ConduitConfig{
+			ShadowEnabled:   false,
+			TimeoutMS:       1500,
+			CapsuleMaxBytes: 8192,
+		},
 		Behavior: BehaviorConfig{
 			TrustMode:            false,
 			AutoCompactThreshold: 80,

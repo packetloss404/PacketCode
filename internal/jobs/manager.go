@@ -68,6 +68,8 @@ type Config struct {
 	MaxDepth      int // default 2
 	MaxTotal      int // default 32
 	TokenBudget   int // input+output tokens per job; zero disables
+	SugarCache    agent.SugarCacheConfig
+	ConduitShadow agent.ConduitShadowConfig
 
 	// DefaultProvider/Model override the main registry's Active() when
 	// the SpawnRequest doesn't specify its own. Either-or-both may be
