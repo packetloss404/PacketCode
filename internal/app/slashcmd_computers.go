@@ -17,6 +17,10 @@ import (
 // established at process startup with --computer; slash commands never open a
 // network connection implicitly.
 func (a *App) handleComputersCommand(args []string) (tea.Model, tea.Cmd) {
+	if a.deps.Config != nil && !a.deps.Config.PacketComputers.IsEnabled() {
+		a.conversation.AppendSystem("computers: Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
+		return a, nil
+	}
 	reg, err := loadComputerRegistry()
 	if err != nil {
 		a.conversation.AppendSystem(fmt.Sprintf("computers: %s", err))

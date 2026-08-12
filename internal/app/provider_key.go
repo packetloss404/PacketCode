@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/ui/components/prompt"
 )
 
@@ -70,13 +69,7 @@ func (a *App) openProviderKeyPrompt(slug string) tea.Cmd {
 }
 
 func (a *App) providerRequiresKey(slug string) bool {
-	if a.deps.Config == nil {
-		return !config.IsKeylessProvider(slug)
-	}
-	if pc, ok := a.deps.Config.Providers[slug]; ok {
-		return pc.RequiresAPIKey(slug)
-	}
-	return !config.IsKeylessProvider(slug)
+	return a.deps.Config.ProviderRequiresAPIKey(slug)
 }
 
 // handlePromptSubmit dispatches prompt.SubmitMsg. Currently only the

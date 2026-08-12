@@ -25,6 +25,13 @@ Cache behavior is configured under `[sugar]` with `cache_mode` (`auto` or
 defaults above. Sugar workspace policy is authoritative and may tighten these
 requests.
 
+The parent `[sugar].enabled` gate is tri-state. When absent, a fresh non-Sugar
+install is auto-inactive, while existing configured/default Sugar users stay
+active for compatibility. Set it to false, or set
+`PACKETCODE_SUGAR_ENABLED=false`, to hard-disable Sugar provider registration
+and all `sugar_cache` construction. Non-Sugar requests never receive this
+metadata regardless of the gate.
+
 The Conduit runtime client matches Sugar's shadow-only run/event/continue API,
 and is disabled by default. Set `[conduit].shadow_enabled = true` or
 `PACKETCODE_CONDUIT_SHADOW=true` to opt in. Eligible `sugar/conduit` turns start
@@ -32,6 +39,8 @@ one shadow run, emit ordered coarse tool/validation/provider outcomes, and call
 Continue for recommendation telemetry. A recommendation is never applied to
 the live model choice. Endpoint failures disable the current shadow lifecycle
 without interrupting chat.
+The opt-in is subordinate to `[sugar].enabled`; disabled Sugar always leaves
+the Conduit shadow inert, even if stale configuration asks to enable it.
 
 Runtime event DTOs cannot carry prompts, code, file names, tool arguments,
 command output, or specialist capsules. The bounded v1 specialist capsule is a

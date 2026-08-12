@@ -16,8 +16,15 @@ func (a *App) handleHelpCommand(_ []string) (tea.Model, tea.Cmd) {
 
 func (a *App) renderHelp() string {
 	out := renderHelpWithSlashCommands(a.slashHelpRows())
+	var b strings.Builder
+	b.WriteString(out)
+	b.WriteString("\n\nFeature gates\n")
+	for _, row := range a.featureGateHelpRows() {
+		writeHelpRow(&b, row.Key, row.Desc)
+	}
+	out = strings.TrimRight(b.String(), "\n")
 	if errs := a.slashRegistry().Errors(); len(errs) > 0 {
-		var b strings.Builder
+		b.Reset()
 		b.WriteString(out)
 		b.WriteString("\n\nSlash command load warnings\n")
 		for _, err := range errs {
@@ -26,6 +33,44 @@ func (a *App) renderHelp() string {
 		out = strings.TrimRight(b.String(), "\n")
 	}
 	return out
+}
+
+func (a *App) featureGateHelpRows() []KeyHelp {
+	packetComputersEnabled := true
+	sugarEnabled := true
+	acpEnabled := true
+	conduitShadowEnabled := false
+	if a != nil && a.deps.Config != nil {
+		packetComputersEnabled = a.deps.Config.PacketComputers.IsEnabled()
+		sugarEnabled = a.deps.Config.SugarIsEnabled()
+		acpEnabled = a.deps.Config.ACP.IsEnabled()
+		conduitShadowEnabled = a.deps.Config.ConduitIsEnabled()
+	}
+	return []KeyHelp{
+		{
+			Key:  "packet_computers",
+			Desc: featureGateState(packetComputersEnabled) + " — [packet_computers] enabled or PACKETCODE_PACKET_COMPUTERS_ENABLED",
+		},
+		{
+			Key:  "sugar",
+			Desc: featureGateState(sugarEnabled) + " — [sugar] enabled or PACKETCODE_SUGAR_ENABLED",
+		},
+		{
+			Key:  "acp",
+			Desc: featureGateState(acpEnabled) + " — [acp] enabled or PACKETCODE_ACP_ENABLED",
+		},
+		{
+			Key:  "conduit shadow",
+			Desc: featureGateState(conduitShadowEnabled) + " — [conduit] shadow_enabled; requires Sugar",
+		},
+	}
+}
+
+func featureGateState(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 // renderHelp iterates the five keymap groups in a stable order and

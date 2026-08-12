@@ -70,6 +70,10 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 		fmt.Fprintf(stderr, "packetcode: load config: %v\n", err)
 		return 1
 	}
+	if cfg.SugarExplicitlyDisabled() {
+		fmt.Fprintln(stderr, "packetcode: Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
+		return 1
+	}
 	baseURL := strings.TrimSpace(*server)
 	if baseURL == "" {
 		baseURL = sugarBaseURL(cfg)
@@ -210,6 +214,8 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 	pc.APIKey = tokenResponse.Token
 	pc.BaseURL = baseURL
 	cfg.Providers[sugar.Slug] = pc
+	enabled := true
+	cfg.Sugar.Enabled = &enabled
 	if err := cfg.Save(); err != nil {
 		fmt.Fprintf(stderr, "packetcode: Sugar key was issued but could not be saved: %v\n", err)
 		return 1

@@ -5,6 +5,24 @@ current direct-SSH slice supports foreground coding plus process-lifetime
 background agents and workflows. Core file and shell tools run on a registered
 remote project root over host-key-pinned SSH and SFTP connections.
 
+## Feature gate
+
+Packet Computers is enabled by default for compatibility. A standalone local
+PacketCode installation can disable the complete surface:
+
+```toml
+[packet_computers]
+enabled = false
+```
+
+`PACKETCODE_PACKET_COMPUTERS_ENABLED=false` is the environment equivalent.
+In disabled mode PacketCode does not load or create
+`computers/registry.json`, start SSH, or initialize remote placement.
+`--computer`, `/computers`, `/spawn --computer`, and
+`/workflows run --computer` fail with an explicit disabled message. Omitting
+those selectors leaves ordinary local sessions, jobs, and workflows unchanged.
+The gate does not delete an existing registry; re-enabling restores access.
+
 ## What works today
 
 Register a local record, register an SSH record, remove a record, or inspect

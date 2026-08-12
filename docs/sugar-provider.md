@@ -13,6 +13,28 @@ Packetcode's built-in `sugar` provider connects the existing local Go agent to t
 - Local tools, permissions, sessions, worktrees, background agents, and MCP remain owned by Packetcode.
 - Compute routing and upstream usage metering remain owned by Sugar and Runpod.
 
+## Feature gate
+
+Sugar uses a tri-state gate. With `enabled` absent, a fresh non-Sugar install is
+auto-inactive and does no Sugar initialization; an existing configured/default
+Sugar provider remains active for compatibility. `packetcode sugar login`
+explicitly activates the automatic state. To hard-disable the complete surface:
+
+```toml
+[sugar]
+enabled = false
+```
+
+`PACKETCODE_SUGAR_ENABLED=false` is the environment equivalent. Disabled mode
+removes built-in Sugar from provider registration, blocks `packetcode sugar login`,
+suppresses `sugar_cache` metadata, and forces Conduit shadow off. It makes no
+Sugar or Conduit network calls, does not remove saved credentials, and does not
+affect non-Sugar providers. Re-enable it to use an existing configuration.
+The gate preserves saved credentials and provider configuration.
+An explicitly disabled built-in also permits advanced users to reuse the
+`sugar` slug for an independent `type = "openai_compatible"` provider; that
+custom provider does not activate Sugar cache or Conduit features.
+
 ## Login
 
 ```text

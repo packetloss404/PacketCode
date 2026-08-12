@@ -20,6 +20,7 @@ import (
 )
 
 type SugarCacheConfig struct {
+	Enabled   bool
 	Mode      provider.SugarCacheMode
 	Retention provider.SugarCacheRetention
 	Privacy   provider.SugarPrivacyMode
@@ -123,6 +124,9 @@ func (s *conduitShadowState) providerFailure(ctx context.Context, err error) {
 }
 
 func (s *conduitShadowState) blocked(ctx context.Context, call provider.ToolCall, reason string) {
+	if s == nil || !s.active {
+		return
+	}
 	category := classifyTool(call)
 	s.emit(ctx, sugar.RuntimeEvent{
 		Type:               sugar.RuntimeBlocked,

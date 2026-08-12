@@ -41,6 +41,41 @@ func TestProviderFactoriesFromConfig_SkipsNonCustomUnknownProvider(t *testing.T)
 	assert.False(t, ok)
 }
 
+func TestProviderFactoriesFromConfig_SugarFollowsTriStateActivation(t *testing.T) {
+	t.Run("fresh install is inactive", func(t *testing.T) {
+		_, ok := providerFactoriesFromConfig(config.Default())["sugar"]
+		assert.False(t, ok)
+	})
+	t.Run("existing Sugar config remains active", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Providers["sugar"] = config.ProviderConfig{DefaultModel: "sugar/conduit"}
+		_, ok := providerFactoriesFromConfig(cfg)["sugar"]
+		assert.True(t, ok)
+	})
+	t.Run("explicit false wins over existing config", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Providers["sugar"] = config.ProviderConfig{DefaultModel: "sugar/conduit"}
+		disabled := false
+		cfg.Sugar.Enabled = &disabled
+		_, ok := providerFactoriesFromConfig(cfg)["sugar"]
+		assert.False(t, ok)
+	})
+	t.Run("explicitly disabled built-in permits a custom Sugar slug", func(t *testing.T) {
+		cfg := config.Default()
+		disabled := false
+		keyless := false
+		cfg.Sugar.Enabled = &disabled
+		cfg.Providers["sugar"] = config.ProviderConfig{
+			Type: "openai_compatible", BaseURL: "http://localhost:8080/v1",
+			DefaultModel: "custom-model", APIKeyRequired: &keyless,
+		}
+		factory, ok := providerFactoriesFromConfig(cfg)["sugar"]
+		require.True(t, ok)
+		assert.False(t, providerRequiresAPIKey(cfg, "sugar"))
+		assert.Equal(t, "sugar", factory("").Slug())
+	})
+}
+
 func TestProviderFactoriesFromConfig_DoesNotOverrideBuiltInSlug(t *testing.T) {
 	keyRequired := false
 	cfg := config.Default()

@@ -20,6 +20,7 @@ import (
 	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/provider/sugar"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 )
@@ -110,13 +111,13 @@ func New(cfg Config) *Agent {
 	if cfg.Policy == nil {
 		cfg.Policy = permissions.DefaultPolicy()
 	}
-	if cfg.SugarCache.Mode == "" {
+	if cfg.SugarCache.Enabled && cfg.SugarCache.Mode == "" {
 		cfg.SugarCache.Mode = provider.SugarCacheAuto
 	}
-	if cfg.SugarCache.Retention == "" {
+	if cfg.SugarCache.Enabled && cfg.SugarCache.Retention == "" {
 		cfg.SugarCache.Retention = provider.SugarCacheProviderDefault
 	}
-	if cfg.SugarCache.Privacy == "" {
+	if cfg.SugarCache.Enabled && cfg.SugarCache.Privacy == "" {
 		cfg.SugarCache.Privacy = provider.SugarPrivacyStandard
 	}
 	return &Agent{
@@ -198,7 +199,10 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 		events <- AgentEvent{Type: EventError, Error: fmt.Errorf("save user message: %w", err)}
 		return
 	}
-	shadow := newConduitShadowState(a.conduitShadow, a.session, userMessage)
+	var shadow *conduitShadowState
+	if a.conduitShadow.Enabled {
+		shadow = newConduitShadowState(a.conduitShadow, a.session, userMessage)
+	}
 
 	for iter := 0; iter < maxToolIterations; iter++ {
 		more, err := a.oneTurn(ctx, events, shadow)
@@ -247,7 +251,7 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *c
 			Content: unsupportedToolsMessage(prov.Name(), modelID),
 		}}, req.Messages...)
 	}
-	if cur := a.session.Current(); cur != nil {
+	if cur := a.session.Current(); cur != nil && a.sugarCache.Enabled && prov.Slug() == sugar.Slug {
 		stablePrefixMessages := 0
 		if a.systemPrompt != "" {
 			stablePrefixMessages = 1

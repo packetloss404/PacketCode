@@ -48,6 +48,10 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "packetcode acp: load config: %v\n", err)
 		return 1
 	}
+	if !cfg.ACP.IsEnabled() {
+		fmt.Fprintln(stderr, "packetcode acp: ACP integration is disabled; enable [acp].enabled or set PACKETCODE_ACP_ENABLED=true")
+		return 1
+	}
 	if *permissionFlag != "" {
 		profile, err := permissions.ParseProfile(*permissionFlag)
 		if err != nil {
@@ -109,6 +113,9 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
+	if f.provider == "sugar" && !f.cfg.SugarIsEnabled() && !f.cfg.SugarUsesCustomProvider() {
+		return nil, fmt.Errorf("Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
+	}
 	if f.provider == "" {
 		return nil, fmt.Errorf("no default provider is configured; configure PacketCode before creating a session")
 	}

@@ -1,12 +1,29 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestComputersCommandDisabledDoesNotCreateOrLoadRegistry(t *testing.T) {
+	rig := newTestApp(t)
+	home := filepath.Join(rig.tmp, "standalone-home")
+	t.Setenv("PACKETCODE_HOME", home)
+	disabled := false
+	rig.cfg.PacketComputers.Enabled = &disabled
+
+	rig.app.handleComputersCommand(nil)
+	convContains(t, rig.app, "Packet Computers integration is disabled")
+
+	registryPath := filepath.Join(home, "computers", "registry.json")
+	if _, err := os.Stat(registryPath); !os.IsNotExist(err) {
+		t.Fatalf("disabled /computers touched registry %s: %v", registryPath, err)
+	}
+}
 
 func TestParseSSHComputerArgs(t *testing.T) {
 	computer, err := parseSSHComputerArgs([]string{

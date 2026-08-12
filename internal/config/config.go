@@ -16,24 +16,100 @@ import (
 )
 
 type Config struct {
-	Default     DefaultConfig              `toml:"default"`
-	Providers   map[string]ProviderConfig  `toml:"providers"`
-	Behavior    BehaviorConfig             `toml:"behavior"`
-	Permissions PermissionConfig           `toml:"permissions"`
-	MCP         map[string]MCPServerConfig `toml:"mcp"`
-	StatusLine  StatusLineConfig           `toml:"statusline"`
-	Hooks       HooksConfig                `toml:"hooks"`
-	Sugar       SugarConfig                `toml:"sugar"`
-	Conduit     ConduitConfig              `toml:"conduit"`
+	Default         DefaultConfig              `toml:"default"`
+	Providers       map[string]ProviderConfig  `toml:"providers"`
+	Behavior        BehaviorConfig             `toml:"behavior"`
+	Permissions     PermissionConfig           `toml:"permissions"`
+	MCP             map[string]MCPServerConfig `toml:"mcp"`
+	StatusLine      StatusLineConfig           `toml:"statusline"`
+	Hooks           HooksConfig                `toml:"hooks"`
+	ACP             ACPConfig                  `toml:"acp"`
+	PacketComputers PacketComputersConfig      `toml:"packet_computers"`
+	Sugar           SugarConfig                `toml:"sugar"`
+	Conduit         ConduitConfig              `toml:"conduit"`
+}
+
+// ACPConfig controls the optional Agent Client Protocol stdio server. Enabled
+// is a pointer so existing configurations remain enabled when absent.
+type ACPConfig struct {
+	Enabled         *bool `toml:"enabled,omitempty"`
+	enabledOverride *bool
+}
+
+func (c ACPConfig) IsEnabled() bool {
+	if c.enabledOverride != nil {
+		return *c.enabledOverride
+	}
+	return c.Enabled == nil || *c.Enabled
+}
+
+// PacketComputersConfig controls PacketCode's optional local/SSH computer
+// registry and remote execution surface. Enabled is a pointer so existing
+// configurations remain enabled when the setting is absent.
+type PacketComputersConfig struct {
+	Enabled         *bool `toml:"enabled,omitempty"`
+	enabledOverride *bool
+}
+
+func (c PacketComputersConfig) IsEnabled() bool {
+	if c.enabledOverride != nil {
+		return *c.enabledOverride
+	}
+	return c.Enabled == nil || *c.Enabled
 }
 
 // SugarConfig controls Packetcode's private cache/governor envelope. Sugar
 // may enforce stricter workspace policy server-side; these values are requests,
 // never a way for the client to weaken that policy.
 type SugarConfig struct {
-	CacheMode      string `toml:"cache_mode"`
-	CacheRetention string `toml:"cache_retention"`
-	Privacy        string `toml:"privacy"`
+	Enabled         *bool  `toml:"enabled,omitempty"`
+	CacheMode       string `toml:"cache_mode"`
+	CacheRetention  string `toml:"cache_retention"`
+	Privacy         string `toml:"privacy"`
+	enabledOverride *bool
+}
+
+// SugarExplicitlyDisabled reports whether the user or environment selected a
+// hard-off state. Explicit commands such as `sugar login` may activate the
+// nil/automatic state, but must respect this state.
+func (c *Config) SugarExplicitlyDisabled() bool {
+	if c == nil {
+		return false
+	}
+	if c.Sugar.enabledOverride != nil {
+		return !*c.Sugar.enabledOverride
+	}
+	return c.Sugar.Enabled != nil && !*c.Sugar.Enabled
+}
+
+// SugarIsEnabled resolves Sugar's tri-state activation. Explicit true/false
+// wins. When absent, existing Sugar users stay enabled, while a fresh install
+// remains inert until `sugar login` deliberately activates it.
+func (c *Config) SugarIsEnabled() bool {
+	if c == nil {
+		return false
+	}
+	if c.Sugar.enabledOverride != nil {
+		return *c.Sugar.enabledOverride
+	}
+	if c.Sugar.Enabled != nil {
+		return *c.Sugar.Enabled
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Default.Provider), "sugar") {
+		return true
+	}
+	provider, configured := c.Providers["sugar"]
+	return configured && !provider.IsOpenAICompatible()
+}
+
+// SugarUsesCustomProvider reports the one supported built-in slug escape:
+// explicit built-in disable plus an OpenAI-compatible [providers.sugar].
+func (c *Config) SugarUsesCustomProvider() bool {
+	if c == nil || !c.SugarExplicitlyDisabled() {
+		return false
+	}
+	provider, configured := c.Providers["sugar"]
+	return configured && provider.IsOpenAICompatible()
 }
 
 // ConduitConfig controls the optional, decision-only shadow runtime. It is
@@ -42,6 +118,12 @@ type ConduitConfig struct {
 	ShadowEnabled   bool `toml:"shadow_enabled"`
 	TimeoutMS       int  `toml:"timeout_ms"`
 	CapsuleMaxBytes int  `toml:"capsule_max_bytes"`
+}
+
+// ConduitIsEnabled resolves the child setting together with its Sugar parent
+// without mutating either stored value.
+func (c *Config) ConduitIsEnabled() bool {
+	return c != nil && c.SugarIsEnabled() && c.Conduit.ShadowEnabled
 }
 
 // MCPServerConfig is the per-server entry for [mcp.<name>] in the user's
@@ -130,6 +212,27 @@ func (c ProviderConfig) RequiresAPIKey(slug string) bool {
 		return *c.APIKeyRequired
 	}
 	return true
+}
+
+// ProviderRequiresAPIKey resolves key policy with feature-gate context. The
+// built-in Sugar provider always requires its hosted credential, while an
+// explicitly enabled custom provider reusing that slug honors
+// api_key_required like every other OpenAI-compatible endpoint.
+func (c *Config) ProviderRequiresAPIKey(slug string) bool {
+	if c == nil {
+		return !IsKeylessProvider(slug)
+	}
+	provider, configured := c.Providers[slug]
+	if !configured {
+		return !IsKeylessProvider(slug)
+	}
+	if slug == "sugar" && c.SugarUsesCustomProvider() {
+		if provider.APIKeyRequired != nil {
+			return *provider.APIKeyRequired
+		}
+		return true
+	}
+	return provider.RequiresAPIKey(slug)
 }
 
 func isReservedHostedProvider(slug string) bool {
@@ -267,7 +370,7 @@ func LoadFrom(path string) (*Config, error) {
 	if cfg.Permissions.Profiles == nil {
 		cfg.Permissions.Profiles = map[string]PermissionProfile{}
 	}
-	if err := applySugarEnvironment(cfg); err != nil {
+	if err := applyIntegrationEnvironment(cfg); err != nil {
 		return nil, err
 	}
 	if err := validateSugarAndConduit(cfg); err != nil {
@@ -276,7 +379,45 @@ func LoadFrom(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func applySugarEnvironment(cfg *Config) error {
+func applyIntegrationEnvironment(cfg *Config) error {
+	if value, ok := os.LookupEnv("PACKETCODE_ACP_ENABLED"); ok {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("PACKETCODE_ACP_ENABLED must be true or false")
+			}
+			cfg.ACP.enabledOverride = &enabled
+		}
+	}
+	if value, ok := os.LookupEnv("PACKETCODE_PACKET_COMPUTERS_ENABLED"); ok {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("PACKETCODE_PACKET_COMPUTERS_ENABLED must be true or false")
+			}
+			cfg.PacketComputers.enabledOverride = &enabled
+		}
+	}
+	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_ENABLED"); ok {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("PACKETCODE_SUGAR_ENABLED must be true or false")
+			}
+			cfg.Sugar.enabledOverride = &enabled
+		}
+	}
+	if !cfg.SugarIsEnabled() {
+		// Sugar owns both the cache envelope and Conduit shadow runtime. Keep
+		// every subordinate surface inert when the parent integration is off.
+		// Preserve the stored child setting so a later unrelated config save
+		// cannot erase the user's preference; runtime consumers resolve it
+		// together with the parent gate.
+		return nil
+	}
 	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_CACHE_MODE"); ok {
 		cfg.Sugar.CacheMode = strings.TrimSpace(value)
 	}
@@ -297,6 +438,9 @@ func applySugarEnvironment(cfg *Config) error {
 }
 
 func validateSugarAndConduit(cfg *Config) error {
+	if !cfg.SugarIsEnabled() {
+		return nil
+	}
 	switch cfg.Sugar.CacheMode {
 	case "auto", "off":
 	default:
