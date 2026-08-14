@@ -297,6 +297,106 @@ func TestLoadOrphaned_RewritesRunningAndQueued(t *testing.T) {
 	assert.Empty(t, again)
 }
 
+// The jobs directory is shared across every project on the machine. An
+// instance rooted in one project must not rewrite a job created by an
+// instance rooted in another: that instance may still be running it, and
+// marking it Recovered makes it eligible for a duplicate resubmit.
+func TestLoadPersistedJobs_LeavesAnotherRootsLiveJobsAlone(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+
+	foreign := &Job{
+		ID: "foreign1", SessionID: "main-job-foreign1", Provider: "p", Model: "m",
+		State: StateRunning, CreatedAt: now, OwnerRoot: "/projects/other", AllowWrite: true,
+	}
+	mine := &Job{
+		ID: "mine1111", SessionID: "main-job-mine1111", Provider: "p", Model: "m",
+		State: StateRunning, CreatedAt: now, OwnerRoot: "/projects/here",
+	}
+	require.NoError(t, saveSnapshot(dir, foreign))
+	require.NoError(t, saveSnapshot(dir, mine))
+
+	loaded, recovered, unreadable, err := loadPersistedJobs(dir, "/projects/here")
+	require.NoError(t, err)
+	assert.Empty(t, unreadable)
+
+	require.Len(t, recovered, 1, "only this root's job is abandoned")
+	assert.Equal(t, "mine1111", recovered[0].ID)
+	for _, j := range loaded {
+		assert.NotEqual(t, "foreign1", j.ID, "another root's live job must not be loaded here")
+	}
+
+	// The foreign record is untouched on disk, so its owner still sees it running.
+	stored, ok := readPersistedJob(filepath.Join(dir, "foreign1.json"))
+	require.True(t, ok)
+	assert.Equal(t, "running", stored.State)
+	assert.False(t, stored.Recovered)
+}
+
+// A record written before ownership tracking has no root and must still be
+// recovered, so upgrading does not strand existing jobs.
+func TestLoadPersistedJobs_LegacyRecordsWithoutOwnerAreRecovered(t *testing.T) {
+	dir := t.TempDir()
+	legacy := &Job{
+		ID: "legacy11", SessionID: "main-job-legacy11", Provider: "p", Model: "m",
+		State: StateRunning, CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, saveSnapshot(dir, legacy))
+
+	_, recovered, unreadable, err := loadPersistedJobs(dir, "/projects/here")
+	require.NoError(t, err)
+	assert.Empty(t, unreadable)
+	require.Len(t, recovered, 1)
+	assert.Equal(t, "legacy11", recovered[0].ID)
+}
+
+// A job that cannot be read must be reported, never silently dropped:
+// vanishing without a word is indistinguishable from never having existed.
+func TestLoadPersistedJobs_ReportsUnreadableRecords(t *testing.T) {
+	dir := t.TempDir()
+	good := &Job{
+		ID: "good1111", SessionID: "main-job-good1111", Provider: "p", Model: "m",
+		State: StateCompleted, CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, saveSnapshot(dir, good))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.json"), []byte("{not json"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "future.json"),
+		[]byte(`{"format_version":99,"id":"future","state":"running"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "weird.json"),
+		[]byte(`{"format_version":1,"id":"weird","state":"teleported"}`), 0o600))
+
+	loaded, _, unreadable, err := loadPersistedJobs(dir, "")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Len(t, unreadable, 3)
+
+	reasons := map[string]string{}
+	for _, u := range unreadable {
+		reasons[filepath.Base(u.Path)] = u.Reason
+	}
+	assert.Contains(t, reasons["broken.json"], "malformed job record")
+	assert.Contains(t, reasons["future.json"], "newer than this build supports")
+	assert.Contains(t, reasons["weird.json"], `unrecognised job state "teleported"`)
+}
+
+// Refusing to overwrite a newer record keeps a future build's state intact
+// rather than silently downgrading it.
+func TestSavePersistedSnapshot_RefusesToClobberNewerFormat(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fut12345.json"),
+		[]byte(`{"format_version":99,"id":"fut12345","state":"running","seq":4}`), 0o600))
+
+	err := savePersistedSnapshot(dir, persistedJob{
+		FormatVersion: jobFormatVersion, ID: "fut12345", State: "cancelled", Seq: 5,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "newer than this build supports")
+
+	stored, ok := readPersistedJob(filepath.Join(dir, "fut12345.json"))
+	require.True(t, ok)
+	assert.Equal(t, "running", stored.State)
+}
+
 // TestLoadOrphaned_MissingDirReturnsEmpty ensures a non-existent jobs
 // dir is not an error — first-run is normal.
 func TestLoadOrphaned_MissingDirReturnsEmpty(t *testing.T) {

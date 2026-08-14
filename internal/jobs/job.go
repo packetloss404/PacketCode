@@ -119,6 +119,7 @@ type Job struct {
 	ComputerName      string             // display name captured at spawn time
 	WorkingDir        string             // immutable local or remote workspace root
 	WorkspaceIdentity string             // immutable endpoint+root identity for resubmit safety
+	OwnerRoot         string             // project root of the instance that created the job
 	ComputerPolicy    computers.Policy   // conservative per-computer policy captured at spawn
 	ResultStatus      ResultStatus       // pending/seen/ignored/injected/consumed after terminal result exists
 	Artifacts         []Artifact         // bounded structured refs captured from tool execution

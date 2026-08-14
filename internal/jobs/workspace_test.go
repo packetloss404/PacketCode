@@ -284,7 +284,7 @@ func TestRemoteWorkspacePersistenceRoundTrip(t *testing.T) {
 		WorkingDir: ws.WorkingDir, WorkspaceIdentity: ws.Identity, ComputerPolicy: ws.Policy,
 	}
 	require.NoError(t, saveSnapshot(dir, j))
-	loaded, _, err := loadPersistedJobs(dir)
+	loaded, _, _, err := loadPersistedJobs(dir, "")
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, ws.ComputerID, loaded[0].ComputerID)

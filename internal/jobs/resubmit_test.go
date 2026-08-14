@@ -54,7 +54,7 @@ func TestLoadOrphaned_MarksRecovered(t *testing.T) {
 	assert.Empty(t, recovered[0].ResubmittedAs, "nothing has been resubmitted yet")
 
 	// The marker must survive the round-trip to disk.
-	reloaded, _, err := loadPersistedJobs(dir)
+	reloaded, _, _, err := loadPersistedJobs(dir, "")
 	require.NoError(t, err)
 	require.Len(t, reloaded, 1)
 	assert.True(t, reloaded[0].Recovered)
@@ -112,7 +112,7 @@ func TestResubmit_SpawnsNewJobAndLinksBothWays(t *testing.T) {
 		s, ok := mgr.Get(snap.ID)
 		return ok && s.State.IsTerminal()
 	})
-	reloaded, _, lerr := loadPersistedJobs(jobsDir)
+	reloaded, _, _, lerr := loadPersistedJobs(jobsDir, "")
 	require.NoError(t, lerr)
 	byID := map[string]*Job{}
 	for _, j := range reloaded {

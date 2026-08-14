@@ -11,10 +11,25 @@ import (
 	"github.com/packetcode/packetcode/internal/computers"
 )
 
+// jobFormatVersion is bumped when the on-disk job shape changes
+// incompatibly. Readers refuse a newer record rather than silently
+// misinterpreting it, matching computers.registryVersion. Records written
+// before versioning existed decode as 0 and remain readable.
+const jobFormatVersion = 1
+
+// UnreadableRecord names a job file that could not be loaded. Losing a job
+// quietly is the failure mode this exists to prevent: a job that was
+// abandoned must be reported as such, never as nothing at all.
+type UnreadableRecord struct {
+	Path   string
+	Reason string
+}
+
 // persistedJob is the on-disk shape for ~/.packetcode/jobs/<id>.json.
 // Mirrors Job but uses a stable JSON form so future versions can decode
 // it without depending on Go field order.
 type persistedJob struct {
+	FormatVersion     int               `json:"format_version"`
 	ID                string            `json:"id"`
 	SessionID         string            `json:"session_id"`
 	ParentJobID       string            `json:"parent_job_id,omitempty"`
@@ -43,6 +58,7 @@ type persistedJob struct {
 	ComputerName      string            `json:"computer_name,omitempty"`
 	WorkingDir        string            `json:"working_dir,omitempty"`
 	WorkspaceIdentity string            `json:"workspace_identity,omitempty"`
+	OwnerRoot         string            `json:"owner_root,omitempty"`
 	ComputerPolicy    *computers.Policy `json:"computer_policy,omitempty"`
 	ResultStatus      string            `json:"result_status,omitempty"`
 	Artifacts         []Artifact        `json:"artifacts,omitempty"`
@@ -57,6 +73,7 @@ type persistedJob struct {
 
 func toPersisted(j *Job) persistedJob {
 	return persistedJob{
+		FormatVersion:     jobFormatVersion,
 		ID:                j.ID,
 		SessionID:         j.SessionID,
 		ParentJobID:       j.ParentJobID,
@@ -85,6 +102,7 @@ func toPersisted(j *Job) persistedJob {
 		ComputerName:      j.ComputerName,
 		WorkingDir:        j.WorkingDir,
 		WorkspaceIdentity: j.WorkspaceIdentity,
+		OwnerRoot:         j.OwnerRoot,
 		ComputerPolicy:    persistedComputerPolicy(j),
 		ResultStatus:      normalizeResultStatus(j.ResultStatus).String(),
 		Artifacts:         cloneArtifacts(j.Artifacts),
@@ -99,19 +117,28 @@ func toPersisted(j *Job) persistedJob {
 }
 
 func parseState(s string) State {
+	state, _ := parseKnownState(s)
+	return state
+}
+
+// parseKnownState reports whether the stored state is one this build
+// understands. An unrecognised state is not silently flattened to failed:
+// a record naming a state we cannot interpret is reported as unreadable so
+// the job surfaces as a problem rather than as a wrong answer.
+func parseKnownState(s string) (State, bool) {
 	switch s {
 	case "queued":
-		return StateQueued
+		return StateQueued, true
 	case "running":
-		return StateRunning
+		return StateRunning, true
 	case "completed":
-		return StateCompleted
+		return StateCompleted, true
 	case "failed":
-		return StateFailed
+		return StateFailed, true
 	case "cancelled":
-		return StateCancelled
+		return StateCancelled, true
 	}
-	return StateFailed
+	return StateFailed, false
 }
 
 func parseResultStatus(s string) ResultStatus {
@@ -163,6 +190,7 @@ func fromPersisted(p persistedJob) *Job {
 		ComputerName:      p.ComputerName,
 		WorkingDir:        p.WorkingDir,
 		WorkspaceIdentity: p.WorkspaceIdentity,
+		OwnerRoot:         p.OwnerRoot,
 		ComputerPolicy:    computerPolicyFromPersisted(p.ComputerPolicy),
 		ResultStatus:      parseResultStatus(p.ResultStatus),
 		Artifacts:         cloneArtifacts(p.Artifacts),
@@ -205,8 +233,14 @@ func savePersistedSnapshot(jobsDir string, p persistedJob) error {
 		return fmt.Errorf("save job: ensure dir: %w", err)
 	}
 	final := filepath.Join(jobsDir, p.ID+".json")
-	if p.Seq > 0 {
-		if existing, ok := readPersistedJob(final); ok && existing.Seq > p.Seq {
+	if existing, ok := readPersistedJob(final); ok {
+		if existing.FormatVersion > jobFormatVersion {
+			return fmt.Errorf(
+				"save job %s: on-disk record version %d is newer than this build supports (%d)",
+				p.ID, existing.FormatVersion, jobFormatVersion,
+			)
+		}
+		if p.Seq > 0 && existing.Seq > p.Seq {
 			return nil
 		}
 	}
@@ -253,23 +287,33 @@ func readPersistedJob(path string) (persistedJob, bool) {
 // the resurrected Jobs (so callers can hydrate the in-memory map). The
 // resurrected jobs are already in a terminal state.
 func loadOrphaned(jobsDir string) ([]*Job, error) {
-	_, recovered, err := loadPersistedJobs(jobsDir)
+	_, recovered, _, err := loadPersistedJobs(jobsDir, "")
 	return recovered, err
 }
 
-func loadPersistedJobs(jobsDir string) ([]*Job, []*Job, error) {
+// loadPersistedJobs reads every job record in jobsDir. ownerRoot is the
+// project root of the calling instance; records created by an instance
+// rooted elsewhere are left strictly alone, because the state directory is
+// shared across projects and another live instance may still be running
+// them. An empty ownerRoot disables scoping.
+//
+// Records that cannot be read are returned rather than skipped: a job file
+// that vanishes without a word is indistinguishable from a job that never
+// existed, which is the one thing job reporting must never do.
+func loadPersistedJobs(jobsDir, ownerRoot string) ([]*Job, []*Job, []UnreadableRecord, error) {
 	if jobsDir == "" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	entries, err := os.ReadDir(jobsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("load jobs: %w", err)
+		return nil, nil, nil, fmt.Errorf("load jobs: %w", err)
 	}
 	var loaded []*Job
 	var recovered []*Job
+	var unreadable []UnreadableRecord
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -281,13 +325,36 @@ func loadPersistedJobs(jobsDir string) ([]*Job, []*Job, error) {
 		path := filepath.Join(jobsDir, e.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
+			unreadable = append(unreadable, UnreadableRecord{Path: path, Reason: err.Error()})
 			continue
 		}
 		var p persistedJob
 		if err := json.Unmarshal(data, &p); err != nil {
+			unreadable = append(unreadable, UnreadableRecord{Path: path, Reason: "malformed job record: " + err.Error()})
 			continue
 		}
-		state := parseState(p.State)
+		if p.FormatVersion > jobFormatVersion {
+			unreadable = append(unreadable, UnreadableRecord{
+				Path: path,
+				Reason: fmt.Sprintf("job record version %d is newer than this build supports (%d)",
+					p.FormatVersion, jobFormatVersion),
+			})
+			continue
+		}
+		state, known := parseKnownState(p.State)
+		if !known {
+			unreadable = append(unreadable, UnreadableRecord{
+				Path:   path,
+				Reason: fmt.Sprintf("unrecognised job state %q", p.State),
+			})
+			continue
+		}
+		if (state == StateQueued || state == StateRunning) && !ownedByRoot(p, ownerRoot) {
+			// Another instance created this job and may still be running it.
+			// Rewriting it here would report someone else's live work as
+			// abandoned and make it eligible for a duplicate resubmit.
+			continue
+		}
 		j := fromPersisted(p)
 		if state == StateQueued || state == StateRunning {
 			j.State = StateCancelled
@@ -304,11 +371,22 @@ func loadPersistedJobs(jobsDir string) ([]*Job, []*Job, error) {
 			j.NeedsInput = false
 			j.NeedsApproval = false
 			if err := saveSnapshot(jobsDir, j); err != nil {
+				unreadable = append(unreadable, UnreadableRecord{
+					Path:   path,
+					Reason: "could not record abandonment: " + err.Error(),
+				})
 				continue
 			}
 			recovered = append(recovered, j)
 		}
 		loaded = append(loaded, j)
 	}
-	return loaded, recovered, nil
+	return loaded, recovered, unreadable, nil
+}
+
+// ownedByRoot reports whether a record belongs to the instance rooted at
+// ownerRoot. Records written before ownership was tracked carry no root and
+// are treated as owned, so upgrading does not strand existing jobs.
+func ownedByRoot(p persistedJob, ownerRoot string) bool {
+	return ownerRoot == "" || p.OwnerRoot == "" || p.OwnerRoot == ownerRoot
 }

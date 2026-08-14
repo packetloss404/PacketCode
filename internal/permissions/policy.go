@@ -158,7 +158,25 @@ func (p *Policy) Decide(req Request) Result {
 		}
 	}
 	decision, reason := profileDecision(profile, req)
-	return Result{Decision: decision, Profile: profile, Reason: reason}
+	result := Result{Decision: decision, Profile: profile, Reason: reason}
+	// A deny floor that could not be evaluated must not read as "not denied".
+	// Escalation only tightens: an allow becomes an approval prompt, while ask
+	// and deny are already at least as restrictive and are left alone.
+	if result.Decision == DecisionAllow {
+		if rule, ok := p.denyFloorIndeterminate(req); ok {
+			result.Decision = DecisionAsk
+			result.Reason = "deny rule " + describeDenyFloor(rule) + " may apply to this command; approval required"
+			result.Rule = &rule
+		}
+	}
+	return result
+}
+
+func describeDenyFloor(rule Rule) string {
+	if len(rule.CommandPrefix) > 0 {
+		return "for " + rule.Tool + " " + strings.Join(rule.CommandPrefix, " ")
+	}
+	return "for " + rule.Tool
 }
 
 func (p *Policy) WithProfile(profile Profile) *Policy {
@@ -262,13 +280,27 @@ func (p *Policy) SummaryLines() []string {
 func (p *Policy) matchingRule(req Request) (Rule, bool) {
 	for i := len(p.rules) - 1; i >= 0; i-- {
 		rule := p.rules[i]
-		if rule.DenyFloor && ruleMatchesRequest(rule, req) {
+		if rule.DenyFloor && denyRuleOutcome(rule, req) == prefixMatch {
 			return rule, true
 		}
 	}
 	for i := len(p.rules) - 1; i >= 0; i-- {
 		rule := p.rules[i]
 		if ruleMatchesRequest(rule, req) {
+			return rule, true
+		}
+	}
+	return Rule{}, false
+}
+
+// denyFloorIndeterminate reports whether some deny-floor rule might apply to
+// the request without the policy being able to prove it either way. Callers
+// escalate rather than fall through: a deny floor that cannot be evaluated is
+// not the same thing as a deny floor that does not match.
+func (p *Policy) denyFloorIndeterminate(req Request) (Rule, bool) {
+	for i := len(p.rules) - 1; i >= 0; i-- {
+		rule := p.rules[i]
+		if rule.DenyFloor && denyRuleOutcome(rule, req) == prefixIndeterminate {
 			return rule, true
 		}
 	}
@@ -286,6 +318,26 @@ func ruleMatchesRequest(rule Rule, req Request) bool {
 		return false
 	}
 	return true
+}
+
+// denyRuleOutcome evaluates a rule in the deny direction. Allow-direction
+// matching (ruleMatchesRequest) refuses to match anything but a single simple
+// command, so that a prefix rule can never authorize a larger shell program.
+// Applying that same refusal to a deny rule inverts its meaning: "not a simple
+// command" would become "not denied", and `git push origin main; :` would slip
+// past a rule that denies `git push`. In the deny direction an unprovable
+// match is reported as indeterminate so the caller can fail closed.
+func denyRuleOutcome(rule Rule, req Request) prefixOutcome {
+	if !toolPatternMatches(rule.Tool, req.ToolName) {
+		return prefixNoMatch
+	}
+	if rule.Command != "" && !commandMatches(req.Params, rule.Command) {
+		return prefixNoMatch
+	}
+	if len(rule.CommandPrefix) == 0 {
+		return prefixMatch
+	}
+	return commandPrefixDenyOutcome(req.Params, rule.CommandPrefix)
 }
 
 func configProfile(name string, cfg config.PermissionConfig) (Profile, []Rule, error) {
@@ -443,6 +495,136 @@ func toolPatternMatches(pattern, name string) bool {
 func commandMatches(params json.RawMessage, want string) bool {
 	command, ok := commandParam(params)
 	return ok && command == want
+}
+
+// prefixOutcome is the result of evaluating a command_prefix rule in the deny
+// direction: it either applies, provably does not apply, or cannot be decided
+// from the command string alone.
+type prefixOutcome int
+
+const (
+	prefixNoMatch prefixOutcome = iota
+	prefixMatch
+	prefixIndeterminate
+)
+
+// shellControlChars separate one simple command from another inside a single
+// command string. Splitting on them lets a deny rule see each stage of a
+// pipeline, each side of `&&`, and the body of a `$(...)` substitution.
+const shellControlChars = ";&|<>()`\n\r"
+
+// commandIndirection lists commands that take another command as an argument.
+// A deny rule cannot see through them from the command string alone, so their
+// presence makes the outcome indeterminate rather than a clean miss.
+var commandIndirection = map[string]bool{
+	"bash": true, "command": true, "dash": true, "doas": true, "env": true,
+	"eval": true, "exec": true, "fish": true, "ksh": true, "nice": true,
+	"nohup": true, "sh": true, "ssh": true, "sudo": true, "timeout": true,
+	"watch": true, "xargs": true, "zsh": true,
+}
+
+// commandPrefixDenyOutcome evaluates a command_prefix rule against a possibly
+// compound command. Each simple command within the string is checked, so
+// `true && git push` matches a `git push` rule. A stage that hands its
+// arguments to another interpreter (`sh -c ...`) is reported as indeterminate:
+// the rule may well apply, and the policy must not answer "no".
+func commandPrefixDenyOutcome(params json.RawMessage, prefix []string) prefixOutcome {
+	if len(prefix) == 0 {
+		return prefixMatch
+	}
+	command, ok := commandParam(params)
+	if !ok {
+		return prefixNoMatch
+	}
+	indeterminate := false
+	for _, segment := range splitSimpleCommands(command) {
+		fields := segment.fields
+		if segment.redirectTarget && len(fields) > 0 {
+			// The word after `>` or `<` names a file, not a command.
+			fields = fields[1:]
+		}
+		fields = stripEnvAssignments(fields)
+		if len(fields) == 0 {
+			continue
+		}
+		if fieldsHavePrefix(fields, prefix) {
+			return prefixMatch
+		}
+		if commandIndirection[strings.TrimPrefix(fields[0], "$")] || isScriptPath(fields[0]) {
+			indeterminate = true
+		}
+	}
+	if indeterminate {
+		return prefixIndeterminate
+	}
+	return prefixNoMatch
+}
+
+// commandSegment is one simple command carved out of a larger command string,
+// along with whether it followed a redirection operator.
+type commandSegment struct {
+	fields         []string
+	redirectTarget bool
+}
+
+// splitSimpleCommands breaks a command string on shell control operators so
+// each stage can be evaluated on its own. It is deliberately not a shell
+// parser: it over-approximates, which is the safe direction for a deny rule.
+func splitSimpleCommands(command string) []commandSegment {
+	var (
+		out      []commandSegment
+		current  strings.Builder
+		redirect bool
+	)
+	flush := func(nextRedirect bool) {
+		text := strings.TrimSpace(current.String())
+		current.Reset()
+		if text != "" {
+			out = append(out, commandSegment{fields: strings.Fields(text), redirectTarget: redirect})
+		}
+		redirect = nextRedirect
+	}
+	for _, r := range command {
+		if strings.ContainsRune(shellControlChars, r) {
+			flush(r == '<' || r == '>')
+			continue
+		}
+		current.WriteRune(r)
+	}
+	flush(false)
+	return out
+}
+
+// isScriptPath reports whether a word names a file rather than a bare command.
+// A deny rule cannot see what `./deploy.sh` runs, so invoking a script is the
+// same class of indirection as invoking an interpreter.
+func isScriptPath(field string) bool {
+	return strings.ContainsAny(field, "/\\")
+}
+
+// stripEnvAssignments drops leading NAME=value words so `FOO=bar git push`
+// is still recognised as a `git push` invocation.
+func stripEnvAssignments(fields []string) []string {
+	for len(fields) > 0 {
+		name, _, ok := strings.Cut(fields[0], "=")
+		if !ok || name == "" || strings.ContainsAny(name, "/\\.") {
+			break
+		}
+		fields = fields[1:]
+	}
+	return fields
+}
+
+func fieldsHavePrefix(fields, prefix []string) bool {
+	if len(fields) < len(prefix) {
+		return false
+	}
+	for i, want := range prefix {
+		if fields[i] != want {
+			return false
+		}
+	}
+	return true
 }
 
 func commandPrefixMatches(params json.RawMessage, prefix []string) bool {
