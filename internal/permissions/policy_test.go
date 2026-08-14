@@ -92,6 +92,110 @@ func TestPolicy_CommandPrefixMatchesFields(t *testing.T) {
 	}
 }
 
+// A deny floor must hold against a command that merely wraps the denied
+// invocation. Allow-direction prefix matching refuses to match anything but a
+// simple command; reusing that refusal on a deny rule turned "cannot prove it
+// matches" into "does not match", so every command below used to fall through
+// to the auto profile and run.
+func TestPolicy_DenyFloorHoldsAcrossCompoundCommands(t *testing.T) {
+	p := denyPushPolicy()
+
+	for _, command := range []string{
+		"git push origin main",
+		"git push origin main; :",
+		"true && git push origin main",
+		"echo start; git push origin main",
+		"ls | git push origin main",
+		"echo $(git push origin main)",
+		"GIT_SSH_COMMAND=ssh git push origin main",
+		"git push origin main\necho done",
+	} {
+		assertCommandDecision(t, p, command, DecisionDeny)
+	}
+}
+
+// Indirection through an interpreter or a script cannot be resolved from the
+// command string, so the policy escalates to an approval prompt instead of
+// answering "not denied".
+func TestPolicy_DenyFloorEscalatesUnprovableIndirection(t *testing.T) {
+	p := denyPushPolicy()
+
+	for _, command := range []string{
+		"sh -c 'git push origin main'",
+		"bash -lc \"git push origin main\"",
+		"env FOO=bar sh -c 'git push'",
+		"xargs git",
+		"./deploy.sh",
+		"scripts/release.sh --force",
+	} {
+		assertCommandDecision(t, p, command, DecisionAsk)
+	}
+}
+
+// Escalation must not become noise: a compound command that provably has
+// nothing to do with the deny rule still runs without a prompt.
+func TestPolicy_DenyFloorLeavesUnrelatedCommandsAlone(t *testing.T) {
+	p := denyPushPolicy()
+
+	for _, command := range []string{
+		"ls -la | wc -l",
+		"echo one && echo two",
+		"git status --short",
+		"git pushed-branch-report",
+		"cat notes.txt > /tmp/out",
+	} {
+		assertCommandDecision(t, p, command, DecisionAllow)
+	}
+}
+
+// Escalation only ever tightens. A profile that already asks or denies is not
+// loosened by an indeterminate deny floor.
+func TestPolicy_DenyFloorEscalationNeverWeakens(t *testing.T) {
+	ask := Must(config.PermissionConfig{
+		Profile: string(ProfileAsk),
+		Rules: []config.PermissionRule{{
+			Tool:          "execute_command",
+			Action:        string(DecisionDeny),
+			CommandPrefix: []string{"git", "push"},
+		}},
+	})
+	assertCommandDecision(t, ask, "sh -c 'ls'", DecisionAsk)
+
+	tool := Must(config.PermissionConfig{
+		Profile: string(ProfileAuto),
+		Rules: []config.PermissionRule{{
+			Tool:   "execute_command",
+			Action: string(DecisionDeny),
+			Reason: "shell disabled",
+		}},
+	})
+	assertCommandDecision(t, tool, "sh -c 'anything'", DecisionDeny)
+}
+
+func denyPushPolicy() *Policy {
+	return Must(config.PermissionConfig{
+		Profile: string(ProfileAuto),
+		Rules: []config.PermissionRule{{
+			Tool:          "execute_command",
+			Action:        string(DecisionDeny),
+			CommandPrefix: []string{"git", "push"},
+			Reason:        "no pushes",
+		}},
+	})
+}
+
+func assertCommandDecision(t *testing.T, p *Policy, command string, want Decision) {
+	t.Helper()
+	params, err := json.Marshal(map[string]any{"command": command})
+	if err != nil {
+		t.Fatalf("marshal command %q: %v", command, err)
+	}
+	got := p.Decide(Request{ToolName: "execute_command", RequiresApproval: true, Params: params})
+	if got.Decision != want {
+		t.Fatalf("Decide(%q) = %s (%s), want %s", command, got.Decision, got.Reason, want)
+	}
+}
+
 func TestPolicy_SafeProfileIsNonReadOnlySafetyFloor(t *testing.T) {
 	p := Must(config.PermissionConfig{
 		Profile: string(ProfileSafe),

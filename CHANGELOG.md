@@ -92,6 +92,34 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- Deny permission rules no longer fail open on shell metacharacters. A
+  `command_prefix` rule refuses to match anything but a single simple command,
+  so that a prefix can never *authorize* a larger shell program — but deny-floor
+  rules were evaluated through that same predicate, where "cannot prove it
+  matches" became "does not match". A rule denying `git push` held against
+  `git push origin main` and fell through on `git push origin main; :`,
+  `true && git push origin main`, and `sh -c 'git push origin main'`. Deny
+  matching now evaluates each simple command inside a compound command
+  separately, ignores redirection targets, tolerates leading `NAME=value`
+  words, and escalates to an approval prompt when a stage hands its arguments
+  to an interpreter or a script it cannot see through. Escalation only
+  tightens: an existing `ask` or `deny` is never loosened, and a compound
+  command provably unrelated to the rule still runs without a prompt.
+- Background jobs are scoped to the project that created them. The jobs
+  directory is shared across every project on the machine, so starting
+  packetcode in one project rewrote another project's queued and running jobs
+  as abandoned, made them eligible for `/jobs resubmit` — which could launch a
+  duplicate of a job that was still running, worktree and all — and left the
+  two instances overwriting each other's records. Job records now carry the
+  project root that created them, and another root's live jobs are left
+  strictly alone. Records written before this change carry no root and are
+  still recovered.
+- Job records are versioned and no longer disappear when unreadable. A corrupt
+  or future-versioned job file was skipped silently, so abandoned work was
+  reported as nothing at all. Records now carry `format_version`; unreadable
+  ones are collected and exposed rather than dropped, an unrecognised state is
+  reported instead of being flattened to `failed`, and a record written by a
+  newer packetcode is never overwritten by an older one.
 - MiniMax interleaved-thinking models (M2.x/M3) keep their reasoning chain
   across tool calls. Their thinking arrives inline in `content` wrapped in
   `<think>` blocks; it was rendered as ordinary assistant text and then

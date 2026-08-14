@@ -225,6 +225,10 @@ type Manager struct {
 	// state. WaitForJob blocks on this. Keyed by job id; a goroutine
 	// closes the channel on terminal transition.
 	terminalCh map[string]chan struct{}
+
+	// unreadable records job files that could not be loaded at startup.
+	// Written once during construction and read-only thereafter.
+	unreadable []UnreadableRecord
 }
 
 // NewManager constructs a Manager with sane fallbacks for unset Config
@@ -261,7 +265,8 @@ func NewManager(cfg Config) (*Manager, int, error) {
 	if cfg.OnUpdate != nil {
 		m.subscribers = append(m.subscribers, cfg.OnUpdate)
 	}
-	loaded, recoveredJobs, err := loadPersistedJobs(cfg.JobsDir)
+	loaded, recoveredJobs, unreadable, err := loadPersistedJobs(cfg.JobsDir, cfg.Root)
+	m.unreadable = unreadable
 	if err != nil {
 		// Non-fatal: caller may continue with an empty job list.
 		return m, 0, err
@@ -285,6 +290,18 @@ func NewManager(cfg Config) (*Manager, int, error) {
 		return left.Before(right)
 	})
 	return m, len(recoveredJobs), nil
+}
+
+// UnreadableRecords returns the job files that could not be loaded at
+// startup. Callers surface these so a job that was dropped is reported as
+// dropped rather than disappearing from the list without explanation.
+func (m *Manager) UnreadableRecords() []UnreadableRecord {
+	if len(m.unreadable) == 0 {
+		return nil
+	}
+	out := make([]UnreadableRecord, len(m.unreadable))
+	copy(out, m.unreadable)
+	return out
 }
 
 // Subscribe registers an additional snapshot callback. Used by the App
@@ -977,6 +994,7 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 		ComputerName:      workspace.ComputerName,
 		WorkingDir:        workspace.WorkingDir,
 		WorkspaceIdentity: workspace.Identity,
+		OwnerRoot:         m.cfg.Root,
 		ComputerPolicy:    workspace.Policy,
 	}
 	m.stampSnapshotLocked(job, now, "queued", req.Prompt, false, false)
