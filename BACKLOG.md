@@ -2,13 +2,57 @@
 
 packetcode is pre-1.0. This file contains only work that has not shipped; completed work belongs in [CHANGELOG.md](CHANGELOG.md).
 
+Several items below came from reading two upstream agents against this tree.
+[`docs/research/upstream-adoption-plan.md`](docs/research/upstream-adoption-plan.md)
+carries the evidence, effort, risk, and sequencing, plus the list of things
+deliberately **not** taken and why; the per-upstream notes are
+[`upstream-opencode.md`](docs/research/upstream-opencode.md) and
+[`upstream-crush.md`](docs/research/upstream-crush.md). crush is FSL-licensed
+and packetcode competes with it, so those documents are written as clean-room
+specifications: implement from them with the upstream source closed, and never
+copy its code or prompt text.
+
 ## v1 Release Readiness
 
 - Automate signed/notarized macOS, Linux, and Windows release artifacts and checksum verification.
-- Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions.
+- Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions. Persisted jobs are done (records
+  carry `format_version` and refuse a newer one); config, sessions, workflow
+  TOML, and MCP definitions remain. Write it as a published contract with its
+  own changelog, and land it *before* any daemon work, since a daemon with
+  clients becomes the compatibility problem.
+- Surface unreadable job records. `Manager.UnreadableRecords()` is populated but
+  nothing displays it: report the count at startup alongside the recovered
+  count, and list the records in `doctor`. A job that cannot be read is
+  currently invisible, which is the failure the versioning work exists to stop.
 - Add end-to-end smoke coverage for first-run setup, provider switching, session resume, approvals, background jobs, workflows, and MCP.
-- Keep provider catalogs, pricing, context windows, and tool-capability metadata current; prefer live discovery when authoritative.
+- Keep provider catalogs, pricing, context windows, and tool-capability metadata
+  current; prefer live discovery when authoritative. **Decided 2026-08-14: fetch
+  models.dev with stdlib, do not import `charm.land/catwalk`.** Catwalk declares
+  `go 1.26.6` against this repo's 1.24.2, pulls prometheus and protobuf for what
+  is 70 lines of stdlib HTTP, has no `mistral` entry, prices MiniMax-M3 at the
+  long-context tier, and has no tiered-pricing field at all — so it structurally
+  cannot express the MiniMax billing item below. models.dev carries the tiers
+  and cached rates verbatim. Ship a trimmed embedded snapshot as the offline
+  fallback (~150 KB) so the single-binary property holds and startup never
+  blocks on the network; precedence is user config > live catalog > snapshot >
+  today's hand tables.
 - Add opt-in live-provider contract tests that never run in ordinary CI.
+  **Decided 2026-08-14: own the recorder** (~300-LOC `http.RoundTripper` plus
+  JSON cassettes) rather than importing `charm.land/x/vcr` or `dnaeon/go-vcr` —
+  the requirement is SSE frame chronology with controllable inter-frame timing
+  so `StallGuard` is exercised, which a generic HTTP recorder does not give.
+  Record on an env flag, replay always, and **fail on a missing cassette when
+  `CI=true`**; without that rule cassettes silently re-record drift and assert
+  nothing. Allow-list headers on write and test that the scrubber ran — a key
+  committed inside a cassette is unrecoverable once pushed. Extend the existing
+  `CODEX_LIVE=1` convention rather than inventing a second harness.
+- Fix two tests that fail for reasons unrelated to the code under test.
+  `TestDoctorPlainOutputDoesNotLeakSecrets` fails from environment
+  contamination — an ambient Ollama host overrides the test's configured value,
+  so the redaction assertion never sees the string it is checking, meaning a
+  redaction test currently guards nothing.
+  `TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
+  60s deadline. Both predate 2026-08-14.
 
 ## TUI and Interaction Parity
 
@@ -25,19 +69,151 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
 
 - Add provider-native token counting where a stable tokenizer/API exists; retain the conservative fallback estimator.
 - Persist request-level occupancy samples for diagnostics without conflating them with billable totals.
-- Add configurable model-facing caps for search, command, MCP, and artifact output.
+- Add configurable model-facing caps for search, command, MCP, and artifact
+  output. `execute_command` is the only tool with a byte cap (100 KB);
+  `search_codebase` and `list_directory` cap counts rather than bytes, and **MCP
+  tool results are entirely uncapped**, so a server returning megabytes lands
+  whole in the transcript. There is one chokepoint where every tool result
+  becomes a message — cap there, write the full output to disk, and hand the
+  model an excerpt plus a handle it can read more from, so truncation stops
+  meaning loss. A handle referenced after prune must degrade to "no longer
+  retained", never an error that stalls a turn.
 - Preserve/replay encrypted Codex reasoning items for multi-turn continuity if the subscription backend requires them; never attempt to display opaque reasoning.
-- Add explicit cache-hit/cached-input telemetry to `/cost` and statusline snapshots.
+- Add explicit cache-hit/cached-input telemetry to `/cost` and statusline
+  snapshots. `provider.Usage` already carries the cache fields and Anthropic and
+  Codex populate them, but the wire is cut at four points and rendered as a
+  hard-coded zero at the fifth: `openaicompat`'s usage struct omits
+  `prompt_tokens_details.cached_tokens` (blinding eight providers at once),
+  Gemini omits `cachedContentTokenCount`, `session.TokenUsage` and
+  `cost.SessionCost` have no cache fields so `RecordUsage`'s signature has to
+  widen, and the statusline's two cache JSON slots are literal zeros. Cached
+  figures are a reported *subset* of input tokens, never an addend — assert that
+  per provider or the totals double-count.
 
 ## Agents, Loops, and Workflows
 
 - Add explicit workflow pipeline stages beyond the current ordered
   phases/steps and step-level verifier/retry contract.
 - Add a broader versioned example workflow library.
-- Resume or reconcile active background jobs after process restart. Abandoned jobs are recovered as cancelled and can now be explicitly re-run via `/jobs resubmit` (PCH4, 2026-07-31), which starts a new job and never claims the old process resumed. True reconnect-and-continue requires the daemon and lands as PCMP9.
-- Let background agents request user clarification through Agent View.
+- **Ruled 2026-08-14: packetcode does not resume jobs across a restart.** Durable
+  execution after the originating app closes belongs to PacketAgent, so PCMP9 is
+  cut rather than deferred. Abandoned jobs are recovered as cancelled and can be
+  explicitly re-run via `/jobs resubmit` (PCH4, 2026-07-31), which starts a new
+  job and never claims the old process resumed. That remains the whole story;
+  "jobs survive restart" must not be claimed by this repo at all. The honest
+  reporting of an interrupted job is now carried by the `abandoned`/
+  `indeterminate` state under Packet Computers, which is promoted from PCMP9
+  precondition to the primary terminal state.
+- Let background agents request user clarification through Agent View. Routing
+  half-exists: `jobApprover` already forwards to `uiApprover.PromptApproval`.
+  Four obstacles remain — read-only jobs are refused before reaching the parent
+  approver, `uiApprover` renders one envelope at a time so a question would
+  head-of-line-block every approval from all jobs, `Job.NeedsInput` is hardwired
+  equal to `NeedsApproval` so Agent View has no distinct signal, and there is no
+  timeout, so a blocked question holds a slot out of `background_max_concurrent`.
+- Add loop detection to the agent tool loop. The 25-iteration cap is the only
+  guard today, and its own comment names the failure it cannot catch: retrying
+  the same call on a path that keeps not existing. Hash `(tool, executed
+  arguments, result)` over a sliding window and abort on repeats, with a reason
+  that says why rather than "exceeded N tool iterations".
+- Add a todo tool. There is none, and Agent View has no structured content to
+  render for background jobs. Must render as a compact block and never be echoed
+  as prose — the system prompt explicitly discourages narrating a plan.
 - Add optional live sub-agent transcript streaming without injecting it into foreground model context.
 - Add safe worktree merge/apply assistance and explicit cleanup commands.
+
+## Tools, Execution, and Code Intelligence
+
+Most of this section came out of the upstream research in
+[`docs/research/`](docs/research/upstream-adoption-plan.md); that plan carries
+the evidence, effort, and risk for each item.
+
+- Prune session backups. `internal/session/backup.go` copies the whole file on
+  every write and never cleans up: the undo stack is in-memory only, so `.bak`
+  files orphan on restart, `Cleanup()` has no production caller, and background
+  jobs get their own manager whose backups are never cleaned and never reachable
+  from `/undo`. Age-based prune plus a per-session byte cap.
+- Add git shadow-repo snapshots for message-level revert. Separate `--git-dir`
+  under the packetcode home with `--work-tree` at the project root, one commit
+  per user message, prune and size caps, and explicit `core.autocrlf=false`,
+  `core.longpaths=true`, `core.symlinks=true`, `core.quotepath=false`. The
+  user's own git state is never touched. This is not just a nicer `/undo`: only
+  `write_file` and `patch_file` call `Backup`, so **deletions and renames made
+  by `execute_command` are currently unrecoverable**. Snapshot the job worktree
+  rather than the parent, or a job commit captures unrelated foreground edits.
+- Refuse stale writes. Nothing records when the model last read a file, so
+  `write_file` silently clobbers a concurrent formatter, a rebase, or a second
+  agent in the same worktree. Record `(path, mtime, size, hash)` per session on
+  read and refuse a write with "re-read first". Key it off the existing session
+  store; do not add a database for it. Local backends only in v1, and say so
+  when it is skipped for remote ones.
+- Add an LSP client and, more valuably, run diagnostics after every edit and
+  append them to the tool result, so the model learns it broke the build without
+  being told. `code_intelligence.go` stays as the zero-dependency Go fast path;
+  LSP layers above it and must degrade silently when no server is installed.
+  **Import `github.com/charmbracelet/x/powernap`** (MIT, `go 1.24`, two pure-Go
+  deps) rather than hand-rolling: it carries 388 KB of generated protocol
+  bindings and a 372-server config table. The stdlib-only rule is scoped to LLM
+  provider and MCP wire code, where hand-rolling is the differentiator; it does
+  not reach a published protocol with standard generated bindings. Two caveats:
+  `mitchellh/mapstructure` is archived upstream, and `pkg/lsp/protocol` ships
+  its own nested licence (gopls-derived) needing its own notice entry.
+  **Skip `lsp_rename`/`lsp_replace_symbol` in v1** — LSP-driven mutation
+  bypasses the diff preview, the backup call, and the approval renderer.
+- Add background shell jobs with output and kill tools. `execute_command` is
+  synchronous with a hard 10-minute timeout, so there is no way to start a dev
+  server, watcher, or long build and keep working. Compatible with the no-PTY
+  contract — a detached process with piped output is not a PTY. `job_kill` must
+  be scoped to jobs this session started, never arbitrary pids.
+- Evaluate an in-process POSIX shell (`mvdan.cc/sh`, BSD-3) with Go coreutils on
+  Windows, replacing the `sh -c` / `cmd /C` wrapper. It would retire the
+  per-host capability string currently baked into the tool description, and
+  routing the interpreter's exec/open/stat handlers through
+  `RuntimeBackend.Resolve` would give `execute_command` **root confinement for
+  builtins for the first time** — today only `cwd` is confined and the command
+  itself can read anything. Three things must be settled first: persistent shell
+  state invalidates the approved command string (ship without it, or render the
+  effective env/cwd delta in the approval prompt); in-process builtins are not
+  killable by `procrun`, which assumes a separate OS process, so a tight loop
+  becomes an unkillable goroutine; and the whole permission suite must be
+  re-validated against the new execution path. Start with the handler stack, not
+  a coreutils reimplementation. Do this **after** the cheaper items above.
+- Close the gaps in the tracked-process work.
+  `TrackTree`/`ReleaseTree` is Windows-only — the POSIX side is a no-op, so
+  "descendants cannot survive a normally exiting parent" is a Windows-only
+  guarantee and the doc comment should either say so or gain a POSIX equivalent.
+  It is wired into MCP but not `LocalBackend.Execute`, so `execute_command` gets
+  no Job Object containment. `trackedJobs` leaks on any path that skips
+  `ReleaseTree`, which MCP never does but a shell running hundreds of commands
+  would. And procrun needs a **group handle** — one containment boundary that
+  many `exec.Cmd`s join — before either background shell jobs or an in-process
+  shell, since a pipeline would otherwise create one boundary per stage.
+- Add a bounded `fetch` tool. There is no HTTP in the tool layer at all. Size
+  cap, timeout, redirect limit, refuse non-http(s) schemes, refuse loopback and
+  private address ranges by default, land it under the output store, and frame
+  the result as untrusted evidence — fetched content is the classic
+  prompt-injection vector. Defer agentic fetch, download, and web search until
+  the network policy axis under Security and Trust exists.
+- Expose `doctor` as a read-only self-diagnostic tool. `buildDoctorReport`
+  already emits a versioned structured report with redaction, so this is a thin
+  adapter that turns "it's broken" into a self-diagnosing session. Move the
+  checks out of `cmd/` first — `internal/doctor/` is an empty directory — and
+  give the model-facing surface its own redaction test.
+- Add skills: an `<available_skills>` name-and-description index in the system
+  prompt with a `skill` tool that loads a body on demand. Additive rather than
+  redundant — slash commands are human-typed and the model cannot invoke them,
+  workflows are human-started orchestration, and neither can be selected by the
+  model mid-turn. Reuse the slash-command frontmatter parser, and mark `skill`
+  read-only so loading a body is not approval-gated while the actions it
+  suggests stay gated. Ship embedded builtin skills covering packetcode's own
+  configuration, hooks, workflows, MCP, and theming, so the agent can configure
+  packetcode correctly. Static block only — the upstream delta protocol is dead
+  code against this cache fingerprint. Project-directory skill bodies are
+  attacker-controllable in a hostile repo, the same trust class as project slash
+  commands. Leave remote skill discovery out of v1.
+- Move tool prompts and the system prompt out of Go string literals into
+  embedded files, so prompt changes are reviewable in diffs. The system prompt
+  first, since it has two call sites. Write our own text.
 
 ## MCP and Extensions
 
@@ -47,14 +223,45 @@ packetcode is pre-1.0. This file contains only work that has not shipped; comple
   origin/address, redirect, credential, provenance, approval, or reconnect
   rules.
 - Add MCP resources/prompts only after their context and trust model is defined.
+  **Split ruled 2026-08-14: resources yes, prompts no.** A resource can be
+  delivered by a tool returning bounded tool-role content with the trust
+  contract's labelled-untrusted-boundary treatment. An MCP *prompt* is
+  server-supplied text intended to become a conversation message, and
+  auto-injecting it is exactly what that contract forbids; the only safe shape
+  is a slash command that inserts the text into the user's input buffer for a
+  human to read and send. Both halves are stdio-only and neither weakens the
+  contract.
+- Do not scope MCP OAuth inside the Streamable HTTP work. It needs HTTP
+  transport, adds a third credential mode beyond `none`/`bearer-env`, and a
+  callback server is an **inbound listener** in an executable whose trust
+  contract states it adds no network listener. It needs its own contract
+  amendment covering token storage, refresh, and loopback redirect-URI binding.
 - Add a declarative pack manifest and install/list/enable workflow for prompt commands, MCP, hooks, themes, and workflows.
 - Surface MCP timeout, crash, and reconnect details consistently in transcripts and Agent View.
 
 ## Providers and Local Models
 
-- Add sanctioned subscription-backed providers only when the provider publishes and supports a third-party integration path; otherwise use API-key providers.
+- Add sanctioned subscription-backed providers only when the provider publishes
+  and supports a third-party integration path; otherwise use API-key providers.
+  **GitHub Copilot parked until after v1** (ruled 2026-08-14). The engineering
+  is largely done — `sugar_login.go` is a working, security-tested OAuth device
+  grant and `codexauth.go` does refresh-token exchange with atomic write-back —
+  so this is blocked only on a written answer to whether Copilot's published
+  integration path sanctions a third-party terminal agent. Reputational risk,
+  not technical.
 - Expand Ollama pull progress, cancellation, and model-removal management.
-- Add optional MLX/local-runtime backends only if they can match the native tool and streaming contracts without weakening Ollama's zero-config path.
+- Add optional MLX/local-runtime backends only if they can match the native tool
+  and streaming contracts without weakening Ollama's zero-config path. LM
+  Studio, llama.cpp, and LiteLLM are already usable through the `custom`
+  provider; the missing half is zero-config discovery — probe the well-known
+  ports and register what answers, reusing Ollama's existing capability
+  enrichment. The constraint above is the trap: a server that advertises tool
+  support but mangles parallel tool calls is worse than no discovery, because it
+  silently degrades a working setup. Gate on a real capability probe, default
+  tool support to false when unverified, put discovery behind an opt-in config
+  key so a stray listener cannot hijack a provider list, and use a short client
+  timeout so a dead endpoint cannot delay startup. One file per runtime; ship LM
+  Studio first and stop if it does not earn its keep.
 - Add provider-specific output/reasoning controls to the model picker when the upstream catalog exposes them.
 - Verify the MiniMax reasoning wire shape against a live key. The inline
   `<think>` path is implemented from the published tool-use guide, not from an
@@ -80,21 +287,48 @@ ledger: [docs/packet-computers-loop.md](docs/packet-computers-loop.md)
 direct-SSH backend shipped 2026-08-01: pinned persistent SSH/SFTP plus
 root-confined core tools via `packetcode --computer <name>`.
 
-- PCMP4/PCMP5 — loopback-only daemon RPC plus heartbeat, so status stops being
-  a stored value and becomes a probed one. Must refuse non-loopback binds.
+- PCMP4/PCMP5 — daemon RPC plus heartbeat, so status stops being a stored value
+  and becomes a probed one. **Scope ruled 2026-08-14: the daemon is
+  session-scoped.** It exists to reach Packet Computers and dies with the app;
+  it holds no durable job state (see the PCMP9 ruling above).
+- **Ledger edit needed before PCMP4 starts:** replace the `--listen
+  127.0.0.1:<port>` acceptance condition with an AF_UNIX socket on POSIX and a
+  named pipe (or stdlib AF_UNIX) on Windows. PCMP4 carries two conditions —
+  refuse non-loopback binds *and* write no credentials to disk — and loopback
+  TCP is reachable by every local UID, so satisfying the first that way forces
+  an auth token that breaks the second. A socket at `0600` inside a `0700`
+  directory gets both from filesystem permissions and makes the loopback rule
+  structural rather than a validation check a config path or `--network host`
+  can regress. There is no network listener anywhere in production code today,
+  so nothing is being migrated. Carry two caveats: SSH forwarding needs
+  `AllowStreamLocalForwarding` on the remote sshd and must fail with a clear
+  diagnostic rather than a hang; and try stdlib AF_UNIX on Windows before
+  reaching for `go-winio`.
+- Add a data-dir advisory lock holding pid, start time, and workspace root.
+  Cross-project clobbering is fixed (job records now carry their owning project
+  root), but two instances rooted at the *same* project still cannot be told
+  apart, and a daemon sharing the jobs directory makes that case reachable.
+  Share one vocabulary across the lock, stale-socket classification, and the
+  `abandoned` state — all three are the same three-way "running / died / owned
+  by someone else" question.
 - Finish PCMP6/PCMP7 daemon parity: the foreground direct-SSH backend now
   supplies host verification and `RuntimeBackend` for core tools, but the
   planned SSH-forwarded daemon transport, backend parity suite, remote code
   intelligence, and reconnect semantics remain open.
 - PCMP8 direct-SSH routing shipped 2026-08-02: immutable computer/root binding,
   `/spawn --computer <name>`, whole-workflow placement, independent per-job
-  SSH connections, and fail-closed remote Git worktrees. PCMP9 remains
-  persistent job reconcile. PCMP9 is the first point at which "jobs survive
-  restart" is true; it must not be claimed earlier, and it must preserve
-  PCH4's rule that anything not genuinely resumed is reported as abandoned.
-- Before PCMP9, add an explicit `abandoned`/`indeterminate` remote terminal
-  state so loss after an acknowledged remote start is never flattened into a
-  confirmed cancellation; include process-group-aware cancellation evidence.
+  SSH connections, and fail-closed remote Git worktrees. **PCMP9 is cut** — see
+  the ruling under Agents, Loops, and Workflows. PCH4's rule stands and is now
+  the only rule: anything not genuinely resumed is reported as abandoned.
+- Add an explicit `abandoned`/`indeterminate` terminal state so loss after an
+  acknowledged remote start is never flattened into a confirmed cancellation;
+  include process-group-aware cancellation evidence. **Promoted** by the PCMP9
+  ruling from precondition to the primary honest terminal state, and no longer
+  blocked on the daemon. Today a remote job that started, was acknowledged, and
+  then lost its transport is marked `Cancelled` via `jobCtx.Err()`,
+  indistinguishable from the user pressing cancel. Job records are now
+  versioned, so a new state written by a newer build is reported rather than
+  silently swallowed — that was the blocker.
 - Add a generation-aware SSH connection manager only with a no-replay rule for
   writes/commands; current jobs intentionally own independent connections.
 - Add asynchronous remote project workflow discovery and an explicit
@@ -124,6 +358,31 @@ review-gate, and Flight surfaces to show them in. See
 - Add audit events for live permission-mode changes and remembered approvals.
 - Keep Bypass Permissions explicit, visible, outside the normal Shift+Tab cycle, and subordinate to deny rules.
 - Treat remote/browser/desktop content as untrusted evidence rather than instructions.
+- Decide whether `ask` command-prefix rules should hold across compound
+  commands. The deny direction was fixed 2026-08-14, but the same
+  allow-direction refusal still applies to `ask` rules, so under a permissive
+  profile `git status; :` falls through to allow where `git status` would
+  prompt. Lower severity than the deny bypass and currently pinned by
+  `TestPolicy_CommandPrefixMatchesFields`, so changing it is a deliberate
+  decision rather than a bug fix.
+- Add substring or regex command matching to permission rules. Today there is
+  only exact `command` and `command_prefix`, which is a narrow vocabulary for
+  expressing "never run this".
+- Collapse the two filesystem-confinement implementations.
+  `internal/tools/safefs.go` is largely superseded by
+  `internal/computers/local_backend.go`, which every core tool actually routes
+  through, and their semantics differ slightly. Two jails with one purpose is a
+  place for a gap to hide.
+- Widen the hook matcher from exact-tool-name-or-`*` to globs, reusing
+  `permissions.toolPatternMatches` so hooks and permission rules share one
+  pattern language.
+- Consider hook verdicts beyond block and context injection — rewrite tool
+  input and auto-approve. **Sequencing is the security design:** `PreToolUse`
+  currently fires *after* the policy decision, so a rewrite bolted onto that
+  call site would be evaluated against no policy at all. Move the hook above
+  the first `Decide`, keep deny as an absolute floor over any hook verdict, make
+  both mutating verdicts opt-in per hook, and assert that a rewrite lands before
+  the approval prompt renders.
 
 ## PacketADE Integration and BridgeCode-Plus
 
@@ -139,4 +398,8 @@ and
 - Consume PacketAgent's versioned durable-handoff contract when that sibling
   runtime publishes it; do not create a competing PacketCode daemon contract.
 - Preserve PacketCode as an independently installable product; durable execution
-  after its originating app closes belongs to PacketAgent.
+  after its originating app closes belongs to PacketAgent. **This line governs
+  (ruled 2026-08-14):** it was in tension with PCMP4/5/9, which committed to a
+  packetcode daemon retaining job state across a restart. The tension is
+  resolved in favour of this rule — PCMP9 is cut and the daemon is
+  session-scoped. See Agents, Loops, and Workflows.
