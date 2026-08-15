@@ -60,9 +60,9 @@ Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen wor
 
 ## Results and Persistence
 
-Jobs persist snapshots under `~/.packetcode/jobs/`. Queued, running, and terminal transitions are written immediately; high-frequency activity updates are coalesced and flushed at shutdown. Jobs left active by an unclean prior exit recover as cancelled/abandoned evidence; execution is not resumed yet. For SSH jobs, PacketCode cannot guarantee that a detached remote descendant stopped when the connection disappeared.
+Jobs persist snapshots under `~/.packetcode/jobs/`. Queued, running, and terminal transitions are written immediately; high-frequency activity updates are coalesced and flushed at shutdown. Jobs left active by an unclean prior exit recover as terminal evidence; execution is never resumed. A job that was **running** recovers as `abandoned` with cause `app-exit`, because nothing witnessed how it ended; a job that was only **queued** recovers as `cancelled`, because it provably never started. Abandoned is a distinct terminal state precisely so a loss is never reported as a cancellation somebody chose. packetcode does not resume jobs across a restart (ruled 2026-08-14) — that is a scope boundary, not a missing feature. For SSH jobs, PacketCode cannot guarantee that a detached remote descendant stopped when the connection disappeared.
 
-Recovered jobs carry a durable `Recovered` flag (not inferred from the reason string) and can be explicitly re-run with `/jobs resubmit <id>`. That spawns a *new* job from the saved prompt and links the pair via `ResubmitOf` / `ResubmittedAs`; the abandoned job is never mutated beyond gaining the forward link, so its evidence stays intact. Resubmit is allowed once per job, rejects jobs that ended normally, and refuses a saved prompt larger than `jobs.MaxResubmitPromptBytes` (32 KiB) rather than truncating it. True reconnect-and-continue needs the Packet Computers daemon and is tracked as PCMP9 in [`packet-computers-loop.md`](packet-computers-loop.md).
+Recovered jobs carry a durable `Recovered` flag (not inferred from the reason string) and can be explicitly re-run with `/jobs resubmit <id>`. That spawns a *new* job from the saved prompt and links the pair via `ResubmitOf` / `ResubmittedAs`; the abandoned job is never mutated beyond gaining the forward link, so its evidence stays intact. Resubmit is allowed once per job, rejects jobs that ended normally, and refuses a saved prompt larger than `jobs.MaxResubmitPromptBytes` (32 KiB) rather than truncating it. There is no reconnect-and-continue path and none is planned: PCMP9 was cut on 2026-08-14 because durable execution after the originating app closes belongs to PacketAgent, so resubmit is the whole story. See [`packet-computers-loop.md`](packet-computers-loop.md).
 
 Terminal results are not silently inserted into foreground context. Agent View marks them seen and lets the user inject or ignore them. Parent agents that explicitly wait/collect mark results consumed.
 
@@ -155,7 +155,14 @@ Loop bodies can spawn agents or invoke workflows.
 
 ## Current Limits
 
-- Active jobs do not resume after packetcode restarts.
+- Active jobs do not resume after packetcode restarts. This one is a permanent
+  boundary rather than a limit awaiting work: durable execution after the app
+  closes belongs to PacketAgent (ruled 2026-08-14). Recovered jobs are reported
+  as abandoned and can be explicitly resubmitted as new runs.
+- packetcode cannot confirm that a detached remote descendant stopped. That is
+  reported honestly rather than papered over: such a job is `abandoned`, not
+  `cancelled`. Confirming it needs process-group cancellation evidence, which
+  does not exist yet.
 - Sub-agent transcript output is not streamed into foreground conversation.
 - Background agents cannot yet ask arbitrary user clarification questions.
 - Explicit workflow pipeline stages beyond ordered phases/steps are deferred.

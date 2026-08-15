@@ -170,6 +170,7 @@ type Result struct {
 	Error             string
 	Reason            string
 	State             State
+	AbandonCause      AbandonCause
 	Status            ResultStatus
 	DurationMS        int64
 	InputTokens       int
@@ -471,6 +472,12 @@ func cloneTranscriptMessages(messages []provider.Message) []provider.Message {
 
 // Cancel signals a single job. Returns false if the id is unknown or
 // the job is already terminal.
+//
+// The cancel request is recorded and durably written *before* the context is
+// cancelled. That ordering is the whole point: a context carries no cause, so
+// a user cancel and a dead transport both arrive at the worker as an
+// identical context.Canceled. Without this record on disk first, a stop that
+// races the write would be reported as a confirmed cancellation nobody made.
 func (m *Manager) Cancel(id string) bool {
 	m.mu.Lock()
 	j, ok := m.jobs[id]
@@ -478,14 +485,19 @@ func (m *Manager) Cancel(id string) bool {
 		m.mu.Unlock()
 		return false
 	}
+	j.CancelRequest = CancelRequestUser
 	m.stampSnapshotLocked(j, time.Now().UTC(), "cancelling", "cancellation requested", false, false)
 	snap := snapshotOf(j)
 	subs := snapshotCallbacks(m.subscribers)
+	pending := toPersisted(j)
 	cancel, ok := m.cancel[id]
 	m.mu.Unlock()
 	if !ok || cancel == nil {
 		return false
 	}
+	// Best effort: a failed write costs us the discriminator and the job
+	// degrades to abandoned, which is the safe direction to fail in.
+	_ = m.savePersistedSnapshotImmediate(pending)
 	m.fanOut(snap, subs)
 	cancel()
 	return true
@@ -496,22 +508,36 @@ func (m *Manager) Cancel(id string) bool {
 // Spawn time (not after sem acquire), so this count includes queued
 // jobs whose workers haven't yet started.
 func (m *Manager) CancelAll() int {
+	return m.cancelAllWithRequest(CancelRequestUser, "cancellation requested")
+}
+
+// cancelAllWithRequest records why every active job is being stopped, then
+// cancels them. Shutdown passes CancelRequestShutdown so an app exit is not
+// reported as a deliberate per-job cancellation: the two are different
+// claims, and only one of them is something the user actually did.
+func (m *Manager) cancelAllWithRequest(req CancelRequest, message string) int {
 	m.mu.Lock()
 	now := time.Now().UTC()
 	cancellers := make([]context.CancelFunc, 0, len(m.cancel))
 	snaps := make([]Snapshot, 0, len(m.cancel))
+	pending := make([]persistedJob, 0, len(m.cancel))
 	for id, j := range m.jobs {
 		if j.State.IsTerminal() {
 			continue
 		}
 		if c, ok := m.cancel[id]; ok {
-			m.stampSnapshotLocked(j, now, "cancelling", "cancellation requested", false, false)
+			j.CancelRequest = req
+			m.stampSnapshotLocked(j, now, "cancelling", message, false, false)
 			cancellers = append(cancellers, c)
 			snaps = append(snaps, snapshotOf(j))
+			pending = append(pending, toPersisted(j))
 		}
 	}
 	subs := snapshotCallbacks(m.subscribers)
 	m.mu.Unlock()
+	for _, p := range pending {
+		_ = m.savePersistedSnapshotImmediate(p)
+	}
 	for _, snap := range snaps {
 		m.fanOut(snap, subs)
 	}
@@ -533,7 +559,7 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	m.closed = true
 	m.mu.Unlock()
 
-	m.CancelAll()
+	m.cancelAllWithRequest(CancelRequestShutdown, "app shutdown")
 	m.cancelBase()
 
 	done := make(chan struct{})
@@ -910,6 +936,7 @@ func resultFromJob(j *Job) Result {
 		Error:             j.Error,
 		Reason:            j.Reason,
 		State:             j.State,
+		AbandonCause:      snapshotAbandonCause(j),
 		Status:            normalizeResultStatus(j.ResultStatus),
 		DurationMS:        dur,
 		InputTokens:       j.InputTokens,
@@ -1200,12 +1227,22 @@ func (m *Manager) stampSnapshotLocked(j *Job, at time.Time, activity, message st
 // signals the terminalCh, and fans out the final snapshot. It must be
 // called while NOT holding m.mu.
 func (m *Manager) markTerminal(j *Job, newState State, summary, errMsg, reason string, finalUsageInput, finalUsageOutput int, finalCost float64, transcript []provider.Message, artifacts []Artifact) {
+	m.markTerminalCause(j, newState, "", summary, errMsg, reason, finalUsageInput, finalUsageOutput, finalCost, transcript, artifacts)
+}
+
+// markTerminalCause is markTerminal plus the abandonment cause. The cause is
+// written under the same lock as the state so a reader can never observe
+// StateAbandoned without the reason it is abandoned.
+func (m *Manager) markTerminalCause(j *Job, newState State, cause AbandonCause, summary, errMsg, reason string, finalUsageInput, finalUsageOutput int, finalCost float64, transcript []provider.Message, artifacts []Artifact) {
 	m.mu.Lock()
 	if j.State.IsTerminal() {
 		m.mu.Unlock()
 		return
 	}
 	j.State = newState
+	if newState == StateAbandoned {
+		j.AbandonCause = normalizeAbandonCause(cause)
+	}
 	activity := newState.String()
 	if newState == StateCompleted {
 		activity = "ready for review"

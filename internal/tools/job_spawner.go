@@ -109,15 +109,20 @@ func (e *JobSpawnError) Error() string {
 // (e.g. "completed", "failed", "cancelled") so the tools package doesn't
 // have to re-declare the State enum.
 type JobWaitResult struct {
-	JobID          string
-	ParentJobID    string
-	Provider       string
-	Model          string
-	Prompt         string
-	Summary        string
-	Error          string
-	Reason         string
-	State          string
+	JobID       string
+	ParentJobID string
+	Provider    string
+	Model       string
+	Prompt      string
+	Summary     string
+	Error       string
+	Reason      string
+	State       string
+	// AbandonCause explains an "abandoned" state: app-exit or transport-lost.
+	// Empty for every other state. The model needs the cause, not just the
+	// verdict — "the app closed under it" and "the connection died and the
+	// remote process may still be running" call for different next steps.
+	AbandonCause   string
 	Depth          int
 	ComputerID     string
 	ComputerName   string

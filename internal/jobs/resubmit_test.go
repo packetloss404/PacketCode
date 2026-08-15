@@ -49,7 +49,8 @@ func TestLoadOrphaned_MarksRecovered(t *testing.T) {
 	require.Len(t, recovered, 1)
 
 	assert.True(t, recovered[0].Recovered, "reconciled job must be marked Recovered")
-	assert.Equal(t, StateCancelled, recovered[0].State)
+	assert.Equal(t, StateAbandoned, recovered[0].State)
+	assert.Equal(t, AbandonCauseAppExit, recovered[0].AbandonCause)
 	assert.Equal(t, "previous app exit", recovered[0].Reason)
 	assert.Empty(t, recovered[0].ResubmittedAs, "nothing has been resubmitted yet")
 
@@ -103,7 +104,8 @@ func TestResubmit_SpawnsNewJobAndLinksBothWays(t *testing.T) {
 	// The abandoned job keeps its terminal state and gains a forward link.
 	before, ok := mgr.Get(old.ID)
 	require.True(t, ok)
-	assert.Equal(t, StateCancelled, before.State, "the original must stay cancelled")
+	assert.Equal(t, StateAbandoned, before.State, "the original must stay abandoned")
+	assert.Equal(t, AbandonCauseAppExit, before.AbandonCause)
 	assert.True(t, before.Recovered)
 	assert.Equal(t, snap.ID, before.ResubmittedAs)
 
@@ -122,8 +124,10 @@ func TestResubmit_SpawnsNewJobAndLinksBothWays(t *testing.T) {
 	require.Contains(t, byID, snap.ID)
 	assert.Equal(t, snap.ID, byID[old.ID].ResubmittedAs)
 	assert.Equal(t, old.ID, byID[snap.ID].ResubmitOf)
-	assert.Equal(t, StateCancelled, byID[old.ID].State,
+	assert.Equal(t, StateAbandoned, byID[old.ID].State,
 		"the abandoned record must not be overwritten by its successor")
+	assert.Equal(t, AbandonCauseAppExit, byID[old.ID].AbandonCause,
+		"the cause must survive the round-trip to disk")
 }
 
 func TestResubmit_IsOnlyAllowedOnce(t *testing.T) {

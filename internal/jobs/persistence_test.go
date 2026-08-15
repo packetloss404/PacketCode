@@ -255,9 +255,11 @@ func TestSavePersistedSnapshotSkipsStaleSeq(t *testing.T) {
 }
 
 // TestLoadOrphaned_RewritesRunningAndQueued asserts that any persisted
-// job in StateRunning or StateQueued is rewritten as Cancelled with
-// reason "previous app exit". Returns the resurrected jobs so callers
-// can hydrate their map.
+// job in StateRunning is rewritten as Abandoned and one in StateQueued as
+// Cancelled, both with reason "previous app exit". The split is the honest
+// one: a queued job provably never ran, so its outcome is known, while a
+// running job's outcome is not. Returns the resurrected jobs so callers can
+// hydrate their map.
 func TestLoadOrphaned_RewritesRunningAndQueued(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
@@ -281,12 +283,21 @@ func TestLoadOrphaned_RewritesRunningAndQueued(t *testing.T) {
 	require.Len(t, resurrected, 2, "Running + Queued, not Completed")
 
 	ids := map[string]bool{}
+	byID := map[string]*Job{}
 	for _, j := range resurrected {
 		ids[j.ID] = true
-		assert.Equal(t, StateCancelled, j.State)
+		byID[j.ID] = j
 		assert.Equal(t, "previous app exit", j.Reason)
 		assert.False(t, j.FinishedAt.IsZero())
 	}
+	// A running job's outcome is unknown; a queued one's is not.
+	assert.Equal(t, StateAbandoned, byID["r1111111"].State,
+		"a job that was running is abandoned, never a confirmed cancellation")
+	assert.Equal(t, AbandonCauseAppExit, byID["r1111111"].AbandonCause)
+	assert.Equal(t, StateCancelled, byID["q2222222"].State,
+		"a queued job provably never started, so cancelled is honest")
+	assert.Empty(t, byID["q2222222"].AbandonCause,
+		"only abandoned jobs carry a cause")
 	assert.True(t, ids["r1111111"])
 	assert.True(t, ids["q2222222"])
 	assert.False(t, ids["c3333333"])

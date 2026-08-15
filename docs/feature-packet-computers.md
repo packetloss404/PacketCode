@@ -77,10 +77,14 @@ never merged or deleted automatically.
 Stated plainly, because a registry that looked like a control surface would be
 misleading:
 
-- There is no PacketCode daemon, durable remote job runner, reconnect after the
-  PacketCode process exits, or process supervision. A persistent SSH
-  connection means connection reuse during one PacketCode process—not a
-  persistent remote shell or a job that survives restart.
+- There is no PacketCode daemon, durable remote job runner, or process
+  supervision yet. A persistent SSH connection means connection reuse during
+  one PacketCode process—not a persistent remote shell.
+- **Jobs do not survive a PacketCode restart, and that is out of scope rather
+  than pending.** Ruled 2026-08-14: durable execution after the originating app
+  closes belongs to PacketAgent. There is no reconnect-and-continue path after
+  the PacketCode process exits and none is planned, and the planned daemon
+  milestone is session-scoped — it will hold no durable job state.
 - Remote job snapshots persist their computer/root/worktree evidence locally,
   but an active job found after restart is reported as abandoned and must be
   resubmitted as a new run. PacketCode never claims it resumed.
@@ -99,7 +103,8 @@ misleading:
   PacketCode does not claim process-tree supervision. Detached descendants may
   require operator cleanup until the daemon milestone lands.
 
-Roadmap: [`packet-computers-loop.md`](packet-computers-loop.md) (PCMP1–PCMP9).
+Roadmap: [`packet-computers-loop.md`](packet-computers-loop.md) (PCMP1–PCMP10;
+PCMP9, persistent job reconcile, was cut on 2026-08-14).
 Product definition and the full six-phase arc:
 [`../PACKETCOMPUTERS.md`](../PACKETCOMPUTERS.md).
 

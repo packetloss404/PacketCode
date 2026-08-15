@@ -2,7 +2,16 @@
 
 Status: product/research proposal; not implemented unless explicitly identified below.
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-14
+
+**Ruled 2026-08-14: packetcode does not resume jobs across a restart.** Durable
+execution after the originating app closes belongs to PacketAgent. Phase 2's
+"jobs survive packetcode restart" goal is therefore **cut**, not deferred, and
+the daemon proposed below is **session-scoped**: it exists to reach Packet
+Computers, dies with the app, and holds no durable job state. Phase headings and
+ledger IDs are kept as written so commit and CHANGELOG history stays readable;
+the cut is recorded in place rather than deleted. Implementation ledger:
+[`docs/packet-computers-loop.md`](docs/packet-computers-loop.md).
 
 This document captures the Packet Computers and Packet Control product ideas,
 the external research behind them, and a staged implementation plan.
@@ -34,14 +43,14 @@ schema rather than defining a second evidence format.
 Packet Computers and Packet Control are both worth building, but they belong in
 different layers and — per the split above — in different products.
 
-Packet Computers should be the durable place where agents work: local machines, SSH machines, and eventually managed cloud machines that keep project state, dependencies, services, jobs, transcripts, logs, and approvals across time.
+Packet Computers should be the durable place where agents work: local machines, SSH machines, and eventually managed cloud machines that keep project state, dependencies, services, transcripts, logs, and approvals across time. What persists is the *machine*, not a running job — see the ruling above.
 
 Packet Control should be the evidence layer: a workflow for proving that a change works by capturing terminal, browser, and later desktop evidence, then reporting a verdict against the original claim.
 
 The recommended order:
 
 1. Build Packet Computers as BYO local/SSH computers first.
-2. Add persistent jobs and remote tool execution through a backend abstraction.
+2. Add remote tool execution through a backend abstraction, reached by a session-scoped daemon. (Persistent jobs were cut on 2026-08-14.)
 3. Build Packet Control as terminal-first verification and QA.
 4. Add browser evidence through Playwright or agent-browser.
 5. Defer managed cloud computers, desktop control, and polished demo-video composition until the evidence and remote-machine contracts are stable.
@@ -165,12 +174,17 @@ Important gaps:
 
 - No durable machine registry.
 - No daemon or remote execution transport.
-- No persistent job reconnect/reconcile flow after packetcode restarts.
 - No remote runtime/backend abstraction or computer identity on jobs.
-- No resumable remote/local execution after process restart.
 - No general control-run evidence format (job artifact manifests are bounded handoffs, not QA evidence bundles).
 - No browser/terminal capture abstraction.
 - No target-level policy for computer control.
+
+Two entries stood on this list until 2026-08-14 and have been removed from it,
+because they are no longer gaps to close: there is no persistent job
+reconnect/reconcile flow after a packetcode restart, and no resumable execution
+after process restart. Both are now deliberate scope boundaries. packetcode
+reports anything it did not genuinely resume as abandoned, and `/jobs resubmit`
+starts a *new* job rather than claiming the old one continued.
 
 ## Current PacketADE Fit
 
@@ -207,9 +221,12 @@ One deliberate difference to respect: PacketADE Flight attempts **intentionally*
 do not resume after restart. `flight_attempts.rs` passes `None` for both
 `resume_token` and `resume_messages` ("flights start fresh"), and
 `core/orchestrator.rs` carries a test named
-`recover_never_resumes_bounded_autonomy_after_restart`. Phase 2's "jobs survive
-restart" goal is therefore a bounded-autonomy product decision to re-open in
-PacketADE, not a gap to close silently.
+`recover_never_resumes_bounded_autonomy_after_restart`. packetcode now holds the
+same position for its own reasons: the 2026-08-14 ruling cut Phase 2's "jobs
+survive restart" goal outright, so neither product claims a resumed run. Durable
+execution after the originating app closes is PacketAgent's job. If bounded
+autonomy is ever re-opened in PacketADE, that is a PacketADE product decision and
+does not reinstate anything here.
 
 ## Packet Computers
 
@@ -314,8 +331,21 @@ Computer record:
 Add:
 
 ```text
-packetcode daemon --listen 127.0.0.1:<port>
+packetcode daemon
 ```
+
+The daemon listens on a filesystem socket, never a network port: an AF_UNIX
+socket at `0600` inside a `0700` directory on POSIX, and a named pipe (or
+stdlib AF_UNIX) with equivalent owner-only ACLs on Windows. This replaces the
+originally proposed `--listen 127.0.0.1:<port>`. Loopback TCP is reachable by
+every local UID, so keeping non-loopback binds out would force an auth token —
+which contradicts the rule that the daemon writes no credentials to disk. A
+socket gets both properties from filesystem permissions, and makes the rule
+structural rather than a validation check that a config path or `--network host`
+can regress.
+
+The daemon is **session-scoped**. It dies with the app and holds no durable job
+state; the job RPCs below serve work owned by the running packetcode process.
 
 The daemon should expose a small RPC surface:
 
@@ -332,7 +362,7 @@ The daemon should expose a small RPC surface:
 - `terminal.open` later
 - `browser.run` later
 
-V1 transport should be local loopback or SSH-forwarded loopback. Do not expose a public daemon port.
+V1 transport is a local socket or an SSH-forwarded socket. No daemon port is opened on either end, public or loopback. SSH forwarding requires `AllowStreamLocalForwarding` on the remote sshd and must fail with a clear diagnostic rather than hanging when it is disabled.
 
 ### Runner Integration
 
@@ -386,17 +416,27 @@ Out of scope:
 - Browser control.
 - Public relay.
 
-#### Phase 2: Persistent Jobs
+#### Phase 2: Remote Execution Through the Backend Abstraction
 
-Goal: Jobs survive packetcode restart.
+Goal: foreground tools, background jobs, and whole workflows run on a registered
+computer for the lifetime of the packetcode process.
 
 Scope:
 
-- Daemon keeps job state.
-- packetcode reconnects and reconciles jobs.
-- Agent View restores active and completed jobs.
-- Transcripts stream after reconnect.
-- Cancellation works across reconnect.
+- Session-scoped daemon reached over a filesystem socket.
+- `RuntimeBackend` with local and computer implementations.
+- `ComputerID` frozen onto jobs and workflows, with computer-labelled Agent View.
+- Isolated remote worktrees for write-capable jobs.
+
+**The original goal of this phase was cut on 2026-08-14.** It read "Jobs survive
+packetcode restart", with the daemon keeping job state, packetcode reconnecting
+and reconciling, Agent View restoring active jobs, transcripts streaming after
+reconnect, and cancellation working across reconnect. None of that will be built
+here. Durable execution after the originating app closes belongs to PacketAgent.
+packetcode reports anything not genuinely resumed as abandoned and offers
+`/jobs resubmit`, which starts a new job and never claims the old process
+resumed. This is a cut, not a deferral — see PCMP9 in
+[`docs/packet-computers-loop.md`](docs/packet-computers-loop.md).
 
 #### Phase 3: Project Workspaces — Local Foundation Shipped
 
@@ -699,8 +739,8 @@ This remains open; the existing jobs/workflow packages are execution foundations
 
 Deliver:
 
-- `packetcode daemon`.
-- Loopback RPC.
+- `packetcode daemon`, session-scoped.
+- Socket RPC, with no network port bound.
 - Heartbeat/status.
 - Local shell and filesystem backend.
 - `/computers status`.
@@ -742,8 +782,8 @@ Persistent computers accumulate credentials, repo state, logs, and shell history
 
 Mitigations:
 
-- SSH/loopback only in v1.
-- No public daemon listener.
+- SSH plus filesystem-socket transport only in v1.
+- No daemon network listener at all, public or loopback.
 - Explicit approvals.
 - Per-computer policy.
 - Network policy.
@@ -795,7 +835,7 @@ Users need clear distinctions:
 
 Build both, but do not build both as giant features.
 
-Packet Computers should start with BYO local/SSH machines and persistent job execution. That makes packetcode more useful quickly without taking on managed cloud operations.
+Packet Computers should start with BYO local/SSH machines and process-lifetime remote execution. That makes packetcode more useful quickly without taking on managed cloud operations — or the durable-execution runtime that belongs to PacketAgent.
 
 Packet Control should start with terminal verification and QA manifests. That gives PacketADE a trust-and-truth layer: users can ask not just "did you change it?" but "prove it works."
 

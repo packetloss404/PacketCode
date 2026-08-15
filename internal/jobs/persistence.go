@@ -49,6 +49,8 @@ type persistedJob struct {
 	Summary           string            `json:"summary,omitempty"`
 	Error             string            `json:"error,omitempty"`
 	Reason            string            `json:"reason,omitempty"`
+	AbandonCause      string            `json:"abandon_cause,omitempty"`
+	CancelRequest     string            `json:"cancel_request,omitempty"`
 	InputTokens       int               `json:"input_tokens"`
 	OutputTokens      int               `json:"output_tokens"`
 	CostUSD           float64           `json:"cost_usd"`
@@ -93,6 +95,8 @@ func toPersisted(j *Job) persistedJob {
 		Summary:           j.Summary,
 		Error:             j.Error,
 		Reason:            j.Reason,
+		AbandonCause:      persistedAbandonCause(j),
+		CancelRequest:     string(normalizeCancelRequest(j.CancelRequest)),
 		InputTokens:       j.InputTokens,
 		OutputTokens:      j.OutputTokens,
 		CostUSD:           j.CostUSD,
@@ -137,6 +141,8 @@ func parseKnownState(s string) (State, bool) {
 		return StateFailed, true
 	case "cancelled":
 		return StateCancelled, true
+	case "abandoned":
+		return StateAbandoned, true
 	}
 	return StateFailed, false
 }
@@ -181,6 +187,8 @@ func fromPersisted(p persistedJob) *Job {
 		Summary:           p.Summary,
 		Error:             p.Error,
 		Reason:            p.Reason,
+		AbandonCause:      abandonCauseFromPersisted(p),
+		CancelRequest:     normalizeCancelRequest(CancelRequest(p.CancelRequest)),
 		InputTokens:       p.InputTokens,
 		OutputTokens:      p.OutputTokens,
 		CostUSD:           p.CostUSD,
@@ -202,6 +210,27 @@ func fromPersisted(p persistedJob) *Job {
 		ResubmitOf:        p.ResubmitOf,
 		ResubmittedAs:     p.ResubmittedAs,
 	}
+}
+
+// persistedAbandonCause writes a cause only for abandoned jobs. Stamping one
+// on any other state would leave a claim about an outcome that was in fact
+// confirmed, and omitempty keeps every existing record byte-identical.
+func persistedAbandonCause(j *Job) string {
+	if j == nil || j.State != StateAbandoned {
+		return ""
+	}
+	return string(normalizeAbandonCause(j.AbandonCause))
+}
+
+// abandonCauseFromPersisted mirrors the write side. A record that is not
+// abandoned carries no cause, and an abandoned record with an absent or
+// unreadable cause reads back as Unknown — which is the truthful answer, not
+// a fallback.
+func abandonCauseFromPersisted(p persistedJob) AbandonCause {
+	if parseState(p.State) != StateAbandoned {
+		return ""
+	}
+	return normalizeAbandonCause(AbandonCause(p.AbandonCause))
 }
 
 func persistedComputerPolicy(j *Job) *computers.Policy {
@@ -281,11 +310,78 @@ func readPersistedJob(path string) (persistedJob, bool) {
 	return p, true
 }
 
+// decodeRecordFile reads and validates one record without writing anything.
+// Both the loader and the read-only inspector go through it so a record that
+// one of them calls unreadable is never quietly accepted by the other.
+func decodeRecordFile(path string) (persistedJob, State, *UnreadableRecord) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return persistedJob{}, StateFailed, &UnreadableRecord{Path: path, Reason: err.Error()}
+	}
+	var p persistedJob
+	if err := json.Unmarshal(data, &p); err != nil {
+		return persistedJob{}, StateFailed, &UnreadableRecord{Path: path, Reason: "malformed job record: " + err.Error()}
+	}
+	if p.FormatVersion > jobFormatVersion {
+		return persistedJob{}, StateFailed, &UnreadableRecord{
+			Path: path,
+			Reason: fmt.Sprintf("job record version %d is newer than this build supports (%d)",
+				p.FormatVersion, jobFormatVersion),
+		}
+	}
+	state, known := parseKnownState(p.State)
+	if !known {
+		return persistedJob{}, StateFailed, &UnreadableRecord{
+			Path:   path,
+			Reason: fmt.Sprintf("unrecognised job state %q", p.State),
+		}
+	}
+	return p, state, nil
+}
+
+// InspectRecords reports how many job records in jobsDir this build can read
+// and which it cannot, without loading, reconciling, or writing anything.
+//
+// The read-only guarantee is the entire point. NewManager reconciles: it
+// rewrites records left queued or running by a previous exit and saves them
+// back. A diagnostic that went through NewManager would therefore mark a
+// live instance's in-flight jobs as abandoned merely by being run, and the
+// owner-root scoping does not help when the diagnostic shares that root.
+// Callers that only want to report on the directory must use this.
+func InspectRecords(jobsDir string) (readable int, unreadable []UnreadableRecord, err error) {
+	if jobsDir == "" {
+		return 0, nil, nil
+	}
+	entries, err := os.ReadDir(jobsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("inspect jobs: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".job.") {
+			continue
+		}
+		if _, _, bad := decodeRecordFile(filepath.Join(jobsDir, e.Name())); bad != nil {
+			unreadable = append(unreadable, *bad)
+			continue
+		}
+		readable++
+	}
+	return readable, unreadable, nil
+}
+
 // loadOrphaned scans jobsDir for any persisted jobs that were Queued or
-// Running when the previous app instance exited, rewrites them as
-// Cancelled with reason "previous app exit", and returns the count plus
-// the resurrected Jobs (so callers can hydrate the in-memory map). The
-// resurrected jobs are already in a terminal state.
+// Running when the previous app instance exited and rewrites them with
+// reason "previous app exit": Running becomes Abandoned (its outcome was
+// never witnessed), Queued becomes Cancelled (it provably never ran).
+// Returns the resurrected Jobs so callers can hydrate the in-memory map.
+// The resurrected jobs are already in a terminal state and are never
+// resumed — resubmitting one creates a new job.
 func loadOrphaned(jobsDir string) ([]*Job, error) {
 	_, recovered, _, err := loadPersistedJobs(jobsDir, "")
 	return recovered, err
@@ -323,30 +419,9 @@ func loadPersistedJobs(jobsDir, ownerRoot string) ([]*Job, []*Job, []UnreadableR
 			continue
 		}
 		path := filepath.Join(jobsDir, e.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			unreadable = append(unreadable, UnreadableRecord{Path: path, Reason: err.Error()})
-			continue
-		}
-		var p persistedJob
-		if err := json.Unmarshal(data, &p); err != nil {
-			unreadable = append(unreadable, UnreadableRecord{Path: path, Reason: "malformed job record: " + err.Error()})
-			continue
-		}
-		if p.FormatVersion > jobFormatVersion {
-			unreadable = append(unreadable, UnreadableRecord{
-				Path: path,
-				Reason: fmt.Sprintf("job record version %d is newer than this build supports (%d)",
-					p.FormatVersion, jobFormatVersion),
-			})
-			continue
-		}
-		state, known := parseKnownState(p.State)
-		if !known {
-			unreadable = append(unreadable, UnreadableRecord{
-				Path:   path,
-				Reason: fmt.Sprintf("unrecognised job state %q", p.State),
-			})
+		p, state, bad := decodeRecordFile(path)
+		if bad != nil {
+			unreadable = append(unreadable, *bad)
 			continue
 		}
 		if (state == StateQueued || state == StateRunning) && !ownedByRoot(p, ownerRoot) {
@@ -357,7 +432,17 @@ func loadPersistedJobs(jobsDir, ownerRoot string) ([]*Job, []*Job, []UnreadableR
 		}
 		j := fromPersisted(p)
 		if state == StateQueued || state == StateRunning {
-			j.State = StateCancelled
+			// A queued job never left the semaphore, so "it did not run" is
+			// a confirmed outcome and Cancelled is honest. A running job had
+			// started work that nothing here witnessed the end of, so the
+			// only truthful verdict is Abandoned — packetcode does not resume
+			// it and must not claim it was cancelled on purpose.
+			if state == StateRunning {
+				j.State = StateAbandoned
+				j.AbandonCause = AbandonCauseAppExit
+			} else {
+				j.State = StateCancelled
+			}
 			j.Recovered = true
 			j.Reason = "previous app exit"
 			if j.FinishedAt.IsZero() {
@@ -366,7 +451,7 @@ func loadPersistedJobs(jobsDir, ownerRoot string) ([]*Job, []*Job, []UnreadableR
 			if j.UpdatedAt.IsZero() || j.FinishedAt.After(j.UpdatedAt) {
 				j.UpdatedAt = j.FinishedAt
 			}
-			j.LastActivity = "cancelled"
+			j.LastActivity = j.State.String()
 			j.LastMessage = j.Reason
 			j.NeedsInput = false
 			j.NeedsApproval = false

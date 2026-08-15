@@ -210,3 +210,114 @@ func TestAgentView_EmptyShowsPlaceholderAndNoAction(t *testing.T) {
 	assert.Equal(t, "", next.SelectedID())
 	assert.Nil(t, cmd)
 }
+
+func TestAgentView_AbandonedJobRendersUnderItsOwnGroup(t *testing.T) {
+	now := time.Now()
+	lost := snap("lost1111", StateAbandoned, now.Add(-2*time.Minute), "reindex the repo")
+	lost.AbandonCause = string(jobspkg.AbandonCauseTransportLost)
+	lost.Error = "ssh: connection reset by peer"
+
+	m := New()
+	m.Resize(120, 30)
+	m.Show([]Job{lost})
+
+	out := m.View()
+	// The job must be reachable at all: a group missing from rebuildRows'
+	// order slice silently drops every job in it.
+	assert.Equal(t, "lost1111", m.SelectedID())
+	assert.Contains(t, out, "lost1111")
+	assert.Contains(t, out, "Abandoned")
+	assert.Contains(t, out, "outcome is unknown")
+	assert.Contains(t, out, "not resumed")
+	// Never presented as a clean stop or a finished run.
+	assert.NotContains(t, out, "Cancelled")
+	assert.NotContains(t, out, "Failed")
+	assert.NotContains(t, out, "✓")
+}
+
+func TestAgentView_AbandonedStatusBadgeCarriesCause(t *testing.T) {
+	now := time.Now()
+	known := snap("lost1111", StateAbandoned, now.Add(-time.Minute), "reindex")
+	known.AbandonCause = string(jobspkg.AbandonCauseAppExit)
+	assert.Equal(t, "abandoned (app-exit)", statusBadge(known))
+
+	// "unknown" adds nothing the state has not already said, so it is dropped.
+	vague := snap("lost2222", StateAbandoned, now.Add(-time.Minute), "reindex")
+	vague.AbandonCause = string(jobspkg.AbandonCauseUnknown)
+	assert.Equal(t, "abandoned", statusBadge(vague))
+
+	blank := snap("lost3333", StateAbandoned, now.Add(-time.Minute), "reindex")
+	assert.Equal(t, "abandoned", statusBadge(blank))
+
+	// A result-handling status must not overwrite the outcome, and neither may
+	// a stale activity label left behind by the last thing the agent did.
+	seen := snap("lost4444", StateAbandoned, now.Add(-time.Minute), "reindex")
+	seen.ResultStatus = "seen"
+	seen.LastActivity = "editing main.go"
+	seen.AbandonCause = string(jobspkg.AbandonCauseTransportLost)
+	assert.Equal(t, "abandoned (transport-lost)", statusBadge(seen))
+}
+
+func TestAgentView_AbandonedJobIsNotCancellableButIsDecidable(t *testing.T) {
+	j := snap("lost1111", StateAbandoned, time.Now().Add(-time.Minute), "reindex")
+	j.Error = "ssh: connection reset by peer"
+
+	assert.Equal(t, groupAbandoned, groupForJob(j), "abandoned must not fall through to Working")
+	assert.False(t, canCancel(j), "abandoned is terminal; there is nothing left to cancel")
+	assert.True(t, canDecideResult(j), "the partial result must stay injectable or ignorable")
+
+	m := New()
+	m.Resize(120, 30)
+	m.Show([]Job{j})
+	require.Equal(t, "lost1111", m.SelectedID())
+
+	_, cmd := m.Update(key("c"))
+	assert.Nil(t, cmd, "abandoned jobs must not emit CancelMsg")
+
+	_, cmd = m.Update(key("i"))
+	assert.Equal(t, InjectMsg{JobID: "lost1111"}, runCmd(t, cmd))
+
+	_, cmd = m.Update(key("x"))
+	assert.Equal(t, IgnoreMsg{JobID: "lost1111"}, runCmd(t, cmd))
+
+	assert.NotContains(t, m.View(), "c cancel")
+	assert.Contains(t, m.View(), "i inject")
+}
+
+func TestAgentView_AbandonedGroupHiddenWhenEmpty(t *testing.T) {
+	m := New()
+	m.Resize(120, 30)
+	m.Show([]Job{snap("run11111", StateRunning, time.Now(), "work")})
+
+	assert.NotContains(t, m.View(), "Abandoned")
+}
+
+// An abandoned job whose result was already handled must show both facts.
+// Showing only "injected" would hide that the work never finished; showing
+// only "abandoned" would invite a second inject of a result already taken.
+func TestStatusBadge_AbandonedKeepsFinalResultHandling(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"injected", "abandoned (transport-lost) · injected"},
+		{"ignored", "abandoned (transport-lost) · ignored"},
+		{"consumed", "abandoned (transport-lost) · consumed"},
+		// Non-final handling states add nothing a user can act on.
+		{"pending", "abandoned (transport-lost)"},
+		{"seen", "abandoned (transport-lost)"},
+		{"", "abandoned (transport-lost)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			got := statusBadge(Job{
+				State:        StateAbandoned,
+				AbandonCause: "transport-lost",
+				ResultStatus: tc.status,
+			})
+			if got != tc.want {
+				t.Fatalf("statusBadge = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

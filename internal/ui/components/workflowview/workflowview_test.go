@@ -1,6 +1,7 @@
 package workflowview
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -128,5 +129,44 @@ func TestWorkflowView_LabelsVerifierRows(t *testing.T) {
 	m.Show(runs)
 	if len(m.rows) < 4 || m.rows[3].text != "verifier a2 · " {
 		t.Fatalf("verifier row label missing: %+v", m.rows)
+	}
+}
+
+func TestRenderJobState_AbandonedIsNeitherDoneNorCancelled(t *testing.T) {
+	got := renderJobState(jobspkg.StateAbandoned.String(), 10)
+	if !strings.Contains(got, "abandoned") {
+		t.Fatalf("renderJobState = %q, want it to contain the abandoned label", got)
+	}
+	// "abandoned" is 9 runes, so the 10-wide column pads rather than
+	// truncating; a truncated "abandone…" would be an easy misread.
+	if strings.Contains(got, "…") {
+		t.Fatalf("renderJobState = %q, want no truncation at width 10", got)
+	}
+}
+
+func TestWorkflowView_RendersAbandonedAgentState(t *testing.T) {
+	runs := sampleRuns()
+	runs[0].Phases[0].Steps[0].Agents = []workflow.AgentSnapshot{{
+		JobID:  "job-aaaa",
+		HasJob: true,
+		Job: jobspkg.Snapshot{
+			ID:           "job-aaaa",
+			State:        jobspkg.StateAbandoned,
+			AbandonCause: jobspkg.AbandonCauseTransportLost,
+			Provider:     "fake",
+			Model:        "m",
+		},
+	}}
+
+	m := New()
+	m.Resize(120, 24)
+	m.Show(runs)
+
+	out := m.View()
+	if !strings.Contains(out, "abandoned") {
+		t.Fatalf("view missing abandoned state:\n%s", out)
+	}
+	if strings.Contains(out, "cancelled") || strings.Contains(out, "completed") {
+		t.Fatalf("abandoned agent rendered as a cancellation or completion:\n%s", out)
 	}
 }
