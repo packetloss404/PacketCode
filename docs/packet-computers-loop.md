@@ -1,32 +1,77 @@
-# Packet Computers — Phases 1–2 Loop (PCMP1–PCMP9)
+# Packet Computers — Phase 1 Loop (PCMP1–PCMP10, PCMP9 cut)
 
 Created: 2026-07-31
 
 Product source: [`../PACKETCOMPUTERS.md`](../PACKETCOMPUTERS.md) — research,
 product definition, and the full six-phase arc. This file is the bounded
-implementation ledger for **Phases 1–2 only** (BYO local/SSH computers, then
-persistent jobs). Phases 3–6 stay in the source document until these close.
+implementation ledger for **Phase 1 only** (BYO local/SSH computers reached by a
+session-scoped daemon). Phase 2's "persistent jobs" goal was cut on 2026-08-14
+and is not work this repo will do — see the ruling below and the PCMP9 row.
+Phases 3–6 stay in the source document until this one closes.
 
 Owner: packetcode. The Packet Control half of `PACKETCOMPUTERS.md` was split
 out on 2026-07-31 and is implemented in PacketADE
 (`D:\projects\PacketADE\dev\packet-control-loop.md`, CTL1–CTL9).
 
 Status values: `queued` → `in-progress` → `gated` → `closed`; `external-gate`
-means the item cannot honestly pass without substrate that does not exist yet.
+means the item cannot honestly pass without substrate that does not exist yet;
+`cut` means the item was ruled out of scope for this repo and will not be built
+here. A cut row is kept, never deleted — the ledger records what was planned and
+what happened to it, and removing the row would only lose the decision.
+
+## The 2026-08-14 ruling
+
+**packetcode does not resume jobs across a restart.** Durable execution after
+the originating app closes belongs to PacketAgent. The governing line is in
+BACKLOG's PacketADE section — "Preserve PacketCode as an independently
+installable product; durable execution after its originating app closes belongs
+to PacketAgent" — which was in tension with PCMP4/PCMP5/PCMP9. The tension is
+resolved in favour of that line.
+
+What follows from it:
+
+- **PCMP9 is cut, not deferred.** "Jobs survive restart" is not a promise this
+  repo makes at all, in any timeframe.
+- **The daemon survives but is session-scoped.** It exists to reach Packet
+  Computers and dies with the app. It holds no durable job state.
+- **PCH4's rule is now the whole story.** Anything not genuinely resumed is
+  reported as abandoned, and `/jobs resubmit` starts a new job that never claims
+  the old process resumed.
+- **The `abandoned`/`indeterminate` terminal state is promoted**, from a PCMP9
+  precondition to the primary honest terminal state, and is no longer blocked on
+  the daemon. Job records became versioned on 2026-08-14, which was the blocker
+  for adding a new state: a state written by a newer build is now reported
+  rather than silently swallowed. It is tracked below as PCMP10.
+
+**PCMP4 transport edit.** The acceptance condition moves off
+`packetcode daemon --listen 127.0.0.1:<port>` to an AF_UNIX socket on POSIX and
+a named pipe (or stdlib AF_UNIX) on Windows. PCMP4 carries two acceptance
+conditions — refuse non-loopback binds *and* write no credentials to disk — and
+loopback TCP is reachable by every local UID, so satisfying the first that way
+forces an auth token, which breaks the second. A socket at `0600` inside a
+`0700` directory gets both from filesystem permissions, and makes the loopback
+rule structural rather than a validation check that a config path or
+`--network host` can regress. There is no network listener anywhere in
+production code today, so nothing is being migrated. Two caveats to carry into
+PCMP6: SSH forwarding needs `AllowStreamLocalForwarding` on the remote sshd and
+must fail with a clear diagnostic rather than a hang; and try stdlib AF_UNIX on
+Windows before reaching for `go-winio`.
 
 ## Scope discipline
 
 Packet Computers is a six-phase program whose last phase is cloud
 provisioning, billing, quotas, and fleet updates — an operations product, not
 a feature. The purpose of this ledger is to keep the early, genuinely useful
-part (a machine registry and a local daemon) from being blocked behind it, and
-to make each step's blast radius explicit before it lands.
+part (a machine registry and a session-scoped daemon) from being blocked behind
+it, and to make each step's blast radius explicit before it lands.
 
 Two hard rules for the whole loop:
 
-- **No public PacketCode listener, ever, in Phases 1–2.** Daemon transport is
-  loopback or SSH-forwarded loopback only. The foreground bridge may use the
-  machine's existing SSH service; it never exposes a PacketCode port.
+- **No PacketCode network listener, ever.** Daemon transport is a filesystem
+  socket — AF_UNIX on POSIX, named pipe or stdlib AF_UNIX on Windows — reached
+  locally or through SSH stream-local forwarding. No port is bound on either
+  end. The foreground bridge may use the machine's existing SSH service; it
+  never exposes a PacketCode port.
 - **A remote computer does not inherit local secrets.** The default policy
   denies secrets and requires explicit approval; widening that is a per-record
   user decision, never a default.
@@ -38,25 +83,33 @@ Two hard rules for the whole loop:
 | **PCMP1** | Computer registry data model | Versioned `Computer` record with kind, status, capabilities, policy, project roots, and SSH target. Conservative policy defaults applied on read and write. Malformed or future-versioned registries fail loudly rather than resetting. | Unit + round-trip + malformed/future-version tests | — | **closed 2026-07-31** |
 | **PCMP2** | Read-only `/computers` surface | `/computers` lists records and `/computers status <name>` shows detail. Output states that status is stored, not probed, while no heartbeat exists. | Renderer tests; help/autocomplete coverage | PCMP1 | **closed 2026-07-31** |
 | **PCMP3** | Registry write commands | `/computers register`, `/computers ssh`, and `/computers remove` with validation, duplicate-name refusal, and confirmation before removal. | Command tests incl. invalid input and duplicate names | PCMP1 | **closed 2026-08-01** |
-| **PCMP4** | Loopback daemon | `packetcode daemon --listen 127.0.0.1:<port>` exposing `ping`, `capabilities`, `project.list`. Refuses any non-loopback bind address. Writes no credentials to disk. | Bind-refusal test; lifecycle tests | PCMP1 | queued |
+| **PCMP4** | Session-scoped socket daemon | `packetcode daemon` exposing `ping`, `capabilities`, `project.list` over an AF_UNIX socket at `0600` inside a `0700` directory on POSIX, and a named pipe (or stdlib AF_UNIX) with equivalent owner-only ACLs on Windows. Binds no network port at all. Writes no credentials to disk — filesystem permissions carry authorization, so there is no auth token. Session-scoped: it dies with the app and holds no durable job state. | No-network-listener test; socket permission/ownership test; lifecycle and stale-socket tests | PCMP1 | queued |
 | **PCMP5** | Heartbeat and real status | Registry status is driven by daemon heartbeat with an explicit staleness window. A record with no recent heartbeat reports `unknown`, never a stale `online`. | Staleness/clock-skew tests | PCMP4 | queued |
-| **PCMP6** | SSH-forwarded transport | Reach a remote daemon over SSH-forwarded loopback with host-key verification enforced. No public port is ever opened on either end. | SSH integration tests; unpinned-host refusal | PCMP4 | queued |
+| **PCMP6** | SSH-forwarded transport | Reach a remote daemon over an SSH-forwarded socket with host-key verification enforced. No port is ever opened on either end. A remote sshd without `AllowStreamLocalForwarding` fails with a clear diagnostic rather than hanging. | SSH integration tests; unpinned-host refusal; forwarding-disabled diagnostic test | PCMP4 | queued |
 | **PCMP7** | Runtime backend abstraction | `RuntimeBackend` (resolve/read/write/execute) with `LocalBackend` preserving today's behaviour exactly, plus `ComputerBackend` forwarding to a daemon. Tools gain no remote conditionals. | Backend parity suite run against both implementations | PCMP6 | **in-progress 2026-08-01** — core tools use local/direct-SSH backends; daemon parity remains |
 | **PCMP8** | `ComputerID` on jobs | Jobs carry immutable computer/root identity; `/spawn --computer <name>` and whole-workflow routing use independent direct-SSH backends; remote write jobs require isolated worktrees; Agent View labels the computer. Global and computer permissions compose restrictively. | Job routing + permission-preservation + remote worktree tests | PCMP7 | **closed 2026-08-02 (direct-SSH process-lifetime slice)** |
-| **PCMP9** | Persistent job reconcile | The daemon retains job state; a restarted packetcode reconnects and reconciles rather than abandoning. Must extend PCH4's honesty rules: anything not genuinely resumed is still reported as abandoned. | Reconnect, cancel-across-restart, and mislabelling regression tests | PCMP8; PCH4 | queued |
+| **PCMP9** | Persistent job reconcile | *Planned, never built:* the daemon retains job state; a restarted packetcode reconnects and reconciles rather than abandoning. | *Was:* reconnect, cancel-across-restart, and mislabelling regression tests | PCMP8; PCH4 | **cut 2026-08-14** — durable execution after the originating app closes belongs to PacketAgent, so packetcode does not resume jobs across a restart at all. PCH4's rule stands alone: anything not genuinely resumed is reported as abandoned. Cut, not deferred. |
+| **PCMP10** | `abandoned`/`indeterminate` terminal state | An explicit terminal state so loss after an acknowledged start is never flattened into a confirmed cancellation. Today a remote job that started, was acknowledged, and then lost its transport is marked `Cancelled` via `jobCtx.Err()`, indistinguishable from the user pressing cancel. Carries process-group-aware cancellation evidence. | State round-trip through versioned records; cancel-vs-lost discrimination tests; older-build read-back test | PCH4; versioned job records (2026-08-14) | queued |
+
+PCMP10 is independent of the daemon and can be built now. It was blocked on
+versioned job records — a new state written by a newer build had to be reported
+rather than silently swallowed — and that shipped on 2026-08-14. The PCMP9
+ruling promoted it from precondition to the primary honest terminal state.
 
 ## Sequencing
 
 ```text
 PCMP1 -> PCMP2 -> PCMP3
    \-> PCMP4 -> PCMP5
-        \-> PCMP6 -> PCMP7 -> PCMP8 -> PCMP9
+        \-> PCMP6 -> PCMP7 -> PCMP8
+
+PCMP10 (independent of the daemon)
 ```
 
 PCMP3 is independent of the daemon and shipped with the direct foreground SSH
-slice. PCMP9 is the first
-point at which the "jobs survive restart" promise in `PACKETCOMPUTERS.md`
-Phase 2 becomes true, and it must not be claimed before then.
+slice. Nothing in this ledger makes jobs survive a restart, and nothing is meant
+to: that promise is out of scope for this repo (see the ruling above), so it
+must not be claimed anywhere in packetcode's documentation or output.
 
 ## PCMP1 / PCMP2 — implemented 2026-07-31
 
@@ -105,11 +158,13 @@ directory, and shell tools run through `RuntimeBackend`; remote paths and cwd
 values remain confined to the registered root. Remote transcripts bind their
 computer ID/root and refuse cross-machine resume.
 
-There is still no daemon, heartbeat, `ComputerID` on jobs,
-durable process, remote `/undo`, or reconnect after the PacketCode process
-exits. PCMP8's direct-SSH job routing was added on 2026-08-02. PCMP6 remains the planned SSH-forwarded daemon
-transport; PCMP7 remains in progress until daemon parity and the full backend
-parity gate land.
+There is still no daemon, heartbeat, `ComputerID` on jobs, durable process, or
+remote `/undo`. PCMP8's direct-SSH job routing was added on 2026-08-02. PCMP6
+remains the planned SSH-forwarded daemon transport; PCMP7 remains in progress
+until daemon parity and the full backend parity gate land.
+
+Reconnect after the PacketCode process exits is *not* on that pending list. It
+is out of scope (ruled 2026-08-14), and no later ledger item restores it.
 
 ## Not yet true
 
@@ -119,3 +174,17 @@ Stated plainly so no reader infers more than shipped:
   to a registered SSH computer for the lifetime of the local process.
 - No daemon exists, so no status is ever live.
 - Direct SSH is process-lifetime only; it is not persistent job execution.
+
+## Out of scope, not pending
+
+Kept separate from the list above, because "not yet" and "never here" are
+different promises and readers act on the difference:
+
+- **Jobs do not survive a packetcode restart**, and no ledger item will change
+  that. Durable execution after the originating app closes belongs to
+  PacketAgent (ruled 2026-08-14).
+- **No reconnect-and-continue after process exit.** An interrupted job is
+  reported as abandoned and can be explicitly re-run as a new job via
+  `/jobs resubmit`, which never claims the old process resumed.
+- **The daemon will not hold durable job state.** It is session-scoped by
+  design and dies with the app.

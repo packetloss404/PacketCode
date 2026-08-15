@@ -239,7 +239,7 @@ A remote foreground session defaults its jobs to the active Packet Computer. Fro
 
 Packetcode resolves the computer before queueing and freezes its ID, endpoint/root identity, and working directory into the job. Nested agents inherit that binding and cannot pivot to another computer. Every active remote job owns a separate SSH/SFTP connection, preserving parallelism between workflow siblings. Computer write/shell policy only restricts the captured session policy; it never broadens it.
 
-This is process-lifetime execution. There is no remote PacketCode daemon or reconnect-and-continue loop yet. An app exit or lost SSH connection leaves local evidence that can be inspected or resubmitted as a new job, but it does not resume the original agent. Packetcode also cannot guarantee termination of detached remote descendants.
+This is process-lifetime execution. There is no remote PacketCode daemon yet, and there is no reconnect-and-continue loop at all — jobs do not survive a PacketCode restart, which is out of scope rather than pending (ruled 2026-08-14; durable execution after the originating app closes belongs to PacketAgent). An app exit or lost SSH connection leaves local evidence that can be inspected or resubmitted as a new job, but it does not resume the original agent. Packetcode also cannot guarantee termination of detached remote descendants.
 
 ```toml
 [behavior]

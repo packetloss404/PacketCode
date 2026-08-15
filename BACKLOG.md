@@ -281,9 +281,9 @@ the evidence, effort, and risk for each item.
 
 ## Packet Computers
 
-Product source: [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md). Bounded Phases 1–2
+Product source: [PACKETCOMPUTERS.md](PACKETCOMPUTERS.md). Bounded Phase 1
 ledger: [docs/packet-computers-loop.md](docs/packet-computers-loop.md)
-(PCMP1–PCMP9). PCMP1/PCMP2 shipped 2026-07-31. PCMP3 and a bounded foreground
+(PCMP1–PCMP10; PCMP9 cut 2026-08-14). PCMP1/PCMP2 shipped 2026-07-31. PCMP3 and a bounded foreground
 direct-SSH backend shipped 2026-08-01: pinned persistent SSH/SFTP plus
 root-confined core tools via `packetcode --computer <name>`.
 
@@ -313,8 +313,10 @@ root-confined core tools via `packetcode --computer <name>`.
   by someone else" question.
 - Finish PCMP6/PCMP7 daemon parity: the foreground direct-SSH backend now
   supplies host verification and `RuntimeBackend` for core tools, but the
-  planned SSH-forwarded daemon transport, backend parity suite, remote code
-  intelligence, and reconnect semantics remain open.
+  planned SSH-forwarded daemon transport, backend parity suite, and remote code
+  intelligence remain open. "Reconnect semantics" here means recovering a
+  dropped transport *within* one session — reconnect after the app exits is out
+  of scope per the PCMP9 ruling.
 - PCMP8 direct-SSH routing shipped 2026-08-02: immutable computer/root binding,
   `/spawn --computer <name>`, whole-workflow placement, independent per-job
   SSH connections, and fail-closed remote Git worktrees. **PCMP9 is cut** — see
@@ -322,9 +324,9 @@ root-confined core tools via `packetcode --computer <name>`.
   the only rule: anything not genuinely resumed is reported as abandoned.
 - Add an explicit `abandoned`/`indeterminate` terminal state so loss after an
   acknowledged remote start is never flattened into a confirmed cancellation;
-  include process-group-aware cancellation evidence. **Promoted** by the PCMP9
-  ruling from precondition to the primary honest terminal state, and no longer
-  blocked on the daemon. Today a remote job that started, was acknowledged, and
+  include process-group-aware cancellation evidence. Tracked as PCMP10 in the
+  ledger. **Promoted** by the PCMP9 ruling from precondition to the primary
+  honest terminal state, and no longer blocked on the daemon. Today a remote job that started, was acknowledged, and
   then lost its transport is marked `Cancelled` via `jobCtx.Err()`,
   indistinguishable from the user pressing cancel. Job records are now
   versioned, so a new state written by a newer build is reported rather than
