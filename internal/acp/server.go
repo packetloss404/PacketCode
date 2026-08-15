@@ -583,8 +583,11 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			// Vendor extension surface; underscore-prefixed so spec-only
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
 			// sessionsRename gates _packetcode/sessions/rename; modelsList
-			// gates _packetcode/models/list; mcpList gates
-			// _packetcode/mcp/list.
+			// gates _packetcode/models/list; mcpList gates the CONFIGURED
+			// half of _packetcode/mcp/list (the sessionId-less query). The
+			// per-session half answers off the session's own Runtime and is
+			// always available, including for client-supplied fleets on an
+			// agent with no MCP configuration of its own.
 			//
 			// mcpDefaults is a wire-behaviour promise, not a feature toggle:
 			// this agent accepts session/new and session/load WITHOUT an
@@ -716,13 +719,16 @@ func (s *Server) handleModelsList(msg rpcMessage) {
 // live session's MCP fleet (what actually started, with tool counts); without
 // one it reports the agent's configured servers, which is what a session
 // created without a client-supplied mcpServers list would inherit.
+//
+// The two halves have different prerequisites, so the availability check sits
+// in the no-sessionId branch rather than up here: a per-session answer is read
+// straight off the session's Runtime and never touches s.mcp. Rejecting the
+// live query with method-not-found just because no MCPLister was configured
+// would hide a fleet the session demonstrably has — client-supplied servers
+// being the obvious case, since those exist with no agent configuration at all.
 func (s *Server) handleMCPList(msg rpcMessage) {
 	if len(msg.ID) == 0 {
 		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/mcp/list notification; a request ID is required")
-		return
-	}
-	if s.mcp == nil {
-		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 		return
 	}
 	var params struct {
@@ -745,6 +751,10 @@ func (s *Server) handleMCPList(msg rpcMessage) {
 			servers = []MCPServerStatus{}
 		}
 		s.sendResult(msg.ID, map[string]any{"servers": servers})
+		return
+	}
+	if s.mcp == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 		return
 	}
 	servers, err := s.mcp.ListMCPServers()

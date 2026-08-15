@@ -832,6 +832,53 @@ func TestServerMCPListExtension(t *testing.T) {
 	assert.Equal(t, json.Number("-32602"), object(t, client.receiveID(5)["error"])["code"])
 }
 
+// A live session's fleet is readable even when the agent has no MCPLister:
+// the per-session answer comes off the session's Runtime, so gating it on the
+// configured-server lister would report "Method not found" for a session that
+// demonstrably has MCP servers running — including a client-supplied fleet,
+// which needs no agent configuration at all.
+func TestServerMCPListLiveSessionWithoutLister(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{mcpStatuses: []MCPServerStatus{
+		{Name: "fs", Status: "running", ToolCount: 3, Source: "client", Command: "fs-mcp"},
+	}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	extension := object(t, object(t, object(t, client.receiveID(1)["result"])["agentCapabilities"])["_packetcode"])
+	// No lister: the CONFIGURED half is genuinely unavailable and says so.
+	assert.Equal(t, false, extension["mcpList"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{
+			map[string]any{"type": "stdio", "name": "fs", "command": filepath.Join(workspace, "fs-mcp")},
+		}},
+	})
+	sessionID := object(t, client.receiveID(2)["result"])["sessionId"]
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "_packetcode/mcp/list",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	reply := client.receiveID(3)
+	require.Nil(t, reply["error"], "a live session's fleet must not depend on the configured-server lister")
+	live, ok := object(t, reply["result"])["servers"].([]any)
+	require.True(t, ok)
+	require.Len(t, live, 1)
+	assert.Equal(t, "fs", object(t, live[0])["name"])
+	assert.Equal(t, "running", object(t, live[0])["status"])
+	assert.Equal(t, json.Number("3"), object(t, live[0])["toolCount"])
+
+	// The sessionId-less query is the half that still needs the lister.
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 4, "method": "_packetcode/mcp/list", "params": map[string]any{}})
+	assert.Equal(t, json.Number("-32601"), object(t, client.receiveID(4)["error"])["code"])
+}
+
 func TestServerMCPListWithoutListerIsMethodNotFound(t *testing.T) {
 	client := newTestClient(t, blockingFactory{})
 	defer client.close()
