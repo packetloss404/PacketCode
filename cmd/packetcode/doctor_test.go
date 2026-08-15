@@ -616,6 +616,16 @@ func isolateDoctorEnv(t *testing.T) func() {
 	t.Setenv("PACKETCODE_MINIMAX_API_KEY", "")
 	t.Setenv("PACKETCODE_OPENROUTER_API_KEY", "")
 	t.Setenv("PACKETCODE_OLLAMA_HOST", "")
+	// Vendor env vars matter as much as the PACKETCODE_ ones, and are easier
+	// to miss because they are not ours. Both of these OUTRANK config rather
+	// than merely supplementing it: ollamaHost checks OLLAMA_HOST before
+	// cfg.Providers, and codexauth.DefaultPath prefers CODEX_HOME over
+	// ~/.codex. A developer with either set in their shell would therefore
+	// silently override the config a test plants, and the test would assert
+	// against their machine instead of its own fixture. Setting HOME to a
+	// temp dir does not help, because neither value is derived from HOME.
+	t.Setenv("OLLAMA_HOST", "")
+	t.Setenv("CODEX_HOME", "")
 	oldwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
