@@ -299,6 +299,11 @@ type sessionState struct {
 	approver *permissionApprover
 	cwd      string
 
+	// workers tracks this session's prompt goroutines. session/close has to
+	// know when the turn it just cancelled has finished writing before it may
+	// release the runtime; the server-wide wg cannot answer that per session.
+	workers sync.WaitGroup
+
 	mu        sync.Mutex
 	active    bool
 	cancelled bool
@@ -407,44 +412,89 @@ func (s *Server) SetDefaultPermissionMode(mode string) {
 }
 
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
+//
+// Reading runs in its own goroutine so that cancelling ctx really does stop
+// the server: a blocking Scan on stdin cannot be interrupted, so a loop that
+// scanned inline would sit there until the client closed the pipe and would
+// never reach shutdown — leaking every session's runtime, including its MCP
+// child processes. Dispatch still happens on this goroutine, so requests are
+// handled strictly in order, exactly as before.
+//
+// Note what this still cannot cover: if the process is killed outright
+// (SIGKILL, Windows TerminateProcess, or a parent that drops the child
+// handle) no Go code runs at all and the MCP children are reparented rather
+// than shut down. Clients that own the process lifetime must release sessions
+// explicitly — that is what session/close is for.
 func (s *Server) Serve(ctx context.Context) error {
 	s.ctx = ctx
-	scanner := bufio.NewScanner(s.in)
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	lines := make(chan string, 16)
+	scanErr := make(chan error, 1)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(s.in)
+		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			select {
+			case lines <- line:
+			case <-ctx.Done():
+				return
+			}
 		}
-		if !json.Valid([]byte(line)) {
-			s.sendError(nil, codeParseError, "Parse error", nil)
-			continue
-		}
-		var msg rpcMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			s.sendError(nil, codeInvalidRequest, "Invalid Request", nil)
-			continue
-		}
-		if msg.JSONRPC != "2.0" || (msg.Method == "" && len(msg.ID) == 0) {
-			s.sendError(idOrNull(msg.ID), codeInvalidRequest, "Invalid Request", nil)
-			continue
-		}
-		if len(msg.ID) > 0 && !validID(msg.ID) {
-			s.sendError(nil, codeInvalidRequest, "Invalid Request", nil)
-			continue
-		}
-		if msg.Method == "" {
-			s.handleResponse(msg)
-			continue
-		}
-		s.handleRequest(msg)
-	}
+		scanErr <- scanner.Err()
+	}()
 
-	s.shutdown()
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read ACP transport: %w", err)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				s.shutdown()
+				select {
+				case err := <-scanErr:
+					if err != nil {
+						return fmt.Errorf("read ACP transport: %w", err)
+					}
+				default:
+					// Reader exited on ctx.Done rather than end-of-input.
+				}
+				return nil
+			}
+			s.dispatch(line)
+		case <-ctx.Done():
+			s.shutdown()
+			return nil
+		}
 	}
-	return nil
+}
+
+// dispatch validates one framed JSON-RPC line and routes it. Called only from
+// Serve's loop, which is what keeps request handling serial.
+func (s *Server) dispatch(line string) {
+	if !json.Valid([]byte(line)) {
+		s.sendError(nil, codeParseError, "Parse error", nil)
+		return
+	}
+	var msg rpcMessage
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		s.sendError(nil, codeInvalidRequest, "Invalid Request", nil)
+		return
+	}
+	if msg.JSONRPC != "2.0" || (msg.Method == "" && len(msg.ID) == 0) {
+		s.sendError(idOrNull(msg.ID), codeInvalidRequest, "Invalid Request", nil)
+		return
+	}
+	if len(msg.ID) > 0 && !validID(msg.ID) {
+		s.sendError(nil, codeInvalidRequest, "Invalid Request", nil)
+		return
+	}
+	if msg.Method == "" {
+		s.handleResponse(msg)
+		return
+	}
+	s.handleRequest(msg)
 }
 
 func (s *Server) handleRequest(msg rpcMessage) {
@@ -469,6 +519,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handlePrompt(msg)
 	case "session/cancel":
 		s.handleCancel(msg)
+	case "session/close":
+		s.handleCloseSession(msg)
 	case "_packetcode/sessions/list":
 		s.handleSessionsList(msg)
 	case "_packetcode/sessions/rename":
@@ -518,8 +570,16 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			"promptCapabilities": map[string]bool{
 				"image": false, "audio": false, "embeddedContext": false,
 			},
-			"mcpCapabilities":     map[string]bool{"http": false, "sse": false},
-			"sessionCapabilities": map[string]any{},
+			"mcpCapabilities": map[string]bool{"http": false, "sse": false},
+			// session/close is a SPEC method, not a vendor extension, so it is
+			// advertised the spec's way: SessionCapabilities.close is an
+			// object, where "{}" means supported and an absent/null field
+			// means not. Unlike the _packetcode/* extensions there is no
+			// injected dependency to gate on — closing a session is intrinsic
+			// to the server — so it is unconditionally advertised. Engines
+			// predating it simply answer -32601 from the default case, which
+			// is exactly what a client checking this flag avoids provoking.
+			"sessionCapabilities": map[string]any{"close": map[string]any{}},
 			// Vendor extension surface; underscore-prefixed so spec-only
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
 			// sessionsRename gates _packetcode/sessions/rename; modelsList
@@ -1132,8 +1192,12 @@ func (s *Server) handlePrompt(msg rpcMessage) {
 	state.mu.Unlock()
 
 	s.wg.Add(1)
+	// Registered on the session too, so session/close can tell when this
+	// worker has stopped writing and the runtime is safe to release.
+	state.workers.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer state.workers.Done()
 		s.runPrompt(turnCtx, msg.ID, params.SessionID, prompt, state)
 	}()
 }
@@ -1366,6 +1430,101 @@ func (s *Server) handleCancel(msg rpcMessage) {
 	}
 }
 
+// handleCloseSession answers the spec's session/close: it drops the session
+// from this connection and frees everything behind it — the provider and tool
+// registries, the backup manager, the in-memory transcript, and (via
+// Runtime.Close) the session's MCP child processes. Without it the only way to
+// release a session is to kill the whole agent, so a client that browses fifty
+// history entries pins fifty runtimes for the process's lifetime.
+//
+// Three decisions worth stating, because the spec leaves them open:
+//
+//   - A session with a running prompt is CANCELLED, not rejected. The spec is
+//     explicit ("treat it as if session/cancel was called"), and it is also
+//     the honest behaviour: rejecting with -32000 would make close fail
+//     exactly when a client is trying to reclaim a session that is stuck. The
+//     turn still gets its normal cancelled ending — trailing tool-call
+//     updates and a {"stopReason":"cancelled"} response — so nothing is
+//     silently orphaned.
+//   - Nothing is awaited on this goroutine. Serve dispatches serially, and the
+//     worker being cancelled may be parked inside callClient waiting for a
+//     session/request_permission reply that can only arrive through this very
+//     loop; blocking here would deadlock exactly that case. Cancelling the
+//     turn's context is what unblocks callClient (it selects on ctx.Done),
+//     which is how outstanding permission requests are answered, and the
+//     runtime is released on a tracked goroutine once the worker drains.
+//   - An unknown session is idempotent SUCCESS, not -32602. Close is a
+//     release, and a client racing two closes — or closing a session the agent
+//     already dropped — has got what it asked for. The spec permits either
+//     ("agents might reply with an error"); an error here would only push
+//     clients into swallowing it. A missing or blank sessionId is still
+//     -32602, since that is a malformed call rather than a lost race.
+func (s *Server) handleCloseSession(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring session/close notification; a request ID is required")
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid session/close parameters", nil)
+		return
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	// Unregister first: from here on session/prompt answers "unknown
+	// sessionId", session/load builds a fresh runtime rather than superseding
+	// this one, and shutdown will not double-close what release is about to.
+	s.stateMu.Lock()
+	state := s.sessions[params.SessionID]
+	delete(s.sessions, params.SessionID)
+	s.stateMu.Unlock()
+	if state != nil {
+		s.releaseSession(state)
+	}
+	s.sendResult(msg.ID, map[string]any{})
+}
+
+// releaseSession cancels a session's in-flight turn exactly as session/cancel
+// would and frees its runtime, waiting for the prompt worker to finish first
+// so the close cannot race the updates it is still writing. Never blocks the
+// caller: see handleCloseSession for why that matters.
+func (s *Server) releaseSession(state *sessionState) {
+	state.mu.Lock()
+	active := state.active
+	if active {
+		state.cancelled = true
+		if state.cancel != nil {
+			state.cancel()
+		}
+	}
+	state.mu.Unlock()
+	if !active {
+		s.closeRuntime(state)
+		return
+	}
+	// Tracked on s.wg so shutdown still drains it: a close immediately
+	// followed by the transport closing must not leave the runtime unreleased.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		state.workers.Wait()
+		s.closeRuntime(state)
+	}()
+}
+
+func (s *Server) closeRuntime(state *sessionState) {
+	if state.runtime == nil || state.runtime.Close == nil {
+		return
+	}
+	if err := state.runtime.Close(); err != nil {
+		fmt.Fprintf(s.log, "packetcode acp: close session %s: %v\n", state.runtime.ID, err)
+	}
+}
+
 func (a *permissionApprover) Approve(ctx context.Context, req agent.ApprovalRequest) agent.ApprovalDecision {
 	if a == nil || a.server == nil || a.sessionID == "" {
 		return agent.ApprovalDecision{Approved: false, Reason: "ACP permission channel unavailable"}
@@ -1530,13 +1689,11 @@ func (s *Server) shutdown() {
 		}
 		state.mu.Unlock()
 	}
+	// Drains prompt workers AND any release goroutine an earlier
+	// session/close left in flight, so every runtime is closed exactly once.
 	s.wg.Wait()
 	for _, state := range sessions {
-		if state.runtime.Close != nil {
-			if err := state.runtime.Close(); err != nil {
-				fmt.Fprintf(s.log, "packetcode acp: close session %s: %v\n", state.runtime.ID, err)
-			}
-		}
+		s.closeRuntime(state)
 	}
 }
 

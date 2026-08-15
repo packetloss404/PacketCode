@@ -1446,3 +1446,409 @@ func assertUpdate(t *testing.T, updates []map[string]any, updateType, callID, st
 	}
 	t.Errorf("missing %s update for call %q with status %q", updateType, callID, status)
 }
+
+// closingFactory hands out runtimes whose Close records the session it
+// released, so tests can assert that session/close really frees the runtime
+// (and with it the provider/tool registries and MCP children) instead of just
+// forgetting the map entry.
+type closingFactory struct {
+	mu      sync.Mutex
+	created int
+	closed  []string
+	// runner, when set, replaces blockingRunner for every session.
+	runner func(id string) Runner
+}
+
+func (f *closingFactory) NewSession(_ context.Context, cfg SessionConfig, _ agent.Approver) (*Runtime, error) {
+	f.mu.Lock()
+	f.created++
+	id := fmt.Sprintf("closable-session-%d", f.created)
+	build := f.runner
+	f.mu.Unlock()
+	if cfg.SessionID != "" {
+		id = cfg.SessionID
+	}
+	var runner Runner = blockingRunner{}
+	if build != nil {
+		runner = build(id)
+	}
+	return &Runtime{
+		ID:     id,
+		Runner: runner,
+		Close: func() error {
+			f.mu.Lock()
+			f.closed = append(f.closed, id)
+			f.mu.Unlock()
+			return nil
+		},
+	}, nil
+}
+
+func (f *closingFactory) closedIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closed...)
+}
+
+// awaitClosed polls for the release goroutine session/close spawns for a busy
+// session; the close reply is deliberately not blocked on it.
+func (f *closingFactory) awaitClosed(t *testing.T, id string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, closed := range f.closedIDs() {
+			if closed == id {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("session %s was never closed; released: %v", id, f.closedIDs())
+}
+
+// initializeFor runs the handshake and returns the agentCapabilities object.
+func initializeFor(t *testing.T, client *testClient) map[string]any {
+	t.Helper()
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "init", "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	return object(t, object(t, client.receiveID("init")["result"])["agentCapabilities"])
+}
+
+// newClosableSession creates one session and returns its id.
+func newClosableSession(t *testing.T, client *testClient, id any, workspace string) string {
+	t.Helper()
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	response := client.receiveID(id)
+	require.Nil(t, response["error"], "session/new should succeed: %v", response["error"])
+	sessionID, ok := object(t, response["result"])["sessionId"].(string)
+	require.True(t, ok, "session/new returns a sessionId")
+	return sessionID
+}
+
+func TestServerCloseSessionReleasesRuntime(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &closingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	capabilities := initializeFor(t, client)
+	// session/close is a spec method, advertised the spec's way: an object
+	// under sessionCapabilities.close means "supported".
+	sessionCaps := object(t, capabilities["sessionCapabilities"])
+	assert.Equal(t, map[string]any{}, object(t, sessionCaps["close"]),
+		"sessionCapabilities.close must be advertised so clients may call session/close")
+
+	sessionID := newClosableSession(t, client, 2, workspace)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/close",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	closed := client.receiveID(3)
+	require.Nil(t, closed["error"], "session/close should succeed: %v", closed["error"])
+	assert.Equal(t, map[string]any{}, object(t, closed["result"]))
+	assert.Equal(t, []string{sessionID}, factory.closedIDs(), "the runtime must be released")
+
+	// The session is gone from the connection, so prompting it is a client bug.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "session/prompt",
+		"params": map[string]any{
+			"sessionId": sessionID,
+			"prompt":    []any{map[string]any{"type": "text", "text": "still there?"}},
+		},
+	})
+	prompted := client.receiveID(4)
+	assert.Equal(t, json.Number("-32602"), object(t, prompted["error"])["code"])
+}
+
+func TestServerCloseSessionCancelsActivePrompt(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &closingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	initializeFor(t, client)
+	sessionID := newClosableSession(t, client, 2, workspace)
+
+	// blockingRunner proposes a tool call and then parks on ctx.Done, so the
+	// turn is genuinely in flight when the close lands.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{
+			"sessionId": sessionID,
+			"prompt":    []any{map[string]any{"type": "text", "text": "hello"}},
+		},
+	})
+	for {
+		update, ok := sessionUpdate(client.receive())
+		if ok && update["sessionUpdate"] == "tool_call" {
+			break
+		}
+	}
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "close", "method": "session/close",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+
+	// The spec contract: closing a busy session cancels its work rather than
+	// orphaning it, so the prompt still gets a proper cancelled ending.
+	var closeAcked, promptEnded bool
+	for !closeAcked || !promptEnded {
+		msg := client.receive()
+		switch {
+		case idEqual(msg["id"], "close"):
+			require.Nil(t, msg["error"], "session/close should succeed: %v", msg["error"])
+			closeAcked = true
+		case idEqual(msg["id"], "prompt"):
+			require.Nil(t, msg["error"], "the cancelled turn answers with a result")
+			assert.Equal(t, "cancelled", object(t, msg["result"])["stopReason"])
+			promptEnded = true
+		}
+	}
+	factory.awaitClosed(t, sessionID)
+}
+
+// A turn parked inside callClient waiting for a permission answer is the case
+// that would deadlock if session/close waited for the worker on the request
+// loop: the reply can only arrive through that same loop. Cancelling the turn
+// context is what releases it.
+func TestServerCloseSessionUnblocksOutstandingPermission(t *testing.T) {
+	workspace := t.TempDir()
+	decisions := make(chan agent.ApprovalDecision, 1)
+	factory := &capturingFactory{
+		inner:     &closingFactory{},
+		decisions: decisions,
+	}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	initializeFor(t, client)
+	sessionID := newClosableSession(t, client, 2, workspace)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{
+			"sessionId": sessionID,
+			"prompt":    []any{map[string]any{"type": "text", "text": "gated"}},
+		},
+	})
+	// Wait for the agent->client permission request, and deliberately never
+	// answer it.
+	for {
+		msg := client.receive()
+		if msg["method"] == "session/request_permission" {
+			break
+		}
+	}
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "close", "method": "session/close",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+
+	var closeAcked, promptEnded bool
+	for !closeAcked || !promptEnded {
+		msg := client.receive()
+		switch {
+		case idEqual(msg["id"], "close"):
+			require.Nil(t, msg["error"], "session/close should succeed: %v", msg["error"])
+			closeAcked = true
+		case idEqual(msg["id"], "prompt"):
+			assert.Equal(t, "cancelled", object(t, msg["result"])["stopReason"])
+			promptEnded = true
+		}
+	}
+	select {
+	case decision := <-decisions:
+		assert.False(t, decision.Approved, "an unanswered request must never resolve to allow")
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approver never returned; callClient stayed blocked after session/close")
+	}
+	factory.inner.awaitClosed(t, sessionID)
+}
+
+// capturingFactory wires the server-supplied Approver into the runner, which
+// closingFactory alone cannot do (its runner hook only sees the session id).
+type capturingFactory struct {
+	inner     *closingFactory
+	decisions chan agent.ApprovalDecision
+}
+
+func (f *capturingFactory) NewSession(ctx context.Context, cfg SessionConfig, approver agent.Approver) (*Runtime, error) {
+	f.inner.mu.Lock()
+	f.inner.runner = func(string) Runner {
+		return &approvalRunner{decisions: f.decisions, approver: approver}
+	}
+	f.inner.mu.Unlock()
+	return f.inner.NewSession(ctx, cfg, approver)
+}
+
+// approvalRunner asks the ACP approver for permission and reports the answer,
+// so a test can observe whether the call ever came back.
+type approvalRunner struct {
+	approver  agent.Approver
+	decisions chan agent.ApprovalDecision
+}
+
+func (r *approvalRunner) Run(ctx context.Context, _ string) <-chan agent.AgentEvent {
+	events := make(chan agent.AgentEvent, 2)
+	go func() {
+		defer close(events)
+		call := provider.ToolCall{ID: "gated-call", Name: "execute_command", Arguments: `{}`}
+		events <- agent.AgentEvent{Type: agent.EventToolCallProposed, ToolCall: call}
+		decision := r.approver.Approve(ctx, agent.ApprovalRequest{
+			ToolCall: call, Params: json.RawMessage(`{}`),
+		})
+		select {
+		case r.decisions <- decision:
+		default:
+		}
+		<-ctx.Done()
+		events <- agent.AgentEvent{Type: agent.EventError, Error: ctx.Err()}
+	}()
+	return events
+}
+
+func TestServerCloseSessionThenLoadWorks(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &closingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	initializeFor(t, client)
+	sessionID := newClosableSession(t, client, 2, workspace)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/close",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	require.Nil(t, client.receiveID(3)["error"])
+	require.Equal(t, []string{sessionID}, factory.closedIDs())
+
+	// Eviction must be invisible: re-selecting a closed session just loads it
+	// again, and that builds a NEW runtime rather than resurrecting the old.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "session/load",
+		"params": map[string]any{"sessionId": sessionID, "cwd": workspace, "mcpServers": []any{}},
+	})
+	loaded := client.receiveID(4)
+	require.Nil(t, loaded["error"], "re-loading a closed session should succeed: %v", loaded["error"])
+	assert.Equal(t, []string{sessionID}, factory.closedIDs(),
+		"loading must not close anything: the old runtime was already released")
+
+	// Closing the re-loaded session releases it a second time, proving the
+	// reload rebuilt a real runtime rather than just a map entry.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 5, "method": "session/close",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	require.Nil(t, client.receiveID(5)["error"])
+	assert.Equal(t, []string{sessionID, sessionID}, factory.closedIDs())
+}
+
+func TestServerCloseSessionUnknownIDIsIdempotent(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &closingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	initializeFor(t, client)
+	sessionID := newClosableSession(t, client, 2, workspace)
+
+	// A session this connection never held: a client racing its own eviction
+	// against an engine restart gets success, not an error it would have to
+	// swallow.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/close",
+		"params": map[string]any{"sessionId": "never-existed"},
+	})
+	unknown := client.receiveID(3)
+	require.Nil(t, unknown["error"], "closing an unknown session is not an error")
+	assert.Equal(t, map[string]any{}, object(t, unknown["result"]))
+
+	// Closing twice is the same shape, and releases the runtime exactly once.
+	for _, id := range []any{4, 5} {
+		client.send(map[string]any{
+			"jsonrpc": "2.0", "id": id, "method": "session/close",
+			"params": map[string]any{"sessionId": sessionID},
+		})
+		response := client.receiveID(id)
+		require.Nil(t, response["error"], "repeat close should succeed: %v", response["error"])
+	}
+	assert.Equal(t, []string{sessionID}, factory.closedIDs(), "close must not double-release")
+
+	// A malformed call is still a client bug and still -32602.
+	for i, params := range []map[string]any{{}, {"sessionId": "   "}} {
+		id := fmt.Sprintf("bad-%d", i)
+		client.send(map[string]any{
+			"jsonrpc": "2.0", "id": id, "method": "session/close", "params": params,
+		})
+		bad := client.receiveID(id)
+		assert.Equal(t, json.Number("-32602"), object(t, bad["error"])["code"],
+			"missing sessionId is malformed, not a lost race")
+	}
+}
+
+// Serve must honour its documented contract that ctx cancellation stops the
+// server: a blocking read on stdin used to keep the loop parked forever, so
+// shutdown never ran and every session runtime (MCP children included) leaked
+// until the process died.
+func TestServerContextCancellationRunsShutdown(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &closingFactory{}
+	serverIn, clientIn := io.Pipe()
+	clientOut, serverOut := io.Pipe()
+	defer func() { _ = clientIn.Close() }()
+	// Drain the output so protocol writes never block on the pipe.
+	go func() { _, _ = io.Copy(io.Discard, clientOut) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	server := NewServer(serverIn, serverOut, io.Discard, factory, "test")
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(ctx)
+		_ = serverOut.Close()
+	}()
+
+	send := func(value any) {
+		data, err := json.Marshal(value)
+		require.NoError(t, err)
+		_, err = clientIn.Write(append(data, '\n'))
+		require.NoError(t, err)
+	}
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	// The session must exist before cancelling, or the test proves nothing.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		server.stateMu.Lock()
+		count := len(server.sessions)
+		server.stateMu.Unlock()
+		if count == 1 {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "session/new never registered a session")
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return after its context was cancelled")
+	}
+	assert.Equal(t, []string{"closable-session-1"}, factory.closedIDs(),
+		"cancellation must run shutdown and release every session")
+}
