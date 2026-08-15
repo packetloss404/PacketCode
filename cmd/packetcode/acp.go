@@ -25,9 +25,58 @@ type packetACPFactory struct {
 	provider    string
 	model       string
 	policy      *permissions.Policy
+	// ceiling is the most permissive profile a client-requested permissionMode
+	// may select; the operator's startup configuration sets it.
+	ceiling     permissions.Profile
 	sessionsDir string
 	backupsDir  string
 	log         io.Writer
+}
+
+// profileRank orders the built-in profiles from least to most permissive for
+// the escalation ceiling on client-requested permission modes.
+var profileRank = map[permissions.Profile]int{
+	permissions.ProfileSafe: 0,
+	permissions.ProfileAsk:  1,
+	permissions.ProfileEdit: 2,
+	permissions.ProfileAuto: 3,
+	permissions.ProfileFull: 4,
+}
+
+// serverPermissionCeiling derives the escalation ceiling from the effective
+// startup configuration (after any --permission-mode flag was applied — the
+// flag writes cfg.Permissions.Profile). An EXPLICITLY configured profile caps
+// what clients may request; a default (empty) profile leaves them
+// unrestricted, because on a default setup the ACP client's local user is the
+// operator and per-session modes are their consent mechanism. Custom profiles
+// have unknown permissiveness and also leave clients unrestricted.
+func serverPermissionCeiling(cfg *config.Config) permissions.Profile {
+	ceiling := permissions.ProfileFull
+	if cfg.Permissions.Profile != "" {
+		if profile, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
+			ceiling = profile
+		}
+	}
+	if cfg.Behavior.TrustMode {
+		ceiling = permissions.ProfileFull
+	}
+	return ceiling
+}
+
+// allowedPermissionModes filters the wire vocabulary to modes at or below the
+// ceiling, so clients are never offered an escalation the factory rejects.
+func allowedPermissionModes(ceiling permissions.Profile) []string {
+	out := make([]string, 0, len(acp.PermissionModes))
+	for _, mode := range acp.PermissionModes {
+		profile, err := permissions.ParseProfile(mode)
+		if err != nil {
+			continue
+		}
+		if profileRank[profile] <= profileRank[ceiling] {
+			out = append(out, mode)
+		}
+	}
+	return out
 }
 
 func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -97,8 +146,10 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	provider.SetConfiguredStallTimeout(time.Duration(stall) * time.Second)
 
+	ceiling := serverPermissionCeiling(cfg)
 	factory := &packetACPFactory{
 		cfg: cfg, provider: activeProvider, model: activeModel, policy: policy,
+		ceiling:     ceiling,
 		sessionsDir: sessionsDir, backupsDir: backupsDir, log: stderr,
 	}
 	server := acp.NewServer(stdin, stdout, stderr, factory, welcomeVersion())
@@ -106,6 +157,7 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	server.SetSessionRenamer(&packetSessionRenamer{dir: sessionsDir})
 	server.SetUsageReader(&packetUsageReader{dir: sessionsDir})
 	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
+	server.SetPermissionModes(allowedPermissionModes(ceiling))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
 		return 1
@@ -201,6 +253,14 @@ func (f *packetACPFactory) sessionPolicy(mode string) (*permissions.Policy, erro
 	profile, err := permissions.ParseProfile(mode)
 	if err != nil {
 		return nil, fmt.Errorf("%w %q", acp.ErrUnknownPermissionMode, mode)
+	}
+	// Escalation ceiling: a client may narrow its session's permissions but
+	// never exceed what the operator configured the server with.
+	if f.ceiling != "" && profileRank[profile] > profileRank[f.ceiling] {
+		return nil, fmt.Errorf(
+			"%w: %q exceeds the server's configured permission profile %q",
+			acp.ErrPermissionModeDenied, mode, f.ceiling,
+		)
 	}
 	var cfg config.Config
 	if f.cfg != nil {

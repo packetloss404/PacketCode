@@ -72,6 +72,11 @@ var ErrUnknownProvider = errors.New("unknown provider")
 // server can answer invalid-params instead of a generic internal error.
 var ErrUnknownPermissionMode = errors.New("unknown permission mode")
 
+// ErrPermissionModeDenied marks a session/new permissionMode override that is
+// more permissive than the server allows. Clients must not be able to
+// escalate past the profile the operator started the server with.
+var ErrPermissionModeDenied = errors.New("permission mode not allowed")
+
 // Runner is PacketCode's terminal-independent agent event source.
 type Runner interface {
 	Run(context.Context, string) <-chan agent.AgentEvent
@@ -174,6 +179,8 @@ type Server struct {
 	renamer SessionRenamer
 	catalog ModelCatalog
 	usage   UsageReader
+	// permissionModes, when non-nil, replaces the advertised PermissionModes.
+	permissionModes []string
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -261,6 +268,14 @@ func (s *Server) SetModelCatalog(c ModelCatalog) {
 // leaves the method unregistered.
 func (s *Server) SetUsageReader(r UsageReader) {
 	s.usage = r
+}
+
+// SetPermissionModes overrides the permission modes advertised in initialize.
+// Operators cap this to their startup profile so clients cannot be offered an
+// escalation the factory would reject. Must be called before Serve; nil keeps
+// the full PermissionModes vocabulary.
+func (s *Server) SetPermissionModes(modes []string) {
+	s.permissionModes = modes
 }
 
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
@@ -380,12 +395,19 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 				"sessionsRename":  s.renamer != nil,
 				"sessionsUsage":   s.usage != nil,
 				"modelsList":      s.catalog != nil,
-				"permissionModes": PermissionModes,
+				"permissionModes": s.advertisedPermissionModes(),
 			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
 		"authMethods": []any{},
 	})
+}
+
+func (s *Server) advertisedPermissionModes() []string {
+	if s.permissionModes != nil {
+		return s.permissionModes
+	}
+	return PermissionModes
 }
 
 func (s *Server) handleSessionsList(msg rpcMessage) {
@@ -552,7 +574,8 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 	approver := &permissionApprover{server: s}
 	runtime, err := s.factory.NewSession(s.ctx, sessionConfig, approver)
 	if err != nil {
-		if errors.Is(err, ErrUnknownProvider) || errors.Is(err, ErrUnknownPermissionMode) {
+		if errors.Is(err, ErrUnknownProvider) || errors.Is(err, ErrUnknownPermissionMode) ||
+			errors.Is(err, ErrPermissionModeDenied) {
 			s.replyError(msg, codeInvalidParams, err.Error(), nil)
 			return
 		}

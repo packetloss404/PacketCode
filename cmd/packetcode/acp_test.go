@@ -185,3 +185,56 @@ func TestPacketACPFactoryPermissionModeOverrides(t *testing.T) {
 		assert.NotEqual(t, "inline default", rule.Reason, "inline default rule must be cleared for per-session modes")
 	}
 }
+
+func TestPacketACPFactoryPermissionCeiling(t *testing.T) {
+	cfg := config.Default()
+	// Operator explicitly restricted the server: clients may narrow but
+	// never escalate past it.
+	cfg.Permissions.Profile = "read-only"
+	factory := &packetACPFactory{
+		cfg: cfg, provider: "anthropic", model: "claude-fable-5",
+		ceiling:     serverPermissionCeiling(cfg),
+		sessionsDir: t.TempDir(), backupsDir: t.TempDir(),
+	}
+
+	_, err := factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD: t.TempDir(), PermissionMode: "bypass",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, acp.ErrPermissionModeDenied)
+
+	// Matching the ceiling is allowed: policy resolution succeeds and the
+	// factory proceeds past permission handling (it fails later on provider
+	// construction, not on the mode).
+	_, err = factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD: t.TempDir(), PermissionMode: "read-only",
+	}, nil)
+	if err != nil {
+		assert.NotErrorIs(t, err, acp.ErrPermissionModeDenied)
+		assert.NotErrorIs(t, err, acp.ErrUnknownPermissionMode)
+	}
+
+	assert.Equal(t, []string{"read-only"}, allowedPermissionModes(serverPermissionCeiling(cfg)))
+}
+
+func TestServerPermissionCeilingDefaults(t *testing.T) {
+	// Default config: the local user is the operator; no restriction.
+	cfg := config.Default()
+	cfg.Permissions.Profile = ""
+	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+	assert.Equal(t, acp.PermissionModes, allowedPermissionModes(permissions.ProfileFull))
+
+	// Explicit ask profile caps at ask.
+	cfg.Permissions.Profile = "ask"
+	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
+	assert.Equal(t, []string{"ask", "read-only"}, allowedPermissionModes(permissions.ProfileAsk))
+
+	// Trust mode is already maximal.
+	cfg.Behavior.TrustMode = true
+	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+
+	// Custom profiles have unknown shape: unrestricted.
+	cfg.Behavior.TrustMode = false
+	cfg.Permissions.Profile = "my-custom-profile"
+	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+}
