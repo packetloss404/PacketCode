@@ -103,6 +103,7 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	server := acp.NewServer(stdin, stdout, stderr, factory, welcomeVersion())
 	server.SetSessionLister(&packetSessionLister{dir: sessionsDir})
+	server.SetSessionRenamer(&packetSessionRenamer{dir: sessionsDir})
 	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
@@ -185,6 +186,27 @@ func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
 		})
 	}
 	return out, nil
+}
+
+// packetSessionRenamer persists display-name changes for ACP clients via the
+// _packetcode/sessions/rename extension. Each call builds its own Manager, so
+// Load only sets that throwaway Manager's current session and Rename+Save act
+// on it alone — a live runtime's Manager (created per NewSession call) is
+// never touched. Caveat: a runtime keeps its whole Session in memory and
+// Save persists all of it, so renaming a session that has an active runtime
+// is reverted by that runtime's next Save (e.g. the next turn's AddMessage).
+// The name is normalized by session.Manager.Rename (sanitizeName: lowercase,
+// spaces to hyphens, a-z0-9-_ only, 40 chars max).
+type packetSessionRenamer struct {
+	dir string
+}
+
+func (r *packetSessionRenamer) RenameSession(id, name string) error {
+	manager := session.NewManager(r.dir)
+	if _, err := manager.Load(id); err != nil {
+		return err
+	}
+	return manager.Rename(name)
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {

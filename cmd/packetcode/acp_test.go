@@ -8,7 +8,27 @@ import (
 
 	"github.com/packetcode/packetcode/internal/acp"
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/session"
 )
+
+func TestServerSessionRenamerPersistsSanitizedName(t *testing.T) {
+	dir := t.TempDir()
+	created, err := session.NewManager(dir).New("anthropic", "claude-fable-5")
+	require.NoError(t, err)
+
+	renamer := &packetSessionRenamer{dir: dir}
+	require.NoError(t, renamer.RenameSession(created.ID, "Fix The Login Bug"))
+
+	// Read back through a fresh manager: the rename must be on disk, run
+	// through sanitizeName (lowercase, hyphenated).
+	summaries, err := session.NewManager(dir).List()
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "fix-the-login-bug", summaries[0].Name)
+
+	// Unknown sessions surface the load error to the ACP layer (-32603).
+	require.Error(t, renamer.RenameSession("does-not-exist", "anything"))
+}
 
 func TestServerModelCatalogEnumeratesConfiguredProviders(t *testing.T) {
 	cfg := config.Default()

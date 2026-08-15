@@ -390,6 +390,121 @@ func TestServerSessionsListWithoutListerIsMethodNotFound(t *testing.T) {
 	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
 }
 
+type recordingSessionRenamer struct {
+	mu    sync.Mutex
+	calls [][2]string
+	err   error
+}
+
+func (r *recordingSessionRenamer) RenameSession(id, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, [2]string{id, name})
+	return r.err
+}
+
+func (r *recordingSessionRenamer) recorded() [][2]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([][2]string(nil), r.calls...)
+}
+
+func TestServerSessionsRenameExtension(t *testing.T) {
+	renamer := &recordingSessionRenamer{}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsRename"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "wire acp titles"},
+	})
+	reply := client.receiveID(2)
+	require.Nil(t, reply["error"], "rename should succeed: %v", reply["error"])
+	assert.Equal(t, [][2]string{{"abc-123", "wire acp titles"}}, renamer.recorded())
+}
+
+func TestServerSessionsRenameValidation(t *testing.T) {
+	renamer := &recordingSessionRenamer{}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	// Empty name: invalid params, and the renamer is never invoked.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "   "},
+	})
+	emptyName := client.receiveID(2)
+	assert.Equal(t, json.Number("-32602"), object(t, emptyName["error"])["code"])
+
+	// Empty session id: invalid params as well.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "", "name": "titled"},
+	})
+	emptyID := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, emptyID["error"])["code"])
+	assert.Empty(t, renamer.recorded())
+}
+
+func TestServerSessionsRenameUnknownSessionIsInternal(t *testing.T) {
+	renamer := &recordingSessionRenamer{err: fmt.Errorf("load session: file does not exist")}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "missing", "name": "titled"},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "rename session")
+	assert.Contains(t, errObj["message"], "file does not exist")
+}
+
+func TestServerSessionsRenameWithoutRenamerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsRename"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "titled"},
+	})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
 type staticModelCatalog struct {
 	models []ModelOption
 	err    error

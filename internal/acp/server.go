@@ -103,6 +103,14 @@ type SessionLister interface {
 	ListSessions() ([]SessionSummary, error)
 }
 
+// SessionRenamer updates a persisted session's display name for the
+// _packetcode/sessions/rename extension. Optional: when unset the method
+// answers method-not-found, matching older servers. Implementations receive
+// the raw client-supplied name and may normalize it before persisting.
+type SessionRenamer interface {
+	RenameSession(id, name string) error
+}
+
 // ModelOption is one selectable provider/model pair served by the
 // _packetcode/models/list extension. Default marks the pair a new session
 // uses when session/new carries no "_packetcode" override.
@@ -128,6 +136,7 @@ type Server struct {
 	factory SessionFactory
 	version string
 	lister  SessionLister
+	renamer SessionRenamer
 	catalog ModelCatalog
 
 	writeMu          sync.Mutex
@@ -197,6 +206,12 @@ func NewServer(in io.Reader, out, logWriter io.Writer, factory SessionFactory, v
 // called before Serve; a nil lister leaves the method unregistered.
 func (s *Server) SetSessionLister(l SessionLister) {
 	s.lister = l
+}
+
+// SetSessionRenamer enables the _packetcode/sessions/rename extension. Must
+// be called before Serve; a nil renamer leaves the method unregistered.
+func (s *Server) SetSessionRenamer(r SessionRenamer) {
+	s.renamer = r
 }
 
 // SetModelCatalog enables the _packetcode/models/list extension. Must be
@@ -270,6 +285,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handleCancel(msg)
 	case "_packetcode/sessions/list":
 		s.handleSessionsList(msg)
+	case "_packetcode/sessions/rename":
+		s.handleSessionsRename(msg)
 	case "_packetcode/models/list":
 		s.handleModelsList(msg)
 	default:
@@ -311,10 +328,12 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			"sessionCapabilities": map[string]any{},
 			// Vendor extension surface; underscore-prefixed so spec-only
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
-			// modelsList gates _packetcode/models/list.
+			// sessionsRename gates _packetcode/sessions/rename; modelsList
+			// gates _packetcode/models/list.
 			"_packetcode": map[string]any{
-				"sessionsList": s.lister != nil,
-				"modelsList":   s.catalog != nil,
+				"sessionsList":   s.lister != nil,
+				"sessionsRename": s.renamer != nil,
+				"modelsList":     s.catalog != nil,
 			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
@@ -340,6 +359,38 @@ func (s *Server) handleSessionsList(msg rpcMessage) {
 		summaries = []SessionSummary{}
 	}
 	s.sendResult(msg.ID, map[string]any{"sessions": summaries})
+}
+
+func (s *Server) handleSessionsRename(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/rename notification; a request ID is required")
+		return
+	}
+	if s.renamer == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+		Name      string `json:"name"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/sessions/rename parameters", nil)
+		return
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	if strings.TrimSpace(params.Name) == "" {
+		s.replyError(msg, codeInvalidParams, "name is required", nil)
+		return
+	}
+	if err := s.renamer.RenameSession(params.SessionID, params.Name); err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("rename session: %v", err), nil)
+		return
+	}
+	s.sendResult(msg.ID, map[string]any{})
 }
 
 func (s *Server) handleModelsList(msg rpcMessage) {
