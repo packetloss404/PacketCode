@@ -169,6 +169,7 @@ func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
 	// Every replay update must arrive strictly before the session/load result.
 	type replayed struct{ kind, text string }
 	var got []replayed
+	messageIDs := map[string]bool{}
 	var response map[string]any
 	for response == nil {
 		msg := client.receive()
@@ -177,13 +178,16 @@ func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
 			assert.Equal(t, "resumed-1", params["sessionId"])
 			content := object(t, update["content"])
 			got = append(got, replayed{update["sessionUpdate"].(string), content["text"].(string)})
-			assert.NotEmpty(t, update["messageId"], "replayed chunks carry a messageId")
+			id, _ := update["messageId"].(string)
+			assert.NotEmpty(t, id, "replayed chunks carry a messageId")
+			messageIDs[id] = true
 			continue
 		}
 		if idEqual(msg["id"], "load") {
 			response = msg
 		}
 	}
+	assert.Len(t, messageIDs, 3, "each replayed message gets its own messageId")
 	require.Nil(t, response["error"], "session/load should succeed: %v", response["error"])
 	assert.Equal(t, map[string]any{}, object(t, response["result"]))
 	assert.Equal(t, []replayed{
@@ -238,6 +242,65 @@ func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
 	}
 	require.Nil(t, again["error"], "re-load of an idle session should succeed")
 	assert.Equal(t, 3, replayCount, "second load replays the full transcript again")
+}
+
+func TestServerLoadSessionWhileActivePromptIsBusy(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &replayFactory{history: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-busy", "cwd": workspace, "mcpServers": []any{}},
+	})
+	var loaded map[string]any
+	for loaded == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "load") {
+			loaded = msg
+		}
+	}
+	require.Nil(t, loaded["error"])
+
+	// Blocking prompt keeps the session active; a load during it must be busy.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": "resumed-busy", "prompt": []any{map[string]any{"type": "text", "text": "go"}}},
+	})
+	for {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok && update["sessionUpdate"] == "tool_call" {
+			break
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "busy-load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-busy", "cwd": workspace, "mcpServers": []any{}},
+	})
+	var busy map[string]any
+	for busy == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "busy-load") {
+			busy = msg
+		}
+	}
+	assert.Equal(t, json.Number("-32000"), object(t, busy["error"])["code"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": "resumed-busy"}})
+	for {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			assert.Equal(t, "cancelled", object(t, msg["result"])["stopReason"])
+			break
+		}
+	}
 }
 
 func TestServerLoadSessionFactoryErrorIsInternal(t *testing.T) {

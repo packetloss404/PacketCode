@@ -754,9 +754,16 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 
 	state.mu.Lock()
 	cancelled := state.cancelled || ctx.Err() != nil
-	state.active = false
 	state.cancel = nil
 	state.mu.Unlock()
+	// active stays set until every trailing update and the prompt response have
+	// been written, so a session/load landing mid-teardown is rejected as busy
+	// instead of interleaving its replay with this prompt's final updates.
+	defer func() {
+		state.mu.Lock()
+		state.active = false
+		state.mu.Unlock()
+	}()
 
 	if cancelled || runErr != nil {
 		for id := range openCalls {

@@ -56,3 +56,31 @@ func TestServerModelCatalogIncludesCLIOverrideAbsentFromConfig(t *testing.T) {
 	}
 	assert.Equal(t, expected, models)
 }
+
+func TestPacketACPFactoryProviderOverrides(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers = map[string]config.ProviderConfig{
+		"ollama": {}, // present but no default_model
+	}
+	factory := &packetACPFactory{
+		cfg: cfg, provider: "anthropic", model: "claude-fable-5",
+		sessionsDir: t.TempDir(), backupsDir: t.TempDir(),
+	}
+
+	// Unknown provider override must surface the errors.Is-matchable sentinel
+	// so the ACP server answers -32602 instead of a generic internal error.
+	_, err := factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD: t.TempDir(), Provider: "definitely-unknown",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, acp.ErrUnknownProvider)
+
+	// A provider override without a model consults that provider's
+	// default_model; when it has none, session creation fails loudly rather
+	// than silently reusing the previous provider's model.
+	_, err = factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD: t.TempDir(), Provider: "ollama",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no model is configured for provider "ollama"`)
+}
