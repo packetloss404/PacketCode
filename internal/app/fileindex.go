@@ -41,6 +41,15 @@ func listProjectFiles(root string) []string {
 	return walkListFiles(root)
 }
 
+// ListProjectFiles is the exported form of listProjectFiles, for callers
+// outside the TUI that need the same @-mention candidate set — notably the
+// ACP _packetcode/project/files extension in cmd/packetcode. One
+// implementation means the desktop client's @ menu and the TUI's agree on
+// which files exist and which are ignored.
+func ListProjectFiles(root string) []string {
+	return listProjectFiles(root)
+}
+
 // gitListFiles shells out to `git ls-files` for the cached + untracked set
 // with .gitignore applied. ok is false when git isn't installed, root isn't
 // a repo, or the command errors/times out, signalling the caller to fall

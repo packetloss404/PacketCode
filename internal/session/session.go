@@ -81,6 +81,7 @@ type Summary struct {
 	UpdatedAt    time.Time
 	Provider     string
 	Model        string
+	WorkingDir   string
 	MessageCount int
 	TokenUsage   TokenUsage
 	Cost         CostInfo
@@ -388,6 +389,7 @@ func (m *Manager) List() ([]Summary, error) {
 			UpdatedAt:    s.UpdatedAt,
 			Provider:     s.Provider,
 			Model:        s.Model,
+			WorkingDir:   s.WorkingDir,
 			MessageCount: len(s.Messages),
 			TokenUsage:   s.TokenUsage,
 			Cost:         s.Cost,

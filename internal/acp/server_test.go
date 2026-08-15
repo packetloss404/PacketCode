@@ -38,7 +38,7 @@ func TestServerNativeAgentPermissionAndEvents(t *testing.T) {
 	result := object(t, initialized["result"])
 	assert.Equal(t, json.Number("1"), result["protocolVersion"])
 	capabilities := object(t, result["agentCapabilities"])
-	assert.Equal(t, false, capabilities["loadSession"])
+	assert.Equal(t, true, capabilities["loadSession"])
 
 	client.send(map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "session/new",
@@ -107,10 +107,999 @@ func TestServerNativeAgentPermissionAndEvents(t *testing.T) {
 
 	client.send(map[string]any{"jsonrpc": "2.0", "id": 5, "method": "session/load", "params": map[string]any{}})
 	load := client.receiveID(5)
-	assert.Equal(t, json.Number("-32601"), object(t, load["error"])["code"])
+	assert.Equal(t, json.Number("-32602"), object(t, load["error"])["code"])
 	client.send(map[string]any{"jsonrpc": "2.0", "id": 6, "method": "packetcode/unknown", "params": map[string]any{}})
 	unknown := client.receiveID(6)
 	assert.Equal(t, json.Number("-32601"), object(t, unknown["error"])["code"])
+}
+
+// replayFactory answers resume requests with canned history so tests can
+// assert the session/load replay wire behavior without a real provider.
+type replayFactory struct {
+	history []provider.Message
+	mu      sync.Mutex
+	lastCfg SessionConfig
+}
+
+func (f *replayFactory) NewSession(_ context.Context, cfg SessionConfig, _ agent.Approver) (*Runtime, error) {
+	f.mu.Lock()
+	f.lastCfg = cfg
+	f.mu.Unlock()
+	if cfg.SessionID == "" {
+		return &Runtime{ID: "fresh-session", Runner: blockingRunner{}}, nil
+	}
+	if cfg.SessionID == "missing-session" {
+		return nil, fmt.Errorf("load session %s: file does not exist", cfg.SessionID)
+	}
+	return &Runtime{ID: cfg.SessionID, Runner: blockingRunner{}, History: f.history}, nil
+}
+
+func (f *replayFactory) lastConfig() SessionConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastCfg
+}
+
+func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &replayFactory{history: []provider.Message{
+		{Role: provider.RoleSystem, Content: "you are packetcode"},
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "checking", ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read_file", Content: "package main"},
+		{Role: provider.RoleAssistant, Content: ""}, // tool-only turn: no text to replay
+		{Role: provider.RoleAssistant, Content: "all done"},
+	}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	assert.Equal(t, true, capabilities["loadSession"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-1", "cwd": workspace, "mcpServers": []any{}},
+	})
+
+	// Every replay update must arrive strictly before the session/load result.
+	type replayed struct{ kind, text string }
+	var got []replayed
+	messageIDs := map[string]bool{}
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok {
+			params := object(t, msg["params"])
+			assert.Equal(t, "resumed-1", params["sessionId"])
+			content := object(t, update["content"])
+			got = append(got, replayed{update["sessionUpdate"].(string), content["text"].(string)})
+			id, _ := update["messageId"].(string)
+			assert.NotEmpty(t, id, "replayed chunks carry a messageId")
+			messageIDs[id] = true
+			continue
+		}
+		if idEqual(msg["id"], "load") {
+			response = msg
+		}
+	}
+	assert.Len(t, messageIDs, 3, "each replayed message gets its own messageId")
+	require.Nil(t, response["error"], "session/load should succeed: %v", response["error"])
+	assert.Equal(t, map[string]any{}, object(t, response["result"]))
+	assert.Equal(t, []replayed{
+		{"user_message_chunk", "hello"},
+		{"agent_message_chunk", "checking"},
+		{"agent_message_chunk", "all done"},
+	}, got, "replay is text turns only, in stored order")
+
+	cfg := factory.lastConfig()
+	assert.Equal(t, "resumed-1", cfg.SessionID)
+	assert.Equal(t, workspace, cfg.CWD)
+
+	// The resumed session is registered: prompting it works.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": "resumed-1", "prompt": []any{map[string]any{"type": "text", "text": "continue"}}},
+	})
+	for {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok && update["sessionUpdate"] == "tool_call" {
+			break
+		}
+	}
+	client.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": "resumed-1"}})
+	for {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			break
+		}
+	}
+
+	// Re-loading an idle session on the same connection replaces its runtime
+	// and replays again — clients switch between sessions and come back.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "again", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-1", "cwd": workspace, "mcpServers": []any{}},
+	})
+	replayCount := 0
+	var again map[string]any
+	for again == nil {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok {
+			kind, _ := update["sessionUpdate"].(string)
+			if kind == "user_message_chunk" || kind == "agent_message_chunk" {
+				replayCount++
+			}
+			continue
+		}
+		if idEqual(msg["id"], "again") {
+			again = msg
+		}
+	}
+	require.Nil(t, again["error"], "re-load of an idle session should succeed")
+	assert.Equal(t, 3, replayCount, "second load replays the full transcript again")
+}
+
+func TestServerLoadSessionWhileActivePromptIsBusy(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &replayFactory{history: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-busy", "cwd": workspace, "mcpServers": []any{}},
+	})
+	var loaded map[string]any
+	for loaded == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "load") {
+			loaded = msg
+		}
+	}
+	require.Nil(t, loaded["error"])
+
+	// Blocking prompt keeps the session active; a load during it must be busy.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": "resumed-busy", "prompt": []any{map[string]any{"type": "text", "text": "go"}}},
+	})
+	for {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok && update["sessionUpdate"] == "tool_call" {
+			break
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "busy-load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-busy", "cwd": workspace, "mcpServers": []any{}},
+	})
+	var busy map[string]any
+	for busy == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "busy-load") {
+			busy = msg
+		}
+	}
+	assert.Equal(t, json.Number("-32000"), object(t, busy["error"])["code"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": "resumed-busy"}})
+	for {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			assert.Equal(t, "cancelled", object(t, msg["result"])["stopReason"])
+			break
+		}
+	}
+}
+
+func TestServerLoadSessionFactoryErrorIsInternal(t *testing.T) {
+	workspace := t.TempDir()
+	client := newTestClient(t, &replayFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/load",
+		"params": map[string]any{"sessionId": "missing-session", "cwd": workspace, "mcpServers": []any{}},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "load PacketCode session")
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/load",
+		"params": map[string]any{"sessionId": "x", "cwd": "relative/path", "mcpServers": []any{}},
+	})
+	badCWD := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, badCWD["error"])["code"])
+}
+
+type staticSessionLister struct {
+	summaries []SessionSummary
+	err       error
+}
+
+func (l *staticSessionLister) ListSessions() ([]SessionSummary, error) {
+	return l.summaries, l.err
+}
+
+func TestServerSessionsListExtension(t *testing.T) {
+	updated := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	lister := &staticSessionLister{summaries: []SessionSummary{{
+		SessionID: "abc-123", Name: "wire acp", UpdatedAt: updated,
+		Provider: "codex", Model: "gpt-5.3", WorkingDir: "/proj/gui",
+		MessageCount: 4, CostUSD: 1.25,
+	}}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionLister(lister) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	sessions, ok := object(t, reply["result"])["sessions"].([]any)
+	require.True(t, ok)
+	require.Len(t, sessions, 1)
+	entry := object(t, sessions[0])
+	assert.Equal(t, "abc-123", entry["sessionId"])
+	assert.Equal(t, "wire acp", entry["name"])
+	assert.Equal(t, "codex", entry["provider"])
+	assert.Equal(t, "/proj/gui", entry["workingDir"])
+	assert.Equal(t, json.Number("4"), entry["messageCount"])
+}
+
+func TestServerSessionsListWithoutListerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+type recordingSessionRenamer struct {
+	mu    sync.Mutex
+	calls [][2]string
+	err   error
+}
+
+func (r *recordingSessionRenamer) RenameSession(id, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, [2]string{id, name})
+	return r.err
+}
+
+func (r *recordingSessionRenamer) recorded() [][2]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([][2]string(nil), r.calls...)
+}
+
+func TestServerSessionsRenameExtension(t *testing.T) {
+	renamer := &recordingSessionRenamer{}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsRename"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "wire acp titles"},
+	})
+	reply := client.receiveID(2)
+	require.Nil(t, reply["error"], "rename should succeed: %v", reply["error"])
+	assert.Equal(t, [][2]string{{"abc-123", "wire acp titles"}}, renamer.recorded())
+}
+
+func TestServerSessionsRenameValidation(t *testing.T) {
+	renamer := &recordingSessionRenamer{}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	// Empty name: invalid params, and the renamer is never invoked.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "   "},
+	})
+	emptyName := client.receiveID(2)
+	assert.Equal(t, json.Number("-32602"), object(t, emptyName["error"])["code"])
+
+	// Empty session id: invalid params as well.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "", "name": "titled"},
+	})
+	emptyID := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, emptyID["error"])["code"])
+	assert.Empty(t, renamer.recorded())
+}
+
+func TestServerSessionsRenameUnknownSessionIsInternal(t *testing.T) {
+	renamer := &recordingSessionRenamer{err: fmt.Errorf("load session: file does not exist")}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionRenamer(renamer) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "missing", "name": "titled"},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "rename session")
+	assert.Contains(t, errObj["message"], "file does not exist")
+}
+
+func TestServerSessionsRenameWithoutRenamerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsRename"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/rename",
+		"params": map[string]any{"sessionId": "abc-123", "name": "titled"},
+	})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+type staticUsageReader struct {
+	usage SessionUsage
+	err   error
+
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *staticUsageReader) ReadUsage(sessionID string) (SessionUsage, error) {
+	r.mu.Lock()
+	r.seen = append(r.seen, sessionID)
+	r.mu.Unlock()
+	if r.err != nil {
+		return SessionUsage{}, r.err
+	}
+	return r.usage, nil
+}
+
+func (r *staticUsageReader) sessions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.seen...)
+}
+
+func TestServerSessionsUsageExtension(t *testing.T) {
+	reader := &staticUsageReader{usage: SessionUsage{
+		ContextTokens: 41234, TotalInput: 82000, TotalOutput: 12000, CostUSD: 1.84,
+	}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsUsage"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "abc-123"},
+	})
+	reply := client.receiveID(2)
+	usage := object(t, reply["result"])
+	assert.Equal(t, json.Number("41234"), usage["contextTokens"])
+	assert.Equal(t, json.Number("82000"), usage["totalInput"])
+	assert.Equal(t, json.Number("12000"), usage["totalOutput"])
+	assert.Equal(t, json.Number("1.84"), usage["costUsd"])
+	assert.Equal(t, []string{"abc-123"}, reader.sessions())
+
+	// Missing or blank sessionId is invalid-params, and never hits the reader.
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": "_packetcode/sessions/usage", "params": map[string]any{}})
+	missing := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, missing["error"])["code"])
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "   "},
+	})
+	blank := client.receiveID(4)
+	assert.Equal(t, json.Number("-32602"), object(t, blank["error"])["code"])
+	assert.Equal(t, []string{"abc-123"}, reader.sessions())
+}
+
+func TestServerSessionsUsageReaderErrorIsInternal(t *testing.T) {
+	reader := &staticUsageReader{err: fmt.Errorf("load session: file does not exist")}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "gone"},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "read session usage")
+}
+
+func TestServerSessionsUsageWithoutReaderIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsUsage"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "abc-123"},
+	})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+func TestServerPromptResultCarriesUsage(t *testing.T) {
+	workspace := t.TempDir()
+	reader := &staticUsageReader{usage: SessionUsage{
+		ContextTokens: 500, TotalInput: 900, TotalOutput: 100, CostUSD: 0.25,
+	}}
+	factory := &nativeTestFactory{dir: t.TempDir(), provider: &scriptedProvider{}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "new", "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	sessionID := object(t, client.receiveID("new")["result"])["sessionId"].(string)
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": sessionID, "prompt": []any{map[string]any{"type": "text", "text": "Run the test tool"}}},
+	})
+	var permission map[string]any
+	for permission == nil {
+		msg := client.receive()
+		if msg["method"] == "session/request_permission" {
+			permission = msg
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": permission["id"],
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow_once"}},
+	})
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			response = msg
+		}
+	}
+	result := object(t, response["result"])
+	assert.Equal(t, "end_turn", result["stopReason"])
+	usage := object(t, object(t, result["_packetcode"])["usage"])
+	assert.Equal(t, json.Number("500"), usage["contextTokens"])
+	assert.Equal(t, json.Number("900"), usage["totalInput"])
+	assert.Equal(t, json.Number("100"), usage["totalOutput"])
+	assert.Equal(t, json.Number("0.25"), usage["costUsd"])
+	assert.Equal(t, []string{sessionID}, reader.sessions(), "usage is read for the prompted session")
+}
+
+func TestServerPromptResultUsageReadFailureDegradesToBareResult(t *testing.T) {
+	workspace := t.TempDir()
+	reader := &staticUsageReader{err: fmt.Errorf("disk unhappy")}
+	factory := &nativeTestFactory{dir: t.TempDir(), provider: &scriptedProvider{}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "new", "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	sessionID := object(t, client.receiveID("new")["result"])["sessionId"].(string)
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": sessionID, "prompt": []any{map[string]any{"type": "text", "text": "Run the test tool"}}},
+	})
+	var permission map[string]any
+	for permission == nil {
+		msg := client.receive()
+		if msg["method"] == "session/request_permission" {
+			permission = msg
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": permission["id"],
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow_once"}},
+	})
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			response = msg
+		}
+	}
+	result := object(t, response["result"])
+	assert.Equal(t, "end_turn", result["stopReason"])
+	_, present := result["_packetcode"]
+	assert.False(t, present, "a failed usage read must not attach a partial extension object")
+}
+
+type staticModelCatalog struct {
+	models []ModelOption
+	err    error
+}
+
+func (c *staticModelCatalog) ListModels() ([]ModelOption, error) {
+	return c.models, c.err
+}
+
+func TestServerModelsListExtension(t *testing.T) {
+	catalog := &staticModelCatalog{models: []ModelOption{
+		{Provider: "codex", Model: "gpt-5.3", Default: true},
+		{Provider: "anthropic", Model: "claude-fable-5"},
+	}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetModelCatalog(catalog) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["modelsList"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/models/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	models, ok := object(t, reply["result"])["models"].([]any)
+	require.True(t, ok)
+	require.Len(t, models, 2)
+	first := object(t, models[0])
+	assert.Equal(t, "codex", first["provider"])
+	assert.Equal(t, "gpt-5.3", first["model"])
+	assert.Equal(t, true, first["default"])
+	second := object(t, models[1])
+	assert.Equal(t, "anthropic", second["provider"])
+	assert.Equal(t, "claude-fable-5", second["model"])
+	assert.Equal(t, false, second["default"])
+}
+
+func TestServerModelsListWithoutCatalogIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["modelsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/models/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+type staticMCPLister struct {
+	servers []MCPServerStatus
+	err     error
+}
+
+func (l *staticMCPLister) ListMCPServers() ([]MCPServerStatus, error) {
+	return l.servers, l.err
+}
+
+func TestServerMCPListExtension(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{mcpStatuses: []MCPServerStatus{
+		{Name: "github", Status: "running", ToolCount: 7, Source: "agent"},
+		{Name: "broken", Status: "failed", Source: "agent", Error: "exec: not found"},
+	}}
+	lister := &staticMCPLister{servers: []MCPServerStatus{
+		{Name: "broken", Status: "configured", Source: "agent"},
+		{Name: "github", Status: "configured", Source: "agent"},
+	}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetMCPLister(lister) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	extension := object(t, object(t, object(t, initialized["result"])["agentCapabilities"])["_packetcode"])
+	assert.Equal(t, true, extension["mcpList"])
+	// The absent-vs-empty wire promise is unconditional on this agent.
+	assert.Equal(t, true, extension["mcpDefaults"])
+
+	// Without a sessionId: the agent's configured servers.
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/mcp/list", "params": map[string]any{}})
+	configured, ok := object(t, client.receiveID(2)["result"])["servers"].([]any)
+	require.True(t, ok)
+	require.Len(t, configured, 2)
+	assert.Equal(t, "broken", object(t, configured[0])["name"])
+	assert.Equal(t, "configured", object(t, configured[0])["status"])
+
+	// With a sessionId: that live session's fleet, including tool counts and
+	// the failure a config-only view cannot know about.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{"cwd": workspace},
+	})
+	sessionID := object(t, client.receiveID(3)["result"])["sessionId"]
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "_packetcode/mcp/list",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	live, ok := object(t, client.receiveID(4)["result"])["servers"].([]any)
+	require.True(t, ok)
+	require.Len(t, live, 2)
+	running := object(t, live[0])
+	assert.Equal(t, "github", running["name"])
+	assert.Equal(t, "running", running["status"])
+	assert.Equal(t, json.Number("7"), running["toolCount"])
+	assert.Equal(t, "agent", running["source"])
+	assert.Equal(t, "failed", object(t, live[1])["status"])
+	assert.Equal(t, "exec: not found", object(t, live[1])["error"])
+
+	// An unknown sessionId is a client mistake, not an empty fleet.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 5, "method": "_packetcode/mcp/list",
+		"params": map[string]any{"sessionId": "no-such-session"},
+	})
+	assert.Equal(t, json.Number("-32602"), object(t, client.receiveID(5)["error"])["code"])
+}
+
+func TestServerMCPListWithoutListerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	extension := object(t, object(t, object(t, initialized["result"])["agentCapabilities"])["_packetcode"])
+	assert.Equal(t, false, extension["mcpList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/mcp/list", "params": map[string]any{}})
+	assert.Equal(t, json.Number("-32601"), object(t, client.receiveID(2)["error"])["code"])
+}
+
+// TestServerNewSessionMCPServersAbsentEmptyExplicit pins the three-way wire
+// contract the factory's defaults fallback depends on: an omitted mcpServers
+// field, an explicit [], and a populated list must reach the factory as three
+// distinguishable SessionConfigs.
+func TestServerNewSessionMCPServersAbsentEmptyExplicit(t *testing.T) {
+	workspace := t.TempDir()
+	command := filepath.Join(workspace, "mcp-server")
+	factory := &recordingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	// Absent: the client has no opinion; the factory falls back to the agent's
+	// configured servers.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(1)["result"])["sessionId"])
+
+	// Explicit empty: the client owns the fleet and wants none.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(2)["result"])["sessionId"])
+
+	// Populated: exactly these.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{
+			map[string]any{
+				"type": "stdio", "name": "fs", "command": command,
+				"args": []any{"--root", workspace},
+				"env":  []any{map[string]any{"name": "TOKEN", "value": "t"}},
+			},
+		}},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(3)["result"])["sessionId"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 3)
+	assert.False(t, configs[0].MCPServersSet, "absent mcpServers must not read as an explicit choice")
+	assert.Empty(t, configs[0].MCPServers)
+	assert.True(t, configs[1].MCPServersSet, "an explicit [] must read as an explicit choice")
+	assert.Empty(t, configs[1].MCPServers)
+	assert.True(t, configs[2].MCPServersSet)
+	require.Len(t, configs[2].MCPServers, 1)
+	assert.Equal(t, "fs", configs[2].MCPServers[0].Name)
+	assert.Equal(t, filepath.Clean(command), configs[2].MCPServers[0].Command)
+	assert.Equal(t, []string{"--root", workspace}, configs[2].MCPServers[0].Args)
+	assert.Equal(t, map[string]string{"TOKEN": "t"}, configs[2].MCPServers[0].Env)
+}
+
+// session/load carries the same contract: a resumed session must be able to
+// inherit the agent's MCP configuration rather than silently losing it.
+func TestServerLoadSessionMCPServersAbsentEmptyExplicit(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-absent", "cwd": workspace},
+	})
+	require.Nil(t, client.receiveID(1)["error"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-empty", "cwd": workspace, "mcpServers": []any{}},
+	})
+	require.Nil(t, client.receiveID(2)["error"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 2)
+	assert.False(t, configs[0].MCPServersSet)
+	assert.True(t, configs[1].MCPServersSet)
+}
+
+// recordingFactory captures the SessionConfig session/new hands to the
+// factory and rejects providers and permission modes outside its allow-lists
+// the way the production factory does.
+type recordingFactory struct {
+	knownProviders []string
+	// mcpStatuses is stamped onto every Runtime this factory returns, standing
+	// in for the live fleet the production factory reports.
+	mcpStatuses []MCPServerStatus
+
+	mu      sync.Mutex
+	configs []SessionConfig
+}
+
+func (f *recordingFactory) NewSession(_ context.Context, cfg SessionConfig, _ agent.Approver) (*Runtime, error) {
+	if cfg.Provider != "" {
+		known := false
+		for _, slug := range f.knownProviders {
+			if slug == cfg.Provider {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("%w %q", ErrUnknownProvider, cfg.Provider)
+		}
+	}
+	if cfg.PermissionMode != "" {
+		known := false
+		for _, mode := range PermissionModes {
+			if mode == cfg.PermissionMode {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("%w %q", ErrUnknownPermissionMode, cfg.PermissionMode)
+		}
+	}
+	f.mu.Lock()
+	f.configs = append(f.configs, cfg)
+	id := fmt.Sprintf("recorded-session-%d", len(f.configs))
+	f.mu.Unlock()
+	if cfg.SessionID != "" {
+		id = cfg.SessionID
+	}
+	return &Runtime{ID: id, Runner: blockingRunner{}, MCPServers: f.mcpStatuses}, nil
+}
+
+func (f *recordingFactory) recorded() []SessionConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]SessionConfig(nil), f.configs...)
+}
+
+func TestServerNewSessionPacketcodeOverride(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{knownProviders: []string{"anthropic", "ollama"}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	// No override: the factory sees empty Provider/Model.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	plain := client.receiveID(1)
+	require.NotEmpty(t, object(t, plain["result"])["sessionId"])
+
+	// Override: provider and model reach the factory verbatim.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "anthropic", "model": "claude-fable-5"},
+		},
+	})
+	overridden := client.receiveID(2)
+	require.NotEmpty(t, object(t, overridden["result"])["sessionId"])
+
+	// Unknown provider: invalid-params, and the factory records no session.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "nonexistent", "model": "whatever"},
+		},
+	})
+	rejected := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, rejected["error"])["code"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 2)
+	assert.Equal(t, "", configs[0].Provider)
+	assert.Equal(t, "", configs[0].Model)
+	assert.Equal(t, "anthropic", configs[1].Provider)
+	assert.Equal(t, "claude-fable-5", configs[1].Model)
+}
+
+func TestServerNewSessionPermissionModeOverride(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{knownProviders: []string{"anthropic"}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	initialized := client.receiveID("init")
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	advertised, ok := extension["permissionModes"].([]any)
+	require.True(t, ok, "initialize must advertise _packetcode.permissionModes")
+	modes := make([]string, 0, len(advertised))
+	for _, mode := range advertised {
+		modes = append(modes, mode.(string))
+	}
+	assert.Equal(t, []string{"ask", "accept-edits", "auto", "read-only", "bypass"}, modes)
+
+	// No override: the factory sees an empty PermissionMode.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	plain := client.receiveID(1)
+	require.NotEmpty(t, object(t, plain["result"])["sessionId"])
+
+	// Override: the mode reaches the factory verbatim, alone or alongside a
+	// provider/model override.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"permissionMode": "accept-edits"},
+		},
+	})
+	overridden := client.receiveID(2)
+	require.NotEmpty(t, object(t, overridden["result"])["sessionId"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "anthropic", "model": "claude-fable-5", "permissionMode": "bypass"},
+		},
+	})
+	combined := client.receiveID(3)
+	require.NotEmpty(t, object(t, combined["result"])["sessionId"])
+
+	// Unknown mode: invalid-params, and the factory records no session.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"permissionMode": "yolo"},
+		},
+	})
+	rejected := client.receiveID(4)
+	assert.Equal(t, json.Number("-32602"), object(t, rejected["error"])["code"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 3)
+	assert.Equal(t, "", configs[0].PermissionMode)
+	assert.Equal(t, "accept-edits", configs[1].PermissionMode)
+	assert.Equal(t, "bypass", configs[2].PermissionMode)
+	assert.Equal(t, "anthropic", configs[2].Provider)
+	assert.Equal(t, "claude-fable-5", configs[2].Model)
 }
 
 func TestServerCancelReturnsTerminalCancelledAndFailsOpenTool(t *testing.T) {
@@ -323,10 +1312,18 @@ type testClient struct {
 
 func newTestClient(t *testing.T, factory SessionFactory) *testClient {
 	t.Helper()
+	return newTestClientConfigured(t, factory, nil)
+}
+
+func newTestClientConfigured(t *testing.T, factory SessionFactory, configure func(*Server)) *testClient {
+	t.Helper()
 	serverIn, clientIn := io.Pipe()
 	clientOut, serverOut := io.Pipe()
 	client := &testClient{t: t, in: clientIn, lines: make(chan map[string]any, 32), errors: make(chan error, 1), done: make(chan error, 1)}
 	server := NewServer(serverIn, serverOut, io.Discard, factory, "test")
+	if configure != nil {
+		configure(server)
+	}
 	go func() {
 		client.done <- server.Serve(context.Background())
 		_ = serverOut.Close()

@@ -173,6 +173,33 @@ PacketCode itself after changing `config.toml`.
 
 ---
 
+## MCP in ACP sessions (`packetcode acp`)
+
+Under the Agent Client Protocol the *client* nominally owns a session's MCP
+fleet: `session/new` and `session/load` carry an `mcpServers` array. PacketCode
+reads that field three ways, so a desktop client does not have to re-declare
+what is already in your `config.toml`:
+
+| `mcpServers` in the request | Session runs with |
+| --- | --- |
+| omitted entirely | your `[mcp.<name>]` blocks — the same fleet the TUI starts |
+| `[]` | nothing; the client explicitly asked for no MCP servers |
+| `[{...}]` | exactly the client's list; your config is not merged in |
+
+Startup failures follow the same split. A server the *client* named fails the
+session — it asked for that server by name. A server from *your config* is
+logged to stderr and skipped, exactly as in the TUI, so one bad `[mcp.<name>]`
+block cannot make every desktop session uncreatable.
+
+Clients can read the fleet back with the `_packetcode/mcp/list` extension:
+with no parameters it returns the configured servers, with `{"sessionId": ...}`
+it returns that live session's servers and their `running`/`failed`/`disabled`
+status and tool counts. Agents that support the omission advertise
+`agentCapabilities._packetcode.mcpDefaults: true` in their `initialize`
+response; clients talking to an older agent must keep sending `[]`.
+
+---
+
 ## Known limits
 
 - **No hot-reload.** Add or change a `[mcp.<name>]` block and you need

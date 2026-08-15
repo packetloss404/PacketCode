@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -39,11 +40,59 @@ type MCPServer struct {
 }
 
 // SessionConfig contains the workspace-scoped inputs needed to build a native
-// PacketCode agent session.
+// PacketCode agent session. Provider, Model, and PermissionMode are optional
+// per-session overrides from the session/new "_packetcode" params object;
+// empty values mean "use the configured defaults".
 type SessionConfig struct {
-	CWD        string
+	CWD string
+	// MCPServers is the client-supplied stdio MCP server list. It is only
+	// meaningful together with MCPServersSet.
 	MCPServers []MCPServer
+	// MCPServersSet reports whether the request carried an "mcpServers" field
+	// at all, which the factory needs to tell two very different intents apart:
+	//
+	//   absent      (false)          -> the client has no opinion; the factory
+	//                                  should run the agent's own configured
+	//                                  MCP servers, matching the TUI.
+	//   []          (true, len 0)    -> the client explicitly wants no MCP
+	//                                  servers at all. ACP's contract: the
+	//                                  client owns the session's MCP fleet.
+	//   [a, b, ...] (true, len > 0)  -> exactly these, nothing else.
+	//
+	// The wire decode uses *[]wireMCPServer precisely so absent and [] stay
+	// distinguishable; collapsing them would make it impossible for a desktop
+	// client to opt into the agent's configuration without hard-coding it.
+	MCPServersSet bool
+	// SessionID selects the resume path: when non-empty the factory must load
+	// the persisted session with this ID (session/load) instead of creating a
+	// new one, and populate Runtime.History with its transcript for replay.
+	SessionID string
+	Provider  string
+	Model     string
+	// PermissionMode selects the permission profile the session's policy is
+	// built from. One of PermissionModes; empty keeps the server-wide policy.
+	PermissionMode string
 }
+
+// PermissionModes is the wire vocabulary for the session/new "_packetcode"
+// permissionMode override, advertised verbatim in the initialize
+// agentCapabilities under _packetcode.permissionModes.
+var PermissionModes = []string{"ask", "accept-edits", "auto", "read-only", "bypass"}
+
+// ErrUnknownProvider marks a session/new provider override the factory does
+// not recognize. Factories wrap it (errors.Is-compatible) so the server can
+// answer invalid-params instead of a generic internal error.
+var ErrUnknownProvider = errors.New("unknown provider")
+
+// ErrUnknownPermissionMode marks a session/new permissionMode override the
+// factory does not recognize. Factories wrap it (errors.Is-compatible) so the
+// server can answer invalid-params instead of a generic internal error.
+var ErrUnknownPermissionMode = errors.New("unknown permission mode")
+
+// ErrPermissionModeDenied marks a session/new permissionMode override that is
+// more permissive than the server allows. Clients must not be able to
+// escalate past the profile the operator started the server with.
+var ErrPermissionModeDenied = errors.New("permission mode not allowed")
 
 // Runner is PacketCode's terminal-independent agent event source.
 type Runner interface {
@@ -55,6 +104,15 @@ type Runtime struct {
 	ID     string
 	Runner Runner
 	Close  func() error
+	// MCPServers is the live per-session MCP fleet, as resolved and started by
+	// the factory. Served by _packetcode/mcp/list when the client passes this
+	// session's ID. Nil when the factory does not report it.
+	MCPServers []MCPServerStatus
+	// History is the persisted transcript of a resumed session, in order.
+	// Only factories answering a SessionConfig.SessionID resume request set
+	// it; the server replays user/assistant text turns to the client before
+	// answering session/load. Nil for fresh sessions.
+	History []provider.Message
 }
 
 // SessionFactory lets the protocol package remain independent of provider and
@@ -64,6 +122,143 @@ type SessionFactory interface {
 	NewSession(context.Context, SessionConfig, agent.Approver) (*Runtime, error)
 }
 
+// SessionSummary is the wire projection served by the _packetcode/sessions/list
+// extension method. Fields are additive; clients must tolerate new ones.
+type SessionSummary struct {
+	SessionID    string    `json:"sessionId"`
+	Name         string    `json:"name"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	WorkingDir   string    `json:"workingDir,omitempty"`
+	MessageCount int       `json:"messageCount"`
+	CostUSD      float64   `json:"costUsd"`
+}
+
+// SessionLister supplies persisted session history for the
+// _packetcode/sessions/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers.
+type SessionLister interface {
+	ListSessions() ([]SessionSummary, error)
+}
+
+// SessionRenamer updates a persisted session's display name for the
+// _packetcode/sessions/rename extension. Optional: when unset the method
+// answers method-not-found, matching older servers. Implementations receive
+// the raw client-supplied name and may normalize it before persisting.
+type SessionRenamer interface {
+	RenameSession(id, name string) error
+}
+
+// SessionUsage is the wire projection served by the
+// _packetcode/sessions/usage extension method and attached to successful
+// session/prompt results under "_packetcode".usage. Fields are additive;
+// clients must tolerate new ones.
+type SessionUsage struct {
+	// ContextTokens is the live context-window occupancy after the most
+	// recent turn (prompt + completion), not a cumulative total.
+	ContextTokens int `json:"contextTokens"`
+	// TotalInput and TotalOutput are cumulative across the whole session.
+	TotalInput  int     `json:"totalInput"`
+	TotalOutput int     `json:"totalOutput"`
+	CostUSD     float64 `json:"costUsd"`
+}
+
+// UsageReader supplies per-session token/cost usage for the
+// _packetcode/sessions/usage extension and for prompt-result enrichment.
+// Optional: when unset the method answers method-not-found and prompt
+// results stay bare, matching older servers.
+type UsageReader interface {
+	ReadUsage(sessionID string) (SessionUsage, error)
+}
+
+// ModelOption is one selectable provider/model pair served by the
+// _packetcode/models/list extension. Default marks the pair a new session
+// uses when session/new carries no "_packetcode" override.
+type ModelOption struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Default  bool   `json:"default"`
+}
+
+// ModelCatalog supplies the configured provider/model choices for the
+// _packetcode/models/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers.
+type ModelCatalog interface {
+	ListModels() ([]ModelOption, error)
+}
+
+// MCPServerStatus is one MCP server as reported by the _packetcode/mcp/list
+// extension. Fields are additive; clients must tolerate new ones.
+type MCPServerStatus struct {
+	Name string `json:"name"`
+	// Status is "running", "failed", "disabled", or "configured" (known from
+	// configuration but not started in the queried scope).
+	Status    string `json:"status"`
+	ToolCount int    `json:"toolCount"`
+	// Source is "agent" for servers taken from the agent's own configuration
+	// and "client" for servers the ACP client supplied in session/new.
+	Source  string `json:"source,omitempty"`
+	Command string `json:"command,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// MCPLister supplies the agent's configured MCP servers for the
+// _packetcode/mcp/list extension. Optional: when unset the method answers
+// method-not-found, matching older servers. Per-session live status comes
+// from Runtime.MCPServers instead; this reports the static configuration a
+// session created without a client-supplied list would inherit.
+type MCPLister interface {
+	ListMCPServers() ([]MCPServerStatus, error)
+}
+
+// CommandInfo is the wire projection served by the _packetcode/commands/list
+// extension method. Fields are additive; clients must tolerate new ones.
+type CommandInfo struct {
+	// Name is the bare command word without the leading slash.
+	Name string `json:"name"`
+	// Description is one line of help text for a completion menu.
+	Description string `json:"description"`
+	// Source is "builtin", "user", or "project" — where the command came
+	// from, so clients can group or badge the menu.
+	Source string `json:"source"`
+	// ArgumentHint is a short usage tail such as "[arguments]", shown after
+	// the name in a menu. Empty for commands that take no arguments.
+	ArgumentHint string `json:"argumentHint,omitempty"`
+	// Body is the prompt text the command expands to. Server-side only —
+	// json:"-" keeps it off the wire. The server uses it to expand a leading
+	// "/name" in session/prompt text so a client that inserts the completion
+	// gets the command's real prompt instead of the literal token.
+	Body string `json:"-"`
+}
+
+// CommandCatalog supplies invocable slash commands for the
+// _packetcode/commands/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers. cwd scopes project-local
+// command discovery; implementations may return only user-scoped commands
+// when it is empty.
+type CommandCatalog interface {
+	ListCommands(cwd string) ([]CommandInfo, error)
+}
+
+// ProjectFileIndex answers @-mention file searches for the
+// _packetcode/project/files extension. Optional: when unset the method
+// answers method-not-found, matching older servers. Results are
+// project-relative, slash-separated paths ordered best-match first, and
+// implementations must honour limit.
+type ProjectFileIndex interface {
+	SearchFiles(cwd, query string, limit int) ([]string, error)
+}
+
+const (
+	// defaultProjectFilesLimit caps a _packetcode/project/files response when
+	// the client sends no limit; it matches a comfortable menu length.
+	defaultProjectFilesLimit = 20
+	// maxProjectFilesLimit is the hard ceiling, so a client cannot ask the
+	// server to serialize a whole monorepo into one reply.
+	maxProjectFilesLimit = 200
+)
+
 // Server is a single ACP stdio connection. It is safe for prompt workers and
 // permission responses to use concurrently.
 type Server struct {
@@ -72,6 +267,21 @@ type Server struct {
 	log     io.Writer
 	factory SessionFactory
 	version string
+	lister  SessionLister
+	renamer SessionRenamer
+	catalog ModelCatalog
+	usage   UsageReader
+	mcp     MCPLister
+	// commands gates _packetcode/commands/list and slash expansion in
+	// session/prompt; files gates _packetcode/project/files.
+	commands CommandCatalog
+	files    ProjectFileIndex
+	// permissionModes, when non-nil, replaces the advertised PermissionModes.
+	permissionModes []string
+	// defaultPermissionMode is the mode a session/new without an override
+	// actually runs under. Advertised so clients can label their control
+	// honestly instead of guessing "ask".
+	defaultPermissionMode string
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -136,6 +346,66 @@ func NewServer(in io.Reader, out, logWriter io.Writer, factory SessionFactory, v
 	}
 }
 
+// SetSessionLister enables the _packetcode/sessions/list extension. Must be
+// called before Serve; a nil lister leaves the method unregistered.
+func (s *Server) SetSessionLister(l SessionLister) {
+	s.lister = l
+}
+
+// SetSessionRenamer enables the _packetcode/sessions/rename extension. Must
+// be called before Serve; a nil renamer leaves the method unregistered.
+func (s *Server) SetSessionRenamer(r SessionRenamer) {
+	s.renamer = r
+}
+
+// SetModelCatalog enables the _packetcode/models/list extension. Must be
+// called before Serve; a nil catalog leaves the method unregistered.
+func (s *Server) SetModelCatalog(c ModelCatalog) {
+	s.catalog = c
+}
+
+// SetMCPLister enables the _packetcode/mcp/list extension. Must be called
+// before Serve; a nil lister leaves the method unregistered.
+func (s *Server) SetMCPLister(l MCPLister) {
+	s.mcp = l
+}
+
+// SetUsageReader enables the _packetcode/sessions/usage extension and
+// prompt-result usage enrichment. Must be called before Serve; a nil reader
+// leaves the method unregistered.
+func (s *Server) SetUsageReader(r UsageReader) {
+	s.usage = r
+}
+
+// SetCommandCatalog enables the _packetcode/commands/list extension and, with
+// it, server-side expansion of a leading "/name" in session/prompt text. Must
+// be called before Serve; a nil catalog leaves the method unregistered and
+// prompt text untouched.
+func (s *Server) SetCommandCatalog(c CommandCatalog) {
+	s.commands = c
+}
+
+// SetProjectFileIndex enables the _packetcode/project/files extension. Must be
+// called before Serve; a nil index leaves the method unregistered.
+func (s *Server) SetProjectFileIndex(f ProjectFileIndex) {
+	s.files = f
+}
+
+// SetPermissionModes overrides the permission modes advertised in initialize.
+// Operators cap this to their startup profile so clients cannot be offered an
+// escalation the factory would reject. Must be called before Serve; nil keeps
+// the full PermissionModes vocabulary.
+func (s *Server) SetPermissionModes(modes []string) {
+	s.permissionModes = modes
+}
+
+// SetDefaultPermissionMode advertises the mode sessions run under when
+// session/new carries no override. Must be called before Serve; empty leaves
+// the key absent, which clients read as "unknown".
+func (s *Server) SetDefaultPermissionMode(mode string) {
+	s.defaultPermissionMode = mode
+}
+
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
 func (s *Server) Serve(ctx context.Context) error {
 	s.ctx = ctx
@@ -194,13 +464,25 @@ func (s *Server) handleRequest(msg rpcMessage) {
 	case "session/new":
 		s.handleNewSession(msg)
 	case "session/load":
-		// loadSession is deliberately advertised as false. PacketCode persists
-		// transcripts, but ACP load also requires replaying the complete history.
-		s.replyError(msg, codeMethodNotFound, "session/load is not supported", nil)
+		s.handleLoadSession(msg)
 	case "session/prompt":
 		s.handlePrompt(msg)
 	case "session/cancel":
 		s.handleCancel(msg)
+	case "_packetcode/sessions/list":
+		s.handleSessionsList(msg)
+	case "_packetcode/sessions/rename":
+		s.handleSessionsRename(msg)
+	case "_packetcode/sessions/usage":
+		s.handleSessionsUsage(msg)
+	case "_packetcode/models/list":
+		s.handleModelsList(msg)
+	case "_packetcode/mcp/list":
+		s.handleMCPList(msg)
+	case "_packetcode/commands/list":
+		s.handleCommandsList(msg)
+	case "_packetcode/project/files":
+		s.handleProjectFiles(msg)
 	default:
 		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 	}
@@ -232,16 +514,321 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 	s.sendResult(msg.ID, map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"agentCapabilities": map[string]any{
-			"loadSession": false,
+			"loadSession": true,
 			"promptCapabilities": map[string]bool{
 				"image": false, "audio": false, "embeddedContext": false,
 			},
 			"mcpCapabilities":     map[string]bool{"http": false, "sse": false},
 			"sessionCapabilities": map[string]any{},
+			// Vendor extension surface; underscore-prefixed so spec-only
+			// clients skip it. sessionsList gates _packetcode/sessions/list;
+			// sessionsRename gates _packetcode/sessions/rename; modelsList
+			// gates _packetcode/models/list; mcpList gates
+			// _packetcode/mcp/list.
+			//
+			// mcpDefaults is a wire-behaviour promise, not a feature toggle:
+			// this agent accepts session/new and session/load WITHOUT an
+			// "mcpServers" field and reads the omission as "use the agent's own
+			// configured MCP servers". Older agents reject the omission with
+			// invalid-params, so clients must send [] unless they see this flag.
+			"_packetcode": map[string]any{
+				"sessionsList":          s.lister != nil,
+				"sessionsRename":        s.renamer != nil,
+				"sessionsUsage":         s.usage != nil,
+				"modelsList":            s.catalog != nil,
+				"mcpList":               s.mcp != nil,
+				"mcpDefaults":           true,
+				"commandsList":          s.commands != nil,
+				"projectFiles":          s.files != nil,
+				"permissionModes":       s.advertisedPermissionModes(),
+				"defaultPermissionMode": s.defaultPermissionMode,
+			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
 		"authMethods": []any{},
 	})
+}
+
+func (s *Server) advertisedPermissionModes() []string {
+	if s.permissionModes != nil {
+		return s.permissionModes
+	}
+	return PermissionModes
+}
+
+func (s *Server) handleSessionsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/list notification; a request ID is required")
+		return
+	}
+	if s.lister == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	summaries, err := s.lister.ListSessions()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list sessions: %v", err), nil)
+		return
+	}
+	if summaries == nil {
+		summaries = []SessionSummary{}
+	}
+	s.sendResult(msg.ID, map[string]any{"sessions": summaries})
+}
+
+func (s *Server) handleSessionsRename(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/rename notification; a request ID is required")
+		return
+	}
+	if s.renamer == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+		Name      string `json:"name"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/sessions/rename parameters", nil)
+		return
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	if strings.TrimSpace(params.Name) == "" {
+		s.replyError(msg, codeInvalidParams, "name is required", nil)
+		return
+	}
+	if err := s.renamer.RenameSession(params.SessionID, params.Name); err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("rename session: %v", err), nil)
+		return
+	}
+	s.sendResult(msg.ID, map[string]any{})
+}
+
+func (s *Server) handleSessionsUsage(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/usage notification; a request ID is required")
+		return
+	}
+	if s.usage == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil || strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	usage, err := s.usage.ReadUsage(params.SessionID)
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("read session usage: %v", err), nil)
+		return
+	}
+	s.sendResult(msg.ID, usage)
+}
+
+func (s *Server) handleModelsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/models/list notification; a request ID is required")
+		return
+	}
+	if s.catalog == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	models, err := s.catalog.ListModels()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list models: %v", err), nil)
+		return
+	}
+	if models == nil {
+		models = []ModelOption{}
+	}
+	s.sendResult(msg.ID, map[string]any{"models": models})
+}
+
+// handleMCPList answers _packetcode/mcp/list. With a sessionId it reports that
+// live session's MCP fleet (what actually started, with tool counts); without
+// one it reports the agent's configured servers, which is what a session
+// created without a client-supplied mcpServers list would inherit.
+func (s *Server) handleMCPList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/mcp/list notification; a request ID is required")
+		return
+	}
+	if s.mcp == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/mcp/list parameters", nil)
+		return
+	}
+	if id := strings.TrimSpace(params.SessionID); id != "" {
+		s.stateMu.Lock()
+		state := s.sessions[id]
+		s.stateMu.Unlock()
+		if state == nil {
+			s.replyError(msg, codeInvalidParams, fmt.Sprintf("unknown session %q", id), nil)
+			return
+		}
+		servers := state.runtime.MCPServers
+		if servers == nil {
+			servers = []MCPServerStatus{}
+		}
+		s.sendResult(msg.ID, map[string]any{"servers": servers})
+		return
+	}
+	servers, err := s.mcp.ListMCPServers()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list MCP servers: %v", err), nil)
+		return
+	}
+	if servers == nil {
+		servers = []MCPServerStatus{}
+	}
+	s.sendResult(msg.ID, map[string]any{"servers": servers})
+}
+
+func (s *Server) handleCommandsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/commands/list notification; a request ID is required")
+		return
+	}
+	if s.commands == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		CWD string `json:"cwd"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/commands/list parameters", nil)
+		return
+	}
+	// An absent cwd is legal: it simply scopes the answer to user-level
+	// commands, since project commands live under <cwd>/.packetcode/commands.
+	commands, err := s.commands.ListCommands(strings.TrimSpace(params.CWD))
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list commands: %v", err), nil)
+		return
+	}
+	if commands == nil {
+		commands = []CommandInfo{}
+	}
+	s.sendResult(msg.ID, map[string]any{"commands": commands})
+}
+
+func (s *Server) handleProjectFiles(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/project/files notification; a request ID is required")
+		return
+	}
+	if s.files == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		CWD   string `json:"cwd"`
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/project/files parameters", nil)
+		return
+	}
+	// Unlike commands, a file search has no meaning without a root to search.
+	cwd := strings.TrimSpace(params.CWD)
+	if cwd == "" {
+		s.replyError(msg, codeInvalidParams, "cwd is required", nil)
+		return
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultProjectFilesLimit
+	}
+	if limit > maxProjectFilesLimit {
+		limit = maxProjectFilesLimit
+	}
+	files, err := s.files.SearchFiles(cwd, strings.TrimSpace(params.Query), limit)
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("search project files: %v", err), nil)
+		return
+	}
+	if files == nil {
+		files = []string{}
+	}
+	s.sendResult(msg.ID, map[string]any{"files": files})
+}
+
+// expandSlashCommand replaces a whole-prompt "/name [args]" invocation with the
+// matching catalog command's body, substituting $ARGUMENTS. Without this a
+// client that inserts a completion would send the literal "/name" token to the
+// model, since the ACP surface has no other slash processing. Prompts that are
+// not a single line, do not start with "/", or name no known command pass
+// through untouched — so shell paths and prose beginning with a slash are safe.
+func (s *Server) expandSlashCommand(prompt, cwd string) string {
+	if s.commands == nil {
+		return prompt
+	}
+	name, args, ok := splitSlashInvocation(prompt)
+	if !ok {
+		return prompt
+	}
+	commands, err := s.commands.ListCommands(cwd)
+	if err != nil {
+		fmt.Fprintf(s.log, "packetcode acp: slash expansion skipped: %v\n", err)
+		return prompt
+	}
+	for _, cmd := range commands {
+		if !strings.EqualFold(cmd.Name, name) || cmd.Body == "" {
+			continue
+		}
+		if strings.Contains(cmd.Body, "$ARGUMENTS") {
+			return strings.ReplaceAll(cmd.Body, "$ARGUMENTS", args)
+		}
+		// No placeholder: the arguments must still reach the model. Dropping
+		// them silently deletes half of what the user asked for while the
+		// client still shows them their whole sentence.
+		if args == "" {
+			return cmd.Body
+		}
+		return cmd.Body + "\n\n" + args
+	}
+	return prompt
+}
+
+// splitSlashInvocation parses "/name rest" out of a single-line prompt. It
+// mirrors internal/app's slash grammar: the verb is [A-Za-z0-9_-]+ and the
+// remainder is passed to $ARGUMENTS verbatim (trimmed).
+func splitSlashInvocation(prompt string) (name, args string, ok bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if !strings.HasPrefix(trimmed, "/") || strings.ContainsAny(trimmed, "\n\r") {
+		return "", "", false
+	}
+	verb, rest, _ := strings.Cut(strings.TrimPrefix(trimmed, "/"), " ")
+	if verb == "" {
+		return "", "", false
+	}
+	for _, r := range verb {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return "", "", false
+		}
+	}
+	return verb, strings.TrimSpace(rest), true
 }
 
 type wireMCPServer struct {
@@ -264,6 +851,13 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		CWD                   string           `json:"cwd"`
 		MCPServers            *[]wireMCPServer `json:"mcpServers"`
 		AdditionalDirectories []string         `json:"additionalDirectories"`
+		// Vendor extension: optional per-session provider/model override,
+		// mirroring the _packetcode capability namespace.
+		Packetcode *struct {
+			Provider       string `json:"provider"`
+			Model          string `json:"model"`
+			PermissionMode string `json:"permissionMode"`
+		} `json:"_packetcode"`
 	}
 	if err := decodeParams(msg.Params, &params); err != nil {
 		s.replyError(msg, codeInvalidParams, "invalid session/new parameters", nil)
@@ -279,15 +873,16 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		s.replyError(msg, codeInvalidParams, "cwd must be an existing directory", nil)
 		return
 	}
-	if params.MCPServers == nil {
-		s.replyError(msg, codeInvalidParams, "mcpServers is required", nil)
-		return
-	}
 	if len(params.AdditionalDirectories) > 0 {
 		s.replyError(msg, codeInvalidParams, "additionalDirectories are not supported", nil)
 		return
 	}
-	mcpServers, err := parseMCPServers(*params.MCPServers)
+	// ACP marks mcpServers required, but this agent is deliberately lenient on
+	// input: an omitted field means "no opinion", which the factory answers
+	// with the agent's own configured servers. An explicit [] still means none.
+	// Being lenient here costs nothing (every spec-conformant client sends the
+	// field) and is the only way a client can defer to the agent's config.
+	mcpServers, err := parseOptionalMCPServers(params.MCPServers)
 	if err != nil {
 		s.replyError(msg, codeInvalidParams, err.Error(), nil)
 		return
@@ -296,9 +891,20 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
 		return
 	}
+	sessionConfig := SessionConfig{CWD: cwd, MCPServers: mcpServers, MCPServersSet: params.MCPServers != nil}
+	if params.Packetcode != nil {
+		sessionConfig.Provider = strings.TrimSpace(params.Packetcode.Provider)
+		sessionConfig.Model = strings.TrimSpace(params.Packetcode.Model)
+		sessionConfig.PermissionMode = strings.TrimSpace(params.Packetcode.PermissionMode)
+	}
 	approver := &permissionApprover{server: s}
-	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{CWD: cwd, MCPServers: mcpServers}, approver)
+	runtime, err := s.factory.NewSession(s.ctx, sessionConfig, approver)
 	if err != nil {
+		if errors.Is(err, ErrUnknownProvider) || errors.Is(err, ErrUnknownPermissionMode) ||
+			errors.Is(err, ErrPermissionModeDenied) {
+			s.replyError(msg, codeInvalidParams, err.Error(), nil)
+			return
+		}
 		s.replyError(msg, codeInternalError, "create PacketCode session: "+err.Error(), nil)
 		return
 	}
@@ -323,6 +929,136 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 	s.sessions[runtime.ID] = state
 	s.stateMu.Unlock()
 	s.sendResult(msg.ID, map[string]string{"sessionId": runtime.ID})
+}
+
+// handleLoadSession resumes a persisted session per ACP session/load: it
+// rebuilds the runtime bound to the stored transcript, replays every user and
+// assistant text turn to the client as session/update notifications, and only
+// then answers the request with an empty result. Tool-call machinery is not
+// replayed in v1 — text turns carry the conversation.
+func (s *Server) handleLoadSession(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring session/load notification; a request ID is required")
+		return
+	}
+	var params struct {
+		SessionID  string           `json:"sessionId"`
+		CWD        string           `json:"cwd"`
+		MCPServers *[]wireMCPServer `json:"mcpServers"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid session/load parameters", nil)
+		return
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	if !filepath.IsAbs(params.CWD) {
+		s.replyError(msg, codeInvalidParams, "cwd must be an absolute path", nil)
+		return
+	}
+	cwd := filepath.Clean(params.CWD)
+	info, err := os.Stat(cwd)
+	if err != nil || !info.IsDir() {
+		s.replyError(msg, codeInvalidParams, "cwd must be an existing directory", nil)
+		return
+	}
+	// Same absent-vs-empty contract as session/new: omitting mcpServers defers
+	// to the agent's configured servers, [] means run with none.
+	mcpServers, err := parseOptionalMCPServers(params.MCPServers)
+	if err != nil {
+		s.replyError(msg, codeInvalidParams, err.Error(), nil)
+		return
+	}
+	if s.factory == nil {
+		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
+		return
+	}
+	// Re-loading a session this connection already holds is allowed — clients
+	// switch between sessions and expect a fresh replay each time — unless a
+	// prompt is currently running on it. The old runtime is replaced.
+	s.stateMu.Lock()
+	existing := s.sessions[params.SessionID]
+	s.stateMu.Unlock()
+	if existing != nil {
+		existing.mu.Lock()
+		active := existing.active
+		existing.mu.Unlock()
+		if active {
+			s.replyError(msg, codeSessionBusy, "session already has an active prompt", nil)
+			return
+		}
+	}
+	approver := &permissionApprover{server: s}
+	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{
+		CWD: cwd, MCPServers: mcpServers, MCPServersSet: params.MCPServers != nil,
+		SessionID: params.SessionID,
+	}, approver)
+	if err != nil {
+		s.replyError(msg, codeInternalError, "load PacketCode session: "+err.Error(), nil)
+		return
+	}
+	if runtime == nil || runtime.ID == "" || runtime.Runner == nil {
+		if runtime != nil && runtime.Close != nil {
+			_ = runtime.Close()
+		}
+		s.replyError(msg, codeInternalError, "session factory returned an invalid runtime", nil)
+		return
+	}
+	if runtime.ID != params.SessionID {
+		if runtime.Close != nil {
+			_ = runtime.Close()
+		}
+		s.replyError(msg, codeInternalError, "session factory resumed a different session ID", nil)
+		return
+	}
+	approver.sessionID = runtime.ID
+	state := &sessionState{runtime: runtime, approver: approver, cwd: cwd}
+	s.stateMu.Lock()
+	s.sessions[runtime.ID] = state
+	s.stateMu.Unlock()
+	// Requests are handled serially, so nothing raced the replacement; the
+	// superseded runtime (if any) just needs its resources released.
+	if existing != nil && existing.runtime.Close != nil {
+		if err := existing.runtime.Close(); err != nil {
+			fmt.Fprintf(s.log, "packetcode acp: close superseded session %s: %v\n", runtime.ID, err)
+		}
+	}
+
+	// ACP requires the full replay to reach the client before the session/load
+	// response. Updates and the result share writeMu-serialized writes, so
+	// emitting them here in order guarantees that.
+	for _, message := range runtime.History {
+		var kind string
+		switch message.Role {
+		case provider.RoleUser:
+			kind = "user_message_chunk"
+		case provider.RoleAssistant:
+			kind = "agent_message_chunk"
+		default:
+			continue // system prompts and tool traffic are not replayed
+		}
+		if message.Content == "" {
+			continue
+		}
+		s.sendUpdate(runtime.ID, map[string]any{
+			"sessionUpdate": kind,
+			"messageId":     fmt.Sprintf("packetcode-message-%d", s.nextMessageID.Add(1)),
+			"content":       map[string]string{"type": "text", "text": message.Content},
+		})
+	}
+	s.sendResult(msg.ID, map[string]any{})
+}
+
+// parseOptionalMCPServers validates a possibly-absent wire mcpServers field.
+// An absent field yields a nil slice; the caller records the distinction in
+// SessionConfig.MCPServersSet.
+func parseOptionalMCPServers(in *[]wireMCPServer) ([]MCPServer, error) {
+	if in == nil {
+		return nil, nil
+	}
+	return parseMCPServers(*in)
 }
 
 func parseMCPServers(in []wireMCPServer) ([]MCPServer, error) {
@@ -380,6 +1116,9 @@ func (s *Server) handlePrompt(msg rpcMessage) {
 		s.replyError(msg, codeInvalidParams, "unknown sessionId", nil)
 		return
 	}
+	// A client that offers command completion sends the raw "/name" token;
+	// turn it back into the command's prompt before the turn starts.
+	prompt = s.expandSlashCommand(prompt, state.cwd)
 	state.mu.Lock()
 	if state.active {
 		state.mu.Unlock()
@@ -502,9 +1241,16 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 
 	state.mu.Lock()
 	cancelled := state.cancelled || ctx.Err() != nil
-	state.active = false
 	state.cancel = nil
 	state.mu.Unlock()
+	// active stays set until every trailing update and the prompt response have
+	// been written, so a session/load landing mid-teardown is rejected as busy
+	// instead of interleaving its replay with this prompt's final updates.
+	defer func() {
+		state.mu.Lock()
+		state.active = false
+		state.mu.Unlock()
+	}()
 
 	if cancelled || runErr != nil {
 		for id := range openCalls {
@@ -537,7 +1283,18 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 		"sessionUpdate": "plan",
 		"entries":       []map[string]string{{"content": planContent, "priority": "medium", "status": "completed"}},
 	})
-	s.sendResult(requestID, map[string]string{"stopReason": "end_turn"})
+	// Successful turns carry the session's usage in the vendor-extension
+	// namespace so clients can refresh cost/context gauges without a second
+	// round-trip. A failed read degrades to a bare spec result.
+	result := map[string]any{"stopReason": "end_turn"}
+	if s.usage != nil {
+		if usage, err := s.usage.ReadUsage(sessionID); err == nil {
+			result["_packetcode"] = map[string]any{"usage": usage}
+		} else {
+			fmt.Fprintf(s.log, "packetcode acp: read usage for session %s: %v\n", sessionID, err)
+		}
+	}
+	s.sendResult(requestID, result)
 }
 
 func toolCallStart(call provider.ToolCall) map[string]any {
