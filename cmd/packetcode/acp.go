@@ -5,12 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/packetcode/packetcode/internal/acp"
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/app"
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/mcp"
@@ -21,10 +25,10 @@ import (
 )
 
 type packetACPFactory struct {
-	cfg         *config.Config
-	provider    string
-	model       string
-	policy      *permissions.Policy
+	cfg      *config.Config
+	provider string
+	model    string
+	policy   *permissions.Policy
 	// ceiling is the most permissive profile a client-requested permissionMode
 	// may select; the operator's startup configuration sets it.
 	ceiling     permissions.Profile
@@ -158,6 +162,8 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	server.SetUsageReader(&packetUsageReader{dir: sessionsDir})
 	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
 	server.SetMCPLister(&packetMCPLister{cfg: cfg})
+	server.SetCommandCatalog(&packetCommandCatalog{})
+	server.SetProjectFileIndex(&packetProjectFileIndex{})
 	server.SetPermissionModes(allowedPermissionModes(ceiling))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
@@ -338,6 +344,58 @@ func (l *packetMCPLister) ListMCPServers() ([]acp.MCPServerStatus, error) {
 	return out, nil
 }
 
+// packetCommandCatalog serves invocable slash commands to ACP clients via the
+// _packetcode/commands/list extension.
+//
+// It deliberately reports ONLY markdown commands discovered under
+// ~/.packetcode/commands and <cwd>/.packetcode/commands, never a built-in.
+// Every entry in app.SlashCommands is a TUI affordance: /model and /provider
+// open modal pickers, /clear and /transcript manipulate panes, /queue drives
+// the TUI's input queue, /exit quits the program. None of them exist on the
+// ACP surface, which speaks only initialize, session/*, and _packetcode/* —
+// there is no channel over which the server could honour them, and several
+// already have first-class ACP equivalents (_packetcode/models/list,
+// _packetcode/sessions/{list,rename,usage}, the session/new permissionMode
+// override) that a client should use instead of a text command. Advertising
+// them would hand clients a menu of commands that silently do nothing.
+//
+// Markdown commands are different: they are pure prompt templates, so the ACP
+// server can honour one by expanding it in session/prompt (see
+// acp.Server.expandSlashCommand), which is why CommandInfo.Body is carried.
+//
+// The wire vocabulary keeps "builtin" as a legal source so a later server that
+// grows a genuinely ACP-honourable built-in can add it without a schema break.
+//
+// Discovery is re-run per call rather than cached, so a command file added
+// mid-session shows up in the client's next menu.
+type packetCommandCatalog struct{}
+
+func (c *packetCommandCatalog) ListCommands(cwd string) ([]acp.CommandInfo, error) {
+	registry := app.LoadSlashRegistry(cwd)
+	commands := registry.Commands()
+	out := make([]acp.CommandInfo, 0, len(commands))
+	for _, cmd := range commands {
+		if cmd.Builtin {
+			continue
+		}
+		// The only argument convention markdown commands have is the
+		// $ARGUMENTS placeholder; mirror app.loadMarkdownSlashCommand's usage
+		// suffix so clients show the same hint the TUI does.
+		hint := ""
+		if strings.Contains(cmd.Body, "$ARGUMENTS") {
+			hint = "[arguments]"
+		}
+		out = append(out, acp.CommandInfo{
+			Name:         cmd.Name,
+			Description:  cmd.Description,
+			Source:       cmd.Source,
+			ArgumentHint: hint,
+			Body:         cmd.Body,
+		})
+	}
+	return out, nil
+}
+
 // mcpServersForSession resolves which MCP servers one ACP session runs with,
 // and reports whether the client chose them.
 //
@@ -417,6 +475,72 @@ func (f *packetACPFactory) startMCP(
 		}
 	}
 	return manager, statuses, nil
+}
+
+// packetProjectFileIndex answers @-mention file searches via the
+// _packetcode/project/files extension. It reuses app.ListProjectFiles, so the
+// candidate set and ignore rules are identical to the TUI's @ menu: git's own
+// view of the tree (tracked + untracked, .gitignore applied) when cwd is a
+// repo, else a bounded walk that skips VCS internals, vendored/build trees,
+// dotdirs, and obvious binaries.
+//
+// This is a client-facing convenience, not a tool: the agent's own
+// search_codebase/list_directory tools are reachable only from inside a turn,
+// so a client building a mention menu has nothing else to call.
+type packetProjectFileIndex struct{}
+
+func (i *packetProjectFileIndex) SearchFiles(cwd, query string, limit int) ([]string, error) {
+	root, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("cwd is not a directory: %s", cwd)
+	}
+	return rankProjectFiles(app.ListProjectFiles(root), query, limit), nil
+}
+
+// rankProjectFiles filters and orders candidates the way the TUI's mention
+// autocomplete does (internal/ui/components/autocomplete.rebuild): tier 1 is a
+// prefix match on the full relative path or on the basename, tier 2 is a
+// substring match anywhere in the path; each tier is sorted lexically so the
+// order is stable across calls. An empty query returns the head of the list.
+func rankProjectFiles(paths []string, query string, limit int) []string {
+	if limit <= 0 {
+		return []string{}
+	}
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		if len(paths) > limit {
+			paths = paths[:limit]
+		}
+		return append([]string{}, paths...)
+	}
+	var prefix, substring []string
+	for _, p := range paths {
+		lower := strings.ToLower(p)
+		if strings.HasPrefix(lower, needle) || strings.HasPrefix(path.Base(lower), needle) {
+			prefix = append(prefix, p)
+			continue
+		}
+		if strings.Contains(lower, needle) {
+			substring = append(substring, p)
+		}
+	}
+	sort.Strings(prefix)
+	sort.Strings(substring)
+	out := append(prefix, substring...)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {

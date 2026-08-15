@@ -212,6 +212,53 @@ type MCPLister interface {
 	ListMCPServers() ([]MCPServerStatus, error)
 }
 
+// CommandInfo is the wire projection served by the _packetcode/commands/list
+// extension method. Fields are additive; clients must tolerate new ones.
+type CommandInfo struct {
+	// Name is the bare command word without the leading slash.
+	Name string `json:"name"`
+	// Description is one line of help text for a completion menu.
+	Description string `json:"description"`
+	// Source is "builtin", "user", or "project" — where the command came
+	// from, so clients can group or badge the menu.
+	Source string `json:"source"`
+	// ArgumentHint is a short usage tail such as "[arguments]", shown after
+	// the name in a menu. Empty for commands that take no arguments.
+	ArgumentHint string `json:"argumentHint,omitempty"`
+	// Body is the prompt text the command expands to. Server-side only —
+	// json:"-" keeps it off the wire. The server uses it to expand a leading
+	// "/name" in session/prompt text so a client that inserts the completion
+	// gets the command's real prompt instead of the literal token.
+	Body string `json:"-"`
+}
+
+// CommandCatalog supplies invocable slash commands for the
+// _packetcode/commands/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers. cwd scopes project-local
+// command discovery; implementations may return only user-scoped commands
+// when it is empty.
+type CommandCatalog interface {
+	ListCommands(cwd string) ([]CommandInfo, error)
+}
+
+// ProjectFileIndex answers @-mention file searches for the
+// _packetcode/project/files extension. Optional: when unset the method
+// answers method-not-found, matching older servers. Results are
+// project-relative, slash-separated paths ordered best-match first, and
+// implementations must honour limit.
+type ProjectFileIndex interface {
+	SearchFiles(cwd, query string, limit int) ([]string, error)
+}
+
+const (
+	// defaultProjectFilesLimit caps a _packetcode/project/files response when
+	// the client sends no limit; it matches a comfortable menu length.
+	defaultProjectFilesLimit = 20
+	// maxProjectFilesLimit is the hard ceiling, so a client cannot ask the
+	// server to serialize a whole monorepo into one reply.
+	maxProjectFilesLimit = 200
+)
+
 // Server is a single ACP stdio connection. It is safe for prompt workers and
 // permission responses to use concurrently.
 type Server struct {
@@ -225,6 +272,10 @@ type Server struct {
 	catalog ModelCatalog
 	usage   UsageReader
 	mcp     MCPLister
+	// commands gates _packetcode/commands/list and slash expansion in
+	// session/prompt; files gates _packetcode/project/files.
+	commands CommandCatalog
+	files    ProjectFileIndex
 	// permissionModes, when non-nil, replaces the advertised PermissionModes.
 	permissionModes []string
 
@@ -322,6 +373,20 @@ func (s *Server) SetUsageReader(r UsageReader) {
 	s.usage = r
 }
 
+// SetCommandCatalog enables the _packetcode/commands/list extension and, with
+// it, server-side expansion of a leading "/name" in session/prompt text. Must
+// be called before Serve; a nil catalog leaves the method unregistered and
+// prompt text untouched.
+func (s *Server) SetCommandCatalog(c CommandCatalog) {
+	s.commands = c
+}
+
+// SetProjectFileIndex enables the _packetcode/project/files extension. Must be
+// called before Serve; a nil index leaves the method unregistered.
+func (s *Server) SetProjectFileIndex(f ProjectFileIndex) {
+	s.files = f
+}
+
 // SetPermissionModes overrides the permission modes advertised in initialize.
 // Operators cap this to their startup profile so clients cannot be offered an
 // escalation the factory would reject. Must be called before Serve; nil keeps
@@ -403,6 +468,10 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handleModelsList(msg)
 	case "_packetcode/mcp/list":
 		s.handleMCPList(msg)
+	case "_packetcode/commands/list":
+		s.handleCommandsList(msg)
+	case "_packetcode/project/files":
+		s.handleProjectFiles(msg)
 	default:
 		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 	}
@@ -458,6 +527,8 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 				"modelsList":      s.catalog != nil,
 				"mcpList":         s.mcp != nil,
 				"mcpDefaults":     true,
+				"commandsList":    s.commands != nil,
+				"projectFiles":    s.files != nil,
 				"permissionModes": s.advertisedPermissionModes(),
 			},
 		},
@@ -613,6 +684,129 @@ func (s *Server) handleMCPList(msg rpcMessage) {
 		servers = []MCPServerStatus{}
 	}
 	s.sendResult(msg.ID, map[string]any{"servers": servers})
+}
+
+func (s *Server) handleCommandsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/commands/list notification; a request ID is required")
+		return
+	}
+	if s.commands == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		CWD string `json:"cwd"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/commands/list parameters", nil)
+		return
+	}
+	// An absent cwd is legal: it simply scopes the answer to user-level
+	// commands, since project commands live under <cwd>/.packetcode/commands.
+	commands, err := s.commands.ListCommands(strings.TrimSpace(params.CWD))
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list commands: %v", err), nil)
+		return
+	}
+	if commands == nil {
+		commands = []CommandInfo{}
+	}
+	s.sendResult(msg.ID, map[string]any{"commands": commands})
+}
+
+func (s *Server) handleProjectFiles(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/project/files notification; a request ID is required")
+		return
+	}
+	if s.files == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		CWD   string `json:"cwd"`
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/project/files parameters", nil)
+		return
+	}
+	// Unlike commands, a file search has no meaning without a root to search.
+	cwd := strings.TrimSpace(params.CWD)
+	if cwd == "" {
+		s.replyError(msg, codeInvalidParams, "cwd is required", nil)
+		return
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultProjectFilesLimit
+	}
+	if limit > maxProjectFilesLimit {
+		limit = maxProjectFilesLimit
+	}
+	files, err := s.files.SearchFiles(cwd, strings.TrimSpace(params.Query), limit)
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("search project files: %v", err), nil)
+		return
+	}
+	if files == nil {
+		files = []string{}
+	}
+	s.sendResult(msg.ID, map[string]any{"files": files})
+}
+
+// expandSlashCommand replaces a whole-prompt "/name [args]" invocation with the
+// matching catalog command's body, substituting $ARGUMENTS. Without this a
+// client that inserts a completion would send the literal "/name" token to the
+// model, since the ACP surface has no other slash processing. Prompts that are
+// not a single line, do not start with "/", or name no known command pass
+// through untouched — so shell paths and prose beginning with a slash are safe.
+func (s *Server) expandSlashCommand(prompt, cwd string) string {
+	if s.commands == nil {
+		return prompt
+	}
+	name, args, ok := splitSlashInvocation(prompt)
+	if !ok {
+		return prompt
+	}
+	commands, err := s.commands.ListCommands(cwd)
+	if err != nil {
+		fmt.Fprintf(s.log, "packetcode acp: slash expansion skipped: %v\n", err)
+		return prompt
+	}
+	for _, cmd := range commands {
+		if cmd.Name == name && cmd.Body != "" {
+			return strings.ReplaceAll(cmd.Body, "$ARGUMENTS", args)
+		}
+	}
+	return prompt
+}
+
+// splitSlashInvocation parses "/name rest" out of a single-line prompt. It
+// mirrors internal/app's slash grammar: the verb is [A-Za-z0-9_-]+ and the
+// remainder is passed to $ARGUMENTS verbatim (trimmed).
+func splitSlashInvocation(prompt string) (name, args string, ok bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if !strings.HasPrefix(trimmed, "/") || strings.ContainsAny(trimmed, "\n\r") {
+		return "", "", false
+	}
+	verb, rest, _ := strings.Cut(strings.TrimPrefix(trimmed, "/"), " ")
+	if verb == "" {
+		return "", "", false
+	}
+	for _, r := range verb {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return "", "", false
+		}
+	}
+	return verb, strings.TrimSpace(rest), true
 }
 
 type wireMCPServer struct {
@@ -900,6 +1094,9 @@ func (s *Server) handlePrompt(msg rpcMessage) {
 		s.replyError(msg, codeInvalidParams, "unknown sessionId", nil)
 		return
 	}
+	// A client that offers command completion sends the raw "/name" token;
+	// turn it back into the command's prompt before the turn starts.
+	prompt = s.expandSlashCommand(prompt, state.cwd)
 	state.mu.Lock()
 	if state.active {
 		state.mu.Unlock()

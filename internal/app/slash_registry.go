@@ -84,6 +84,17 @@ func (r *SlashCommandRegistry) Lookup(name string) (SlashCommand, bool) {
 	return r.ordered[idx], true
 }
 
+// Commands returns every registered command in display order: built-ins
+// first, then markdown commands in load order. Callers outside the TUI (the
+// ACP _packetcode/commands/list extension) filter on Builtin to pick the
+// subset their surface can honour.
+func (r *SlashCommandRegistry) Commands() []SlashCommand {
+	if r == nil {
+		r = NewBuiltinSlashRegistry()
+	}
+	return append([]SlashCommand(nil), r.ordered...)
+}
+
 func (r *SlashCommandRegistry) HelpRows() []KeyHelp {
 	if r == nil {
 		r = NewBuiltinSlashRegistry()
