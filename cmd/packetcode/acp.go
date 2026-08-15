@@ -187,7 +187,35 @@ func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
 	return out, nil
 }
 
+// sessionPolicy resolves the permission policy one session runs under. An
+// empty mode keeps the server-wide policy; otherwise the mode maps to a
+// profile via permissions.ParseProfile and a fresh policy is built from the
+// config with that profile, mirroring the --permission-mode CLI override (the
+// inline default rule and trust mode are cleared so the chosen mode wins).
+func (f *packetACPFactory) sessionPolicy(mode string) (*permissions.Policy, error) {
+	if mode == "" {
+		return f.policy, nil
+	}
+	profile, err := permissions.ParseProfile(mode)
+	if err != nil {
+		return nil, fmt.Errorf("%w %q", acp.ErrUnknownPermissionMode, mode)
+	}
+	var cfg config.Config
+	if f.cfg != nil {
+		cfg = *f.cfg
+	}
+	cfg.Permissions.Default = ""
+	cfg.Behavior.TrustMode = false
+	return permissions.FromConfigWithProfile(&cfg, profile)
+}
+
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
+	// Resolve the per-session policy first so an invalid permissionMode fails
+	// before any session state is created.
+	policy, err := f.sessionPolicy(cfg.PermissionMode)
+	if err != nil {
+		return nil, err
+	}
 	sessions := session.NewManager(f.sessionsDir)
 	factories := providerFactoriesFromConfig(f.cfg)
 
@@ -308,7 +336,7 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	hookRunner := hooks.New(f.cfg.Hooks, root)
 	runner := agent.New(agent.Config{
 		Registry: reg, Tools: toolReg, Session: sessions,
-		Approver: approver, Policy: f.policy, SystemPrompt: systemPrompt,
+		Approver: approver, Policy: policy, SystemPrompt: systemPrompt,
 		Hooks:         hookRunner,
 		SugarCache:    packetcodeSugarCacheConfig(f.cfg),
 		ConduitShadow: packetcodeConduitShadowConfig(f.cfg),

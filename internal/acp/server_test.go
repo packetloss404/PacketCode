@@ -451,8 +451,8 @@ func TestServerModelsListWithoutCatalogIsMethodNotFound(t *testing.T) {
 }
 
 // recordingFactory captures the SessionConfig session/new hands to the
-// factory and rejects providers outside its allow-list the way the
-// production factory does.
+// factory and rejects providers and permission modes outside its allow-lists
+// the way the production factory does.
 type recordingFactory struct {
 	knownProviders []string
 
@@ -471,6 +471,18 @@ func (f *recordingFactory) NewSession(_ context.Context, cfg SessionConfig, _ ag
 		}
 		if !known {
 			return nil, fmt.Errorf("%w %q", ErrUnknownProvider, cfg.Provider)
+		}
+	}
+	if cfg.PermissionMode != "" {
+		known := false
+		for _, mode := range PermissionModes {
+			if mode == cfg.PermissionMode {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("%w %q", ErrUnknownPermissionMode, cfg.PermissionMode)
 		}
 	}
 	f.mu.Lock()
@@ -531,6 +543,74 @@ func TestServerNewSessionPacketcodeOverride(t *testing.T) {
 	assert.Equal(t, "", configs[0].Model)
 	assert.Equal(t, "anthropic", configs[1].Provider)
 	assert.Equal(t, "claude-fable-5", configs[1].Model)
+}
+
+func TestServerNewSessionPermissionModeOverride(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{knownProviders: []string{"anthropic"}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	initialized := client.receiveID("init")
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	advertised, ok := extension["permissionModes"].([]any)
+	require.True(t, ok, "initialize must advertise _packetcode.permissionModes")
+	modes := make([]string, 0, len(advertised))
+	for _, mode := range advertised {
+		modes = append(modes, mode.(string))
+	}
+	assert.Equal(t, []string{"ask", "accept-edits", "auto", "read-only", "bypass"}, modes)
+
+	// No override: the factory sees an empty PermissionMode.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	plain := client.receiveID(1)
+	require.NotEmpty(t, object(t, plain["result"])["sessionId"])
+
+	// Override: the mode reaches the factory verbatim, alone or alongside a
+	// provider/model override.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"permissionMode": "accept-edits"},
+		},
+	})
+	overridden := client.receiveID(2)
+	require.NotEmpty(t, object(t, overridden["result"])["sessionId"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "anthropic", "model": "claude-fable-5", "permissionMode": "bypass"},
+		},
+	})
+	combined := client.receiveID(3)
+	require.NotEmpty(t, object(t, combined["result"])["sessionId"])
+
+	// Unknown mode: invalid-params, and the factory records no session.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"permissionMode": "yolo"},
+		},
+	})
+	rejected := client.receiveID(4)
+	assert.Equal(t, json.Number("-32602"), object(t, rejected["error"])["code"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 3)
+	assert.Equal(t, "", configs[0].PermissionMode)
+	assert.Equal(t, "accept-edits", configs[1].PermissionMode)
+	assert.Equal(t, "bypass", configs[2].PermissionMode)
+	assert.Equal(t, "anthropic", configs[2].Provider)
+	assert.Equal(t, "claude-fable-5", configs[2].Model)
 }
 
 func TestServerCancelReturnsTerminalCancelledAndFailsOpenTool(t *testing.T) {

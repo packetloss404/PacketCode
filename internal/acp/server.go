@@ -40,9 +40,9 @@ type MCPServer struct {
 }
 
 // SessionConfig contains the workspace-scoped inputs needed to build a native
-// PacketCode agent session. Provider and Model are optional per-session
-// overrides from the session/new "_packetcode" params object; empty values
-// mean "use the configured defaults".
+// PacketCode agent session. Provider, Model, and PermissionMode are optional
+// per-session overrides from the session/new "_packetcode" params object;
+// empty values mean "use the configured defaults".
 type SessionConfig struct {
 	CWD        string
 	MCPServers []MCPServer
@@ -52,12 +52,25 @@ type SessionConfig struct {
 	SessionID string
 	Provider  string
 	Model     string
+	// PermissionMode selects the permission profile the session's policy is
+	// built from. One of PermissionModes; empty keeps the server-wide policy.
+	PermissionMode string
 }
+
+// PermissionModes is the wire vocabulary for the session/new "_packetcode"
+// permissionMode override, advertised verbatim in the initialize
+// agentCapabilities under _packetcode.permissionModes.
+var PermissionModes = []string{"ask", "accept-edits", "auto", "read-only", "bypass"}
 
 // ErrUnknownProvider marks a session/new provider override the factory does
 // not recognize. Factories wrap it (errors.Is-compatible) so the server can
 // answer invalid-params instead of a generic internal error.
 var ErrUnknownProvider = errors.New("unknown provider")
+
+// ErrUnknownPermissionMode marks a session/new permissionMode override the
+// factory does not recognize. Factories wrap it (errors.Is-compatible) so the
+// server can answer invalid-params instead of a generic internal error.
+var ErrUnknownPermissionMode = errors.New("unknown permission mode")
 
 // Runner is PacketCode's terminal-independent agent event source.
 type Runner interface {
@@ -313,8 +326,9 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
 			// modelsList gates _packetcode/models/list.
 			"_packetcode": map[string]any{
-				"sessionsList": s.lister != nil,
-				"modelsList":   s.catalog != nil,
+				"sessionsList":    s.lister != nil,
+				"modelsList":      s.catalog != nil,
+				"permissionModes": PermissionModes,
 			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
@@ -385,8 +399,9 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		// Vendor extension: optional per-session provider/model override,
 		// mirroring the _packetcode capability namespace.
 		Packetcode *struct {
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
+			Provider       string `json:"provider"`
+			Model          string `json:"model"`
+			PermissionMode string `json:"permissionMode"`
 		} `json:"_packetcode"`
 	}
 	if err := decodeParams(msg.Params, &params); err != nil {
@@ -424,11 +439,12 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 	if params.Packetcode != nil {
 		sessionConfig.Provider = strings.TrimSpace(params.Packetcode.Provider)
 		sessionConfig.Model = strings.TrimSpace(params.Packetcode.Model)
+		sessionConfig.PermissionMode = strings.TrimSpace(params.Packetcode.PermissionMode)
 	}
 	approver := &permissionApprover{server: s}
 	runtime, err := s.factory.NewSession(s.ctx, sessionConfig, approver)
 	if err != nil {
-		if errors.Is(err, ErrUnknownProvider) {
+		if errors.Is(err, ErrUnknownProvider) || errors.Is(err, ErrUnknownPermissionMode) {
 			s.replyError(msg, codeInvalidParams, err.Error(), nil)
 			return
 		}

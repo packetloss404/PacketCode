@@ -8,6 +8,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/acp"
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/permissions"
 )
 
 func TestServerModelCatalogEnumeratesConfiguredProviders(t *testing.T) {
@@ -83,4 +84,60 @@ func TestPacketACPFactoryProviderOverrides(t *testing.T) {
 	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `no model is configured for provider "ollama"`)
+}
+
+func TestPacketACPFactoryPermissionModeOverrides(t *testing.T) {
+	cfg := config.Default()
+	serverPolicy, err := permissions.FromConfig(cfg)
+	require.NoError(t, err)
+	factory := &packetACPFactory{
+		cfg: cfg, provider: "anthropic", model: "claude-fable-5", policy: serverPolicy,
+		sessionsDir: t.TempDir(), backupsDir: t.TempDir(),
+	}
+
+	// Unknown mode override must surface the errors.Is-matchable sentinel so
+	// the ACP server answers -32602 instead of a generic internal error, and it
+	// must fail before any session state is created.
+	_, err = factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD: t.TempDir(), PermissionMode: "yolo",
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, acp.ErrUnknownPermissionMode)
+
+	// An empty mode keeps the server-wide policy instance untouched.
+	policy, err := factory.sessionPolicy("")
+	require.NoError(t, err)
+	assert.Same(t, serverPolicy, policy)
+
+	// Each advertised wire mode builds a per-session policy on the matching
+	// profile.
+	expected := map[string]permissions.Profile{
+		"ask":          permissions.ProfileAsk,
+		"accept-edits": permissions.ProfileEdit,
+		"auto":         permissions.ProfileAuto,
+		"read-only":    permissions.ProfileSafe,
+		"bypass":       permissions.ProfileFull,
+	}
+	for mode, profile := range expected {
+		policy, err := factory.sessionPolicy(mode)
+		require.NoError(t, err, "mode %s", mode)
+		assert.Equal(t, profile, policy.Profile(), "mode %s", mode)
+		assert.NotSame(t, serverPolicy, policy, "mode %s must build its own policy", mode)
+	}
+
+	// The per-session policy wins over an inline default rule and trust mode,
+	// matching the --permission-mode CLI override semantics.
+	cfgLoose := config.Default()
+	cfgLoose.Permissions.Default = "allow"
+	cfgLoose.Behavior.TrustMode = true
+	factoryLoose := &packetACPFactory{
+		cfg: cfgLoose, provider: "anthropic", model: "claude-fable-5",
+		sessionsDir: t.TempDir(), backupsDir: t.TempDir(),
+	}
+	strict, err := factoryLoose.sessionPolicy("read-only")
+	require.NoError(t, err)
+	assert.Equal(t, permissions.ProfileSafe, strict.Profile())
+	for _, rule := range strict.Rules() {
+		assert.NotEqual(t, "inline default", rule.Reason, "inline default rule must be cleared for per-session modes")
+	}
 }
