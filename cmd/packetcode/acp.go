@@ -137,24 +137,48 @@ func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
-	if f.provider == "" {
+	sessions := session.NewManager(f.sessionsDir)
+
+	// Resume path (ACP session/load): bind the runtime to the persisted
+	// transcript and prefer the provider/model the conversation was held with.
+	var resumed *session.Session
+	activeProvider, activeModel := f.provider, f.model
+	if cfg.SessionID != "" {
+		loaded, err := sessions.Load(cfg.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load session %s: %w", cfg.SessionID, err)
+		}
+		// Remote-bound transcripts must not resume against the local filesystem.
+		if err := session.ValidateWorkspace(loaded, "", ""); err != nil {
+			return nil, err
+		}
+		if loaded.Provider != "" {
+			activeProvider = loaded.Provider
+		}
+		if loaded.Model != "" {
+			activeModel = loaded.Model
+		}
+		resumed = loaded
+	}
+
+	if activeProvider == "" {
 		return nil, fmt.Errorf("no default provider is configured; configure PacketCode before creating a session")
 	}
-	if f.model == "" {
-		return nil, fmt.Errorf("no model is configured for provider %q", f.provider)
+	if activeModel == "" {
+		return nil, fmt.Errorf("no model is configured for provider %q", activeProvider)
 	}
 	factories := providerFactoriesFromConfig(f.cfg)
-	providerFactory, ok := factories[f.provider]
+	providerFactory, ok := factories[activeProvider]
 	if !ok {
-		return nil, fmt.Errorf("provider %q is unknown", f.provider)
+		return nil, fmt.Errorf("provider %q is unknown", activeProvider)
 	}
-	key := f.cfg.GetProviderKey(f.provider)
-	if providerRequiresAPIKey(f.cfg, f.provider) && key == "" {
-		return nil, fmt.Errorf("provider %q is not configured with an API key", f.provider)
+	key := f.cfg.GetProviderKey(activeProvider)
+	if providerRequiresAPIKey(f.cfg, activeProvider) && key == "" {
+		return nil, fmt.Errorf("provider %q is not configured with an API key", activeProvider)
 	}
 	reg := provider.NewRegistry()
 	reg.Register(providerFactory(key))
-	if err := reg.SetActive(f.provider, f.model); err != nil {
+	if err := reg.SetActive(activeProvider, activeModel); err != nil {
 		return nil, err
 	}
 
@@ -169,12 +193,15 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	toolReg.Register(tools.NewGetDiagnosticsTool(root))
 	toolReg.Register(tools.NewExecuteCommandTool(root))
 
-	sessions := session.NewManager(f.sessionsDir)
-	created, err := sessions.New(f.provider, f.model)
-	if err != nil {
-		return nil, fmt.Errorf("persist session: %w", err)
+	current := resumed
+	if current == nil {
+		created, err := sessions.New(activeProvider, activeModel)
+		if err != nil {
+			return nil, fmt.Errorf("persist session: %w", err)
+		}
+		current = created
 	}
-	backups := session.NewBackupManager(f.backupsDir, created.ID)
+	backups := session.NewBackupManager(f.backupsDir, current.ID)
 	toolReg.Register(tools.NewWriteFileTool(root, backups))
 	toolReg.Register(tools.NewPatchFileTool(root, backups))
 
@@ -217,7 +244,10 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 		SugarCache:    packetcodeSugarCacheConfig(f.cfg),
 		ConduitShadow: packetcodeConduitShadowConfig(f.cfg),
 	})
-	runtime := &acp.Runtime{ID: created.ID, Runner: runner}
+	runtime := &acp.Runtime{ID: current.ID, Runner: runner}
+	if resumed != nil {
+		runtime.History = resumed.Messages
+	}
 	if mcpManager != nil {
 		runtime.Close = func() error { return mcpManager.Shutdown(2 * time.Second) }
 	}

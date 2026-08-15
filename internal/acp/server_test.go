@@ -38,7 +38,7 @@ func TestServerNativeAgentPermissionAndEvents(t *testing.T) {
 	result := object(t, initialized["result"])
 	assert.Equal(t, json.Number("1"), result["protocolVersion"])
 	capabilities := object(t, result["agentCapabilities"])
-	assert.Equal(t, false, capabilities["loadSession"])
+	assert.Equal(t, true, capabilities["loadSession"])
 
 	client.send(map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "session/new",
@@ -107,10 +107,149 @@ func TestServerNativeAgentPermissionAndEvents(t *testing.T) {
 
 	client.send(map[string]any{"jsonrpc": "2.0", "id": 5, "method": "session/load", "params": map[string]any{}})
 	load := client.receiveID(5)
-	assert.Equal(t, json.Number("-32601"), object(t, load["error"])["code"])
+	assert.Equal(t, json.Number("-32602"), object(t, load["error"])["code"])
 	client.send(map[string]any{"jsonrpc": "2.0", "id": 6, "method": "packetcode/unknown", "params": map[string]any{}})
 	unknown := client.receiveID(6)
 	assert.Equal(t, json.Number("-32601"), object(t, unknown["error"])["code"])
+}
+
+// replayFactory answers resume requests with canned history so tests can
+// assert the session/load replay wire behavior without a real provider.
+type replayFactory struct {
+	history []provider.Message
+	mu      sync.Mutex
+	lastCfg SessionConfig
+}
+
+func (f *replayFactory) NewSession(_ context.Context, cfg SessionConfig, _ agent.Approver) (*Runtime, error) {
+	f.mu.Lock()
+	f.lastCfg = cfg
+	f.mu.Unlock()
+	if cfg.SessionID == "" {
+		return &Runtime{ID: "fresh-session", Runner: blockingRunner{}}, nil
+	}
+	if cfg.SessionID == "missing-session" {
+		return nil, fmt.Errorf("load session %s: file does not exist", cfg.SessionID)
+	}
+	return &Runtime{ID: cfg.SessionID, Runner: blockingRunner{}, History: f.history}, nil
+}
+
+func (f *replayFactory) lastConfig() SessionConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastCfg
+}
+
+func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &replayFactory{history: []provider.Message{
+		{Role: provider.RoleSystem, Content: "you are packetcode"},
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "checking", ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "read_file", Content: "package main"},
+		{Role: provider.RoleAssistant, Content: ""}, // tool-only turn: no text to replay
+		{Role: provider.RoleAssistant, Content: "all done"},
+	}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	assert.Equal(t, true, capabilities["loadSession"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "load", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-1", "cwd": workspace, "mcpServers": []any{}},
+	})
+
+	// Every replay update must arrive strictly before the session/load result.
+	type replayed struct{ kind, text string }
+	var got []replayed
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok {
+			params := object(t, msg["params"])
+			assert.Equal(t, "resumed-1", params["sessionId"])
+			content := object(t, update["content"])
+			got = append(got, replayed{update["sessionUpdate"].(string), content["text"].(string)})
+			assert.NotEmpty(t, update["messageId"], "replayed chunks carry a messageId")
+			continue
+		}
+		if idEqual(msg["id"], "load") {
+			response = msg
+		}
+	}
+	require.Nil(t, response["error"], "session/load should succeed: %v", response["error"])
+	assert.Equal(t, map[string]any{}, object(t, response["result"]))
+	assert.Equal(t, []replayed{
+		{"user_message_chunk", "hello"},
+		{"agent_message_chunk", "checking"},
+		{"agent_message_chunk", "all done"},
+	}, got, "replay is text turns only, in stored order")
+
+	cfg := factory.lastConfig()
+	assert.Equal(t, "resumed-1", cfg.SessionID)
+	assert.Equal(t, workspace, cfg.CWD)
+
+	// The resumed session is registered: prompting it works.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": "resumed-1", "prompt": []any{map[string]any{"type": "text", "text": "continue"}}},
+	})
+	for {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok && update["sessionUpdate"] == "tool_call" {
+			break
+		}
+	}
+	client.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": "resumed-1"}})
+	for {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			break
+		}
+	}
+
+	// Loading the same session twice on one connection is rejected.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "again", "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-1", "cwd": workspace, "mcpServers": []any{}},
+	})
+	again := client.receiveID("again")
+	assert.Equal(t, json.Number("-32602"), object(t, again["error"])["code"])
+}
+
+func TestServerLoadSessionFactoryErrorIsInternal(t *testing.T) {
+	workspace := t.TempDir()
+	client := newTestClient(t, &replayFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/load",
+		"params": map[string]any{"sessionId": "missing-session", "cwd": workspace, "mcpServers": []any{}},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "load PacketCode session")
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/load",
+		"params": map[string]any{"sessionId": "x", "cwd": "relative/path", "mcpServers": []any{}},
+	})
+	badCWD := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, badCWD["error"])["code"])
 }
 
 type staticSessionLister struct {

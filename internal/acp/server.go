@@ -44,6 +44,10 @@ type MCPServer struct {
 type SessionConfig struct {
 	CWD        string
 	MCPServers []MCPServer
+	// SessionID selects the resume path: when non-empty the factory must load
+	// the persisted session with this ID (session/load) instead of creating a
+	// new one, and populate Runtime.History with its transcript for replay.
+	SessionID string
 }
 
 // Runner is PacketCode's terminal-independent agent event source.
@@ -56,6 +60,11 @@ type Runtime struct {
 	ID     string
 	Runner Runner
 	Close  func() error
+	// History is the persisted transcript of a resumed session, in order.
+	// Only factories answering a SessionConfig.SessionID resume request set
+	// it; the server replays user/assistant text turns to the client before
+	// answering session/load. Nil for fresh sessions.
+	History []provider.Message
 }
 
 // SessionFactory lets the protocol package remain independent of provider and
@@ -222,9 +231,7 @@ func (s *Server) handleRequest(msg rpcMessage) {
 	case "session/new":
 		s.handleNewSession(msg)
 	case "session/load":
-		// loadSession is deliberately advertised as false. PacketCode persists
-		// transcripts, but ACP load also requires replaying the complete history.
-		s.replyError(msg, codeMethodNotFound, "session/load is not supported", nil)
+		s.handleLoadSession(msg)
 	case "session/prompt":
 		s.handlePrompt(msg)
 	case "session/cancel":
@@ -262,7 +269,7 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 	s.sendResult(msg.ID, map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"agentCapabilities": map[string]any{
-			"loadSession": false,
+			"loadSession": true,
 			"promptCapabilities": map[string]bool{
 				"image": false, "audio": false, "embeddedContext": false,
 			},
@@ -376,6 +383,118 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 	s.sessions[runtime.ID] = state
 	s.stateMu.Unlock()
 	s.sendResult(msg.ID, map[string]string{"sessionId": runtime.ID})
+}
+
+// handleLoadSession resumes a persisted session per ACP session/load: it
+// rebuilds the runtime bound to the stored transcript, replays every user and
+// assistant text turn to the client as session/update notifications, and only
+// then answers the request with an empty result. Tool-call machinery is not
+// replayed in v1 — text turns carry the conversation.
+func (s *Server) handleLoadSession(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring session/load notification; a request ID is required")
+		return
+	}
+	var params struct {
+		SessionID  string           `json:"sessionId"`
+		CWD        string           `json:"cwd"`
+		MCPServers *[]wireMCPServer `json:"mcpServers"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid session/load parameters", nil)
+		return
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	if !filepath.IsAbs(params.CWD) {
+		s.replyError(msg, codeInvalidParams, "cwd must be an absolute path", nil)
+		return
+	}
+	cwd := filepath.Clean(params.CWD)
+	info, err := os.Stat(cwd)
+	if err != nil || !info.IsDir() {
+		s.replyError(msg, codeInvalidParams, "cwd must be an existing directory", nil)
+		return
+	}
+	if params.MCPServers == nil {
+		s.replyError(msg, codeInvalidParams, "mcpServers is required", nil)
+		return
+	}
+	mcpServers, err := parseMCPServers(*params.MCPServers)
+	if err != nil {
+		s.replyError(msg, codeInvalidParams, err.Error(), nil)
+		return
+	}
+	if s.factory == nil {
+		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
+		return
+	}
+	s.stateMu.Lock()
+	_, exists := s.sessions[params.SessionID]
+	s.stateMu.Unlock()
+	if exists {
+		s.replyError(msg, codeInvalidParams, "session is already loaded on this connection", nil)
+		return
+	}
+	approver := &permissionApprover{server: s}
+	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{CWD: cwd, MCPServers: mcpServers, SessionID: params.SessionID}, approver)
+	if err != nil {
+		s.replyError(msg, codeInternalError, "load PacketCode session: "+err.Error(), nil)
+		return
+	}
+	if runtime == nil || runtime.ID == "" || runtime.Runner == nil {
+		if runtime != nil && runtime.Close != nil {
+			_ = runtime.Close()
+		}
+		s.replyError(msg, codeInternalError, "session factory returned an invalid runtime", nil)
+		return
+	}
+	if runtime.ID != params.SessionID {
+		if runtime.Close != nil {
+			_ = runtime.Close()
+		}
+		s.replyError(msg, codeInternalError, "session factory resumed a different session ID", nil)
+		return
+	}
+	approver.sessionID = runtime.ID
+	state := &sessionState{runtime: runtime, approver: approver, cwd: cwd}
+	s.stateMu.Lock()
+	if _, exists := s.sessions[runtime.ID]; exists {
+		s.stateMu.Unlock()
+		if runtime.Close != nil {
+			_ = runtime.Close()
+		}
+		s.replyError(msg, codeInvalidParams, "session is already loaded on this connection", nil)
+		return
+	}
+	s.sessions[runtime.ID] = state
+	s.stateMu.Unlock()
+
+	// ACP requires the full replay to reach the client before the session/load
+	// response. Updates and the result share writeMu-serialized writes, so
+	// emitting them here in order guarantees that.
+	for _, message := range runtime.History {
+		var kind string
+		switch message.Role {
+		case provider.RoleUser:
+			kind = "user_message_chunk"
+		case provider.RoleAssistant:
+			kind = "agent_message_chunk"
+		default:
+			continue // system prompts and tool traffic are not replayed
+		}
+		if message.Content == "" {
+			continue
+		}
+		s.sendUpdate(runtime.ID, map[string]any{
+			"sessionUpdate": kind,
+			"messageId":     fmt.Sprintf("packetcode-message-%d", s.nextMessageID.Add(1)),
+			"content":       map[string]string{"type": "text", "text": message.Content},
+		})
+	}
+	s.sendResult(msg.ID, map[string]any{})
 }
 
 func parseMCPServers(in []wireMCPServer) ([]MCPServer, error) {
