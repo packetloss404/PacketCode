@@ -390,6 +390,203 @@ func TestServerSessionsListWithoutListerIsMethodNotFound(t *testing.T) {
 	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
 }
 
+type staticUsageReader struct {
+	usage SessionUsage
+	err   error
+
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *staticUsageReader) ReadUsage(sessionID string) (SessionUsage, error) {
+	r.mu.Lock()
+	r.seen = append(r.seen, sessionID)
+	r.mu.Unlock()
+	if r.err != nil {
+		return SessionUsage{}, r.err
+	}
+	return r.usage, nil
+}
+
+func (r *staticUsageReader) sessions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.seen...)
+}
+
+func TestServerSessionsUsageExtension(t *testing.T) {
+	reader := &staticUsageReader{usage: SessionUsage{
+		ContextTokens: 41234, TotalInput: 82000, TotalOutput: 12000, CostUSD: 1.84,
+	}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsUsage"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "abc-123"},
+	})
+	reply := client.receiveID(2)
+	usage := object(t, reply["result"])
+	assert.Equal(t, json.Number("41234"), usage["contextTokens"])
+	assert.Equal(t, json.Number("82000"), usage["totalInput"])
+	assert.Equal(t, json.Number("12000"), usage["totalOutput"])
+	assert.Equal(t, json.Number("1.84"), usage["costUsd"])
+	assert.Equal(t, []string{"abc-123"}, reader.sessions())
+
+	// Missing or blank sessionId is invalid-params, and never hits the reader.
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": "_packetcode/sessions/usage", "params": map[string]any{}})
+	missing := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, missing["error"])["code"])
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "   "},
+	})
+	blank := client.receiveID(4)
+	assert.Equal(t, json.Number("-32602"), object(t, blank["error"])["code"])
+	assert.Equal(t, []string{"abc-123"}, reader.sessions())
+}
+
+func TestServerSessionsUsageReaderErrorIsInternal(t *testing.T) {
+	reader := &staticUsageReader{err: fmt.Errorf("load session: file does not exist")}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	client.receiveID(1)
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "gone"},
+	})
+	reply := client.receiveID(2)
+	errObj := object(t, reply["error"])
+	assert.Equal(t, json.Number("-32603"), errObj["code"])
+	assert.Contains(t, errObj["message"], "read session usage")
+}
+
+func TestServerSessionsUsageWithoutReaderIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsUsage"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/usage",
+		"params": map[string]any{"sessionId": "abc-123"},
+	})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+func TestServerPromptResultCarriesUsage(t *testing.T) {
+	workspace := t.TempDir()
+	reader := &staticUsageReader{usage: SessionUsage{
+		ContextTokens: 500, TotalInput: 900, TotalOutput: 100, CostUSD: 0.25,
+	}}
+	factory := &nativeTestFactory{dir: t.TempDir(), provider: &scriptedProvider{}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "new", "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	sessionID := object(t, client.receiveID("new")["result"])["sessionId"].(string)
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": sessionID, "prompt": []any{map[string]any{"type": "text", "text": "Run the test tool"}}},
+	})
+	var permission map[string]any
+	for permission == nil {
+		msg := client.receive()
+		if msg["method"] == "session/request_permission" {
+			permission = msg
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": permission["id"],
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow_once"}},
+	})
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			response = msg
+		}
+	}
+	result := object(t, response["result"])
+	assert.Equal(t, "end_turn", result["stopReason"])
+	usage := object(t, object(t, result["_packetcode"])["usage"])
+	assert.Equal(t, json.Number("500"), usage["contextTokens"])
+	assert.Equal(t, json.Number("900"), usage["totalInput"])
+	assert.Equal(t, json.Number("100"), usage["totalOutput"])
+	assert.Equal(t, json.Number("0.25"), usage["costUsd"])
+	assert.Equal(t, []string{sessionID}, reader.sessions(), "usage is read for the prompted session")
+}
+
+func TestServerPromptResultUsageReadFailureDegradesToBareResult(t *testing.T) {
+	workspace := t.TempDir()
+	reader := &staticUsageReader{err: fmt.Errorf("disk unhappy")}
+	factory := &nativeTestFactory{dir: t.TempDir(), provider: &scriptedProvider{}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetUsageReader(reader) })
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "new", "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	sessionID := object(t, client.receiveID("new")["result"])["sessionId"].(string)
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt",
+		"params": map[string]any{"sessionId": sessionID, "prompt": []any{map[string]any{"type": "text", "text": "Run the test tool"}}},
+	})
+	var permission map[string]any
+	for permission == nil {
+		msg := client.receive()
+		if msg["method"] == "session/request_permission" {
+			permission = msg
+		}
+	}
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": permission["id"],
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow_once"}},
+	})
+	var response map[string]any
+	for response == nil {
+		msg := client.receive()
+		if idEqual(msg["id"], "prompt") {
+			response = msg
+		}
+	}
+	result := object(t, response["result"])
+	assert.Equal(t, "end_turn", result["stopReason"])
+	_, present := result["_packetcode"]
+	assert.False(t, present, "a failed usage read must not attach a partial extension object")
+}
+
 type staticModelCatalog struct {
 	models []ModelOption
 	err    error

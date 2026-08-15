@@ -103,6 +103,28 @@ type SessionLister interface {
 	ListSessions() ([]SessionSummary, error)
 }
 
+// SessionUsage is the wire projection served by the
+// _packetcode/sessions/usage extension method and attached to successful
+// session/prompt results under "_packetcode".usage. Fields are additive;
+// clients must tolerate new ones.
+type SessionUsage struct {
+	// ContextTokens is the live context-window occupancy after the most
+	// recent turn (prompt + completion), not a cumulative total.
+	ContextTokens int `json:"contextTokens"`
+	// TotalInput and TotalOutput are cumulative across the whole session.
+	TotalInput  int     `json:"totalInput"`
+	TotalOutput int     `json:"totalOutput"`
+	CostUSD     float64 `json:"costUsd"`
+}
+
+// UsageReader supplies per-session token/cost usage for the
+// _packetcode/sessions/usage extension and for prompt-result enrichment.
+// Optional: when unset the method answers method-not-found and prompt
+// results stay bare, matching older servers.
+type UsageReader interface {
+	ReadUsage(sessionID string) (SessionUsage, error)
+}
+
 // ModelOption is one selectable provider/model pair served by the
 // _packetcode/models/list extension. Default marks the pair a new session
 // uses when session/new carries no "_packetcode" override.
@@ -129,6 +151,7 @@ type Server struct {
 	version string
 	lister  SessionLister
 	catalog ModelCatalog
+	usage   UsageReader
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -205,6 +228,13 @@ func (s *Server) SetModelCatalog(c ModelCatalog) {
 	s.catalog = c
 }
 
+// SetUsageReader enables the _packetcode/sessions/usage extension and
+// prompt-result usage enrichment. Must be called before Serve; a nil reader
+// leaves the method unregistered.
+func (s *Server) SetUsageReader(r UsageReader) {
+	s.usage = r
+}
+
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
 func (s *Server) Serve(ctx context.Context) error {
 	s.ctx = ctx
@@ -270,6 +300,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handleCancel(msg)
 	case "_packetcode/sessions/list":
 		s.handleSessionsList(msg)
+	case "_packetcode/sessions/usage":
+		s.handleSessionsUsage(msg)
 	case "_packetcode/models/list":
 		s.handleModelsList(msg)
 	default:
@@ -313,8 +345,9 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
 			// modelsList gates _packetcode/models/list.
 			"_packetcode": map[string]any{
-				"sessionsList": s.lister != nil,
-				"modelsList":   s.catalog != nil,
+				"sessionsList":  s.lister != nil,
+				"sessionsUsage": s.usage != nil,
+				"modelsList":    s.catalog != nil,
 			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
@@ -340,6 +373,30 @@ func (s *Server) handleSessionsList(msg rpcMessage) {
 		summaries = []SessionSummary{}
 	}
 	s.sendResult(msg.ID, map[string]any{"sessions": summaries})
+}
+
+func (s *Server) handleSessionsUsage(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/usage notification; a request ID is required")
+		return
+	}
+	if s.usage == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil || strings.TrimSpace(params.SessionID) == "" {
+		s.replyError(msg, codeInvalidParams, "sessionId is required", nil)
+		return
+	}
+	usage, err := s.usage.ReadUsage(params.SessionID)
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("read session usage: %v", err), nil)
+		return
+	}
+	s.sendResult(msg.ID, usage)
 }
 
 func (s *Server) handleModelsList(msg rpcMessage) {
@@ -796,7 +853,18 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 		"sessionUpdate": "plan",
 		"entries":       []map[string]string{{"content": planContent, "priority": "medium", "status": "completed"}},
 	})
-	s.sendResult(requestID, map[string]string{"stopReason": "end_turn"})
+	// Successful turns carry the session's usage in the vendor-extension
+	// namespace so clients can refresh cost/context gauges without a second
+	// round-trip. A failed read degrades to a bare spec result.
+	result := map[string]any{"stopReason": "end_turn"}
+	if s.usage != nil {
+		if usage, err := s.usage.ReadUsage(sessionID); err == nil {
+			result["_packetcode"] = map[string]any{"usage": usage}
+		} else {
+			fmt.Fprintf(s.log, "packetcode acp: read usage for session %s: %v\n", sessionID, err)
+		}
+	}
+	s.sendResult(requestID, result)
 }
 
 func toolCallStart(call provider.ToolCall) map[string]any {

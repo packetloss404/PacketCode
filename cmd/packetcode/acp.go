@@ -103,6 +103,7 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	server := acp.NewServer(stdin, stdout, stderr, factory, welcomeVersion())
 	server.SetSessionLister(&packetSessionLister{dir: sessionsDir})
+	server.SetUsageReader(&packetUsageReader{dir: sessionsDir})
 	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
@@ -185,6 +186,28 @@ func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
 		})
 	}
 	return out, nil
+}
+
+// packetUsageReader serves per-session token/cost usage to ACP clients via
+// the _packetcode/sessions/usage extension and prompt-result enrichment. It
+// re-reads the persisted session file on every call: the agent saves usage
+// after each stream completion, so the file is authoritative, and a full
+// parse per turn is acceptable.
+type packetUsageReader struct {
+	dir string
+}
+
+func (r *packetUsageReader) ReadUsage(sessionID string) (acp.SessionUsage, error) {
+	loaded, err := session.NewManager(r.dir).Load(sessionID)
+	if err != nil {
+		return acp.SessionUsage{}, err
+	}
+	return acp.SessionUsage{
+		ContextTokens: loaded.TokenUsage.ContextTokens,
+		TotalInput:    loaded.TokenUsage.TotalInput,
+		TotalOutput:   loaded.TokenUsage.TotalOutput,
+		CostUSD:       loaded.Cost.TotalUSD,
+	}, nil
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
