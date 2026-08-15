@@ -172,6 +172,149 @@ func TestServerSessionsListWithoutListerIsMethodNotFound(t *testing.T) {
 	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
 }
 
+type staticModelCatalog struct {
+	models []ModelOption
+	err    error
+}
+
+func (c *staticModelCatalog) ListModels() ([]ModelOption, error) {
+	return c.models, c.err
+}
+
+func TestServerModelsListExtension(t *testing.T) {
+	catalog := &staticModelCatalog{models: []ModelOption{
+		{Provider: "codex", Model: "gpt-5.3", Default: true},
+		{Provider: "anthropic", Model: "claude-fable-5"},
+	}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetModelCatalog(catalog) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["modelsList"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/models/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	models, ok := object(t, reply["result"])["models"].([]any)
+	require.True(t, ok)
+	require.Len(t, models, 2)
+	first := object(t, models[0])
+	assert.Equal(t, "codex", first["provider"])
+	assert.Equal(t, "gpt-5.3", first["model"])
+	assert.Equal(t, true, first["default"])
+	second := object(t, models[1])
+	assert.Equal(t, "anthropic", second["provider"])
+	assert.Equal(t, "claude-fable-5", second["model"])
+	assert.Equal(t, false, second["default"])
+}
+
+func TestServerModelsListWithoutCatalogIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["modelsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/models/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
+// recordingFactory captures the SessionConfig session/new hands to the
+// factory and rejects providers outside its allow-list the way the
+// production factory does.
+type recordingFactory struct {
+	knownProviders []string
+
+	mu      sync.Mutex
+	configs []SessionConfig
+}
+
+func (f *recordingFactory) NewSession(_ context.Context, cfg SessionConfig, _ agent.Approver) (*Runtime, error) {
+	if cfg.Provider != "" {
+		known := false
+		for _, slug := range f.knownProviders {
+			if slug == cfg.Provider {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("%w %q", ErrUnknownProvider, cfg.Provider)
+		}
+	}
+	f.mu.Lock()
+	f.configs = append(f.configs, cfg)
+	id := fmt.Sprintf("recorded-session-%d", len(f.configs))
+	f.mu.Unlock()
+	return &Runtime{ID: id, Runner: blockingRunner{}}, nil
+}
+
+func (f *recordingFactory) recorded() []SessionConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]SessionConfig(nil), f.configs...)
+}
+
+func TestServerNewSessionPacketcodeOverride(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{knownProviders: []string{"anthropic", "ollama"}}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	// No override: the factory sees empty Provider/Model.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	plain := client.receiveID(1)
+	require.NotEmpty(t, object(t, plain["result"])["sessionId"])
+
+	// Override: provider and model reach the factory verbatim.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "anthropic", "model": "claude-fable-5"},
+		},
+	})
+	overridden := client.receiveID(2)
+	require.NotEmpty(t, object(t, overridden["result"])["sessionId"])
+
+	// Unknown provider: invalid-params, and the factory records no session.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{
+			"cwd": workspace, "mcpServers": []any{},
+			"_packetcode": map[string]any{"provider": "nonexistent", "model": "whatever"},
+		},
+	})
+	rejected := client.receiveID(3)
+	assert.Equal(t, json.Number("-32602"), object(t, rejected["error"])["code"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 2)
+	assert.Equal(t, "", configs[0].Provider)
+	assert.Equal(t, "", configs[0].Model)
+	assert.Equal(t, "anthropic", configs[1].Provider)
+	assert.Equal(t, "claude-fable-5", configs[1].Model)
+}
+
 func TestServerCancelReturnsTerminalCancelledAndFailsOpenTool(t *testing.T) {
 	workspace := t.TempDir()
 	factory := blockingFactory{}

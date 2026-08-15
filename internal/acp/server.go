@@ -40,11 +40,20 @@ type MCPServer struct {
 }
 
 // SessionConfig contains the workspace-scoped inputs needed to build a native
-// PacketCode agent session.
+// PacketCode agent session. Provider and Model are optional per-session
+// overrides from the session/new "_packetcode" params object; empty values
+// mean "use the configured defaults".
 type SessionConfig struct {
 	CWD        string
 	MCPServers []MCPServer
+	Provider   string
+	Model      string
 }
+
+// ErrUnknownProvider marks a session/new provider override the factory does
+// not recognize. Factories wrap it (errors.Is-compatible) so the server can
+// answer invalid-params instead of a generic internal error.
+var ErrUnknownProvider = errors.New("unknown provider")
 
 // Runner is PacketCode's terminal-independent agent event source.
 type Runner interface {
@@ -85,6 +94,22 @@ type SessionLister interface {
 	ListSessions() ([]SessionSummary, error)
 }
 
+// ModelOption is one selectable provider/model pair served by the
+// _packetcode/models/list extension. Default marks the pair a new session
+// uses when session/new carries no "_packetcode" override.
+type ModelOption struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Default  bool   `json:"default"`
+}
+
+// ModelCatalog supplies the configured provider/model choices for the
+// _packetcode/models/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers.
+type ModelCatalog interface {
+	ListModels() ([]ModelOption, error)
+}
+
 // Server is a single ACP stdio connection. It is safe for prompt workers and
 // permission responses to use concurrently.
 type Server struct {
@@ -94,6 +119,7 @@ type Server struct {
 	factory SessionFactory
 	version string
 	lister  SessionLister
+	catalog ModelCatalog
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -164,6 +190,12 @@ func (s *Server) SetSessionLister(l SessionLister) {
 	s.lister = l
 }
 
+// SetModelCatalog enables the _packetcode/models/list extension. Must be
+// called before Serve; a nil catalog leaves the method unregistered.
+func (s *Server) SetModelCatalog(c ModelCatalog) {
+	s.catalog = c
+}
+
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
 func (s *Server) Serve(ctx context.Context) error {
 	s.ctx = ctx
@@ -231,6 +263,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handleCancel(msg)
 	case "_packetcode/sessions/list":
 		s.handleSessionsList(msg)
+	case "_packetcode/models/list":
+		s.handleModelsList(msg)
 	default:
 		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 	}
@@ -269,8 +303,12 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			"mcpCapabilities":     map[string]bool{"http": false, "sse": false},
 			"sessionCapabilities": map[string]any{},
 			// Vendor extension surface; underscore-prefixed so spec-only
-			// clients skip it. sessionsList gates _packetcode/sessions/list.
-			"_packetcode": map[string]any{"sessionsList": s.lister != nil},
+			// clients skip it. sessionsList gates _packetcode/sessions/list;
+			// modelsList gates _packetcode/models/list.
+			"_packetcode": map[string]any{
+				"sessionsList": s.lister != nil,
+				"modelsList":   s.catalog != nil,
+			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
 		"authMethods": []any{},
@@ -297,6 +335,26 @@ func (s *Server) handleSessionsList(msg rpcMessage) {
 	s.sendResult(msg.ID, map[string]any{"sessions": summaries})
 }
 
+func (s *Server) handleModelsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/models/list notification; a request ID is required")
+		return
+	}
+	if s.catalog == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	models, err := s.catalog.ListModels()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list models: %v", err), nil)
+		return
+	}
+	if models == nil {
+		models = []ModelOption{}
+	}
+	s.sendResult(msg.ID, map[string]any{"models": models})
+}
+
 type wireMCPServer struct {
 	Type    string   `json:"type"`
 	Name    string   `json:"name"`
@@ -317,6 +375,12 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		CWD                   string           `json:"cwd"`
 		MCPServers            *[]wireMCPServer `json:"mcpServers"`
 		AdditionalDirectories []string         `json:"additionalDirectories"`
+		// Vendor extension: optional per-session provider/model override,
+		// mirroring the _packetcode capability namespace.
+		Packetcode *struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"_packetcode"`
 	}
 	if err := decodeParams(msg.Params, &params); err != nil {
 		s.replyError(msg, codeInvalidParams, "invalid session/new parameters", nil)
@@ -349,9 +413,18 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
 		return
 	}
+	sessionConfig := SessionConfig{CWD: cwd, MCPServers: mcpServers}
+	if params.Packetcode != nil {
+		sessionConfig.Provider = strings.TrimSpace(params.Packetcode.Provider)
+		sessionConfig.Model = strings.TrimSpace(params.Packetcode.Model)
+	}
 	approver := &permissionApprover{server: s}
-	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{CWD: cwd, MCPServers: mcpServers}, approver)
+	runtime, err := s.factory.NewSession(s.ctx, sessionConfig, approver)
 	if err != nil {
+		if errors.Is(err, ErrUnknownProvider) {
+			s.replyError(msg, codeInvalidParams, err.Error(), nil)
+			return
+		}
 		s.replyError(msg, codeInternalError, "create PacketCode session: "+err.Error(), nil)
 		return
 	}

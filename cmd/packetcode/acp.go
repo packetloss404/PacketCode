@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/packetcode/packetcode/internal/acp"
@@ -102,11 +103,61 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	server := acp.NewServer(stdin, stdout, stderr, factory, welcomeVersion())
 	server.SetSessionLister(&packetSessionLister{dir: sessionsDir})
+	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// packetModelCatalog serves the configured provider/model choices to ACP
+// clients via the _packetcode/models/list extension. The active provider and
+// model (config defaults plus any CLI override) are flagged Default so
+// clients can preselect them.
+type packetModelCatalog struct {
+	cfg            *config.Config
+	activeProvider string
+	activeModel    string
+}
+
+func (c *packetModelCatalog) ListModels() ([]acp.ModelOption, error) {
+	out := make([]acp.ModelOption, 0, len(c.cfg.Providers)+1)
+	seen := make(map[string]struct{})
+	add := func(providerSlug, model string) {
+		if providerSlug == "" || model == "" {
+			return
+		}
+		key := providerSlug + "\x00" + model
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, acp.ModelOption{
+			Provider: providerSlug,
+			Model:    model,
+			Default:  providerSlug == c.activeProvider && model == c.activeModel,
+		})
+	}
+	// The active pair leads the list even when it is absent from config
+	// (e.g. a --model CLI override).
+	add(c.activeProvider, c.activeModel)
+	factories := providerFactoriesFromConfig(c.cfg)
+	slugs := make([]string, 0, len(c.cfg.Providers))
+	for slug := range c.cfg.Providers {
+		if _, ok := factories[slug]; ok {
+			slugs = append(slugs, slug)
+		}
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		pc := c.cfg.Providers[slug]
+		add(slug, pc.DefaultModel)
+		for _, m := range pc.Models {
+			add(slug, m.ID)
+		}
+	}
+	return out, nil
 }
 
 // packetSessionLister serves persisted session history to ACP clients via the
@@ -137,24 +188,41 @@ func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
-	if f.provider == "" {
+	factories := providerFactoriesFromConfig(f.cfg)
+	activeProvider := f.provider
+	activeModel := f.model
+	if cfg.Provider != "" {
+		if _, ok := factories[cfg.Provider]; !ok {
+			return nil, fmt.Errorf("%w %q", acp.ErrUnknownProvider, cfg.Provider)
+		}
+		if cfg.Provider != f.provider {
+			// A provider override invalidates the configured default model;
+			// fall back to that provider's own default unless the client also
+			// picked a model.
+			activeModel = f.cfg.Providers[cfg.Provider].DefaultModel
+		}
+		activeProvider = cfg.Provider
+	}
+	if cfg.Model != "" {
+		activeModel = cfg.Model
+	}
+	if activeProvider == "" {
 		return nil, fmt.Errorf("no default provider is configured; configure PacketCode before creating a session")
 	}
-	if f.model == "" {
-		return nil, fmt.Errorf("no model is configured for provider %q", f.provider)
+	if activeModel == "" {
+		return nil, fmt.Errorf("no model is configured for provider %q", activeProvider)
 	}
-	factories := providerFactoriesFromConfig(f.cfg)
-	providerFactory, ok := factories[f.provider]
+	providerFactory, ok := factories[activeProvider]
 	if !ok {
-		return nil, fmt.Errorf("provider %q is unknown", f.provider)
+		return nil, fmt.Errorf("provider %q is unknown", activeProvider)
 	}
-	key := f.cfg.GetProviderKey(f.provider)
-	if providerRequiresAPIKey(f.cfg, f.provider) && key == "" {
-		return nil, fmt.Errorf("provider %q is not configured with an API key", f.provider)
+	key := f.cfg.GetProviderKey(activeProvider)
+	if providerRequiresAPIKey(f.cfg, activeProvider) && key == "" {
+		return nil, fmt.Errorf("provider %q is not configured with an API key", activeProvider)
 	}
 	reg := provider.NewRegistry()
 	reg.Register(providerFactory(key))
-	if err := reg.SetActive(f.provider, f.model); err != nil {
+	if err := reg.SetActive(activeProvider, activeModel); err != nil {
 		return nil, err
 	}
 
@@ -170,7 +238,7 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	toolReg.Register(tools.NewExecuteCommandTool(root))
 
 	sessions := session.NewManager(f.sessionsDir)
-	created, err := sessions.New(f.provider, f.model)
+	created, err := sessions.New(activeProvider, activeModel)
 	if err != nil {
 		return nil, fmt.Errorf("persist session: %w", err)
 	}
