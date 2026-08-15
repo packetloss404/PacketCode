@@ -67,6 +67,29 @@ func serverPermissionCeiling(cfg *config.Config) permissions.Profile {
 	return ceiling
 }
 
+// defaultPermissionMode names, in the ACP wire vocabulary, the profile a
+// session runs under when session/new carries no override. Advertised at
+// initialize so a client can label its permission control with what the
+// engine will actually do instead of assuming "ask".
+func defaultPermissionMode(cfg *config.Config) string {
+	profile := permissions.ProfileAsk
+	if cfg.Permissions.Profile != "" {
+		if parsed, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
+			profile = parsed
+		}
+	}
+	if cfg.Behavior.TrustMode {
+		profile = permissions.ProfileFull
+	}
+	// Map back to the wire spelling; a custom profile has no wire name.
+	for _, mode := range acp.PermissionModes {
+		if parsed, err := permissions.ParseProfile(mode); err == nil && parsed == profile {
+			return mode
+		}
+	}
+	return ""
+}
+
 // allowedPermissionModes filters the wire vocabulary to modes at or below the
 // ceiling, so clients are never offered an escalation the factory rejects.
 func allowedPermissionModes(ceiling permissions.Profile) []string {
@@ -165,6 +188,7 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	server.SetCommandCatalog(&packetCommandCatalog{})
 	server.SetProjectFileIndex(&packetProjectFileIndex{})
 	server.SetPermissionModes(allowedPermissionModes(ceiling))
+	server.SetDefaultPermissionMode(defaultPermissionMode(cfg))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
 		return 1

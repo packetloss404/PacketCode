@@ -159,9 +159,17 @@ func TestServerExpandSlashCommand(t *testing.T) {
 	// A bare invocation leaves $ARGUMENTS empty rather than literal.
 	assert.Equal(t, "Deploy to  and report the result.",
 		server.expandSlashCommand("/deploy", "/proj"))
-	// A body with no placeholder ignores trailing text.
-	assert.Equal(t, "Security-review the working tree.",
+	// A body with no placeholder must still carry the user's arguments:
+	// dropping them would delete part of the request while the client keeps
+	// showing the user their whole sentence.
+	assert.Equal(t, "Security-review the working tree.\n\nplease",
 		server.expandSlashCommand("/audit please", "/proj"))
+	// A bare invocation of such a command is just its body.
+	assert.Equal(t, "Security-review the working tree.",
+		server.expandSlashCommand("/audit", "/proj"))
+	// Verb matching is case-insensitive, matching the client's own filtering.
+	assert.Equal(t, "Deploy to prod and report the result.",
+		server.expandSlashCommand("/DEPLOY prod", "/proj"))
 	// Unknown verbs, absolute paths, and multi-line prompts pass through.
 	assert.Equal(t, "/unknown thing", server.expandSlashCommand("/unknown thing", "/proj"))
 	assert.Equal(t, "/usr/bin/env is missing", server.expandSlashCommand("/usr/bin/env is missing", "/proj"))

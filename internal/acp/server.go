@@ -278,6 +278,10 @@ type Server struct {
 	files    ProjectFileIndex
 	// permissionModes, when non-nil, replaces the advertised PermissionModes.
 	permissionModes []string
+	// defaultPermissionMode is the mode a session/new without an override
+	// actually runs under. Advertised so clients can label their control
+	// honestly instead of guessing "ask".
+	defaultPermissionMode string
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -393,6 +397,13 @@ func (s *Server) SetProjectFileIndex(f ProjectFileIndex) {
 // the full PermissionModes vocabulary.
 func (s *Server) SetPermissionModes(modes []string) {
 	s.permissionModes = modes
+}
+
+// SetDefaultPermissionMode advertises the mode sessions run under when
+// session/new carries no override. Must be called before Serve; empty leaves
+// the key absent, which clients read as "unknown".
+func (s *Server) SetDefaultPermissionMode(mode string) {
+	s.defaultPermissionMode = mode
 }
 
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
@@ -521,15 +532,16 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			// configured MCP servers". Older agents reject the omission with
 			// invalid-params, so clients must send [] unless they see this flag.
 			"_packetcode": map[string]any{
-				"sessionsList":    s.lister != nil,
-				"sessionsRename":  s.renamer != nil,
-				"sessionsUsage":   s.usage != nil,
-				"modelsList":      s.catalog != nil,
-				"mcpList":         s.mcp != nil,
-				"mcpDefaults":     true,
-				"commandsList":    s.commands != nil,
-				"projectFiles":    s.files != nil,
-				"permissionModes": s.advertisedPermissionModes(),
+				"sessionsList":          s.lister != nil,
+				"sessionsRename":        s.renamer != nil,
+				"sessionsUsage":         s.usage != nil,
+				"modelsList":            s.catalog != nil,
+				"mcpList":               s.mcp != nil,
+				"mcpDefaults":           true,
+				"commandsList":          s.commands != nil,
+				"projectFiles":          s.files != nil,
+				"permissionModes":       s.advertisedPermissionModes(),
+				"defaultPermissionMode": s.defaultPermissionMode,
 			},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
@@ -777,9 +789,19 @@ func (s *Server) expandSlashCommand(prompt, cwd string) string {
 		return prompt
 	}
 	for _, cmd := range commands {
-		if cmd.Name == name && cmd.Body != "" {
+		if !strings.EqualFold(cmd.Name, name) || cmd.Body == "" {
+			continue
+		}
+		if strings.Contains(cmd.Body, "$ARGUMENTS") {
 			return strings.ReplaceAll(cmd.Body, "$ARGUMENTS", args)
 		}
+		// No placeholder: the arguments must still reach the model. Dropping
+		// them silently deletes half of what the user asked for while the
+		// client still shows them their whole sentence.
+		if args == "" {
+			return cmd.Body
+		}
+		return cmd.Body + "\n\n" + args
 	}
 	return prompt
 }
