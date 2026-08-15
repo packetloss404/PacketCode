@@ -1795,20 +1795,37 @@ func (a *App) handleJobUpdate(snap jobs.Snapshot) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// hasErrorDetail reports whether a snapshot's Error text should be surfaced.
+// Abandoned jobs qualify alongside failed ones: the transport or shutdown
+// error is preserved on the record and is usually the only evidence the user
+// has about why the outcome was never confirmed.
+func hasErrorDetail(snap jobs.Snapshot) bool {
+	if strings.TrimSpace(snap.Error) == "" {
+		return false
+	}
+	return snap.State == jobs.StateFailed || snap.State == jobs.StateAbandoned
+}
+
 // formatTerminalJobLine renders a single-line inline notification for a
 // job that has just reached a terminal state. Matches the spec:
 //
 //	[job:7f3a — done · 12s · gemini/2.5-flash · $0.0031]
 //	14 call sites in 8 files; …
 func formatTerminalJobLine(snap jobs.Snapshot) string {
-	label := "done"
+	// The default is the state's own name, not "done". A hardcoded success
+	// default means any state this switch has not been taught about announces
+	// itself in the conversation as a completed run.
+	label := snap.State.String()
 	switch snap.State {
-	case jobs.StateFailed:
-		label = "failed"
-	case jobs.StateCancelled:
-		label = "cancelled"
 	case jobs.StateCompleted:
 		label = "done"
+	case jobs.StateAbandoned:
+		// The cause is the only thing that distinguishes "the app exited" from
+		// "the transport died and a remote agent may still be running", so it
+		// belongs in the line the user actually reads.
+		if cause := snap.AbandonCause; cause != "" && cause != jobs.AbandonCauseUnknown {
+			label += " (" + cause.String() + ")"
+		}
 	}
 	dur := time.Duration(0)
 	if !snap.StartedAt.IsZero() && !snap.FinishedAt.IsZero() {
@@ -1829,7 +1846,7 @@ func formatTerminalJobLine(snap jobs.Snapshot) string {
 	head := fmt.Sprintf("[job:%s — %s · %s · %s · %s · $%.4f]",
 		snap.ID, label, roundedDuration(dur), target, prov, snap.CostUSD)
 	body := strings.TrimSpace(snap.Summary)
-	if snap.State == jobs.StateFailed && snap.Error != "" {
+	if hasErrorDetail(snap) {
 		if body != "" {
 			body += "\n"
 		}
@@ -1859,7 +1876,7 @@ func formatAgentPeek(snap jobs.Snapshot) string {
 		}
 	}
 	body := strings.TrimSpace(snap.Summary)
-	if snap.State == jobs.StateFailed && snap.Error != "" {
+	if hasErrorDetail(snap) {
 		if body != "" {
 			body += "\n"
 		}
@@ -2361,9 +2378,13 @@ func renderJobsTable(snaps []jobs.Snapshot) string {
 			rootMode = "worktree"
 		} else if s.AllowWrite {
 			if s.State.IsTerminal() {
-				if s.State == jobs.StateFailed {
+				// Abandoned counts as failed here, not "none". "none" claims
+				// the root was released cleanly, and an unconfirmed outcome is
+				// exactly the case where that claim cannot be made.
+				switch s.State {
+				case jobs.StateFailed, jobs.StateAbandoned:
 					rootMode = "failed"
-				} else {
+				default:
 					rootMode = "none"
 				}
 			} else {

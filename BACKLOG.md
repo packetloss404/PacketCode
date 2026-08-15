@@ -20,10 +20,15 @@ copy its code or prompt text.
   TOML, and MCP definitions remain. Write it as a published contract with its
   own changelog, and land it *before* any daemon work, since a daemon with
   clients becomes the compatibility problem.
-- Surface unreadable job records. `Manager.UnreadableRecords()` is populated but
-  nothing displays it: report the count at startup alongside the recovered
-  count, and list the records in `doctor`. A job that cannot be read is
-  currently invisible, which is the failure the versioning work exists to stop.
+- ~~Surface unreadable job records.~~ **Shipped 2026-08-14** with PCMP10, which
+  made it urgent: an older build meeting the new `abandoned` state rejects the
+  record, so without this the job simply vanished from the UI. Startup now warns
+  on stderr alongside the recovered count, and `doctor` gained the
+  `state.jobs.records` check. Both bound their per-record listing to 3 so a
+  corrupt directory cannot flood the terminal, and both go through the new
+  read-only `jobs.InspectRecords` — `NewManager` reconciles and rewrites
+  records, so a diagnostic built on it would have marked a live instance's
+  in-flight jobs abandoned just by being run.
 - Add end-to-end smoke coverage for first-run setup, provider switching, session resume, approvals, background jobs, workflows, and MCP.
 - Keep provider catalogs, pricing, context windows, and tool-capability metadata
   current; prefer live discovery when authoritative. **Decided 2026-08-14: fetch
@@ -97,13 +102,13 @@ copy its code or prompt text.
 - Add a broader versioned example workflow library.
 - **Ruled 2026-08-14: packetcode does not resume jobs across a restart.** Durable
   execution after the originating app closes belongs to PacketAgent, so PCMP9 is
-  cut rather than deferred. Abandoned jobs are recovered as cancelled and can be
-  explicitly re-run via `/jobs resubmit` (PCH4, 2026-07-31), which starts a new
-  job and never claims the old process resumed. That remains the whole story;
-  "jobs survive restart" must not be claimed by this repo at all. The honest
-  reporting of an interrupted job is now carried by the `abandoned`/
-  `indeterminate` state under Packet Computers, which is promoted from PCMP9
-  precondition to the primary terminal state.
+  cut rather than deferred. An interrupted job can be explicitly re-run via
+  `/jobs resubmit` (PCH4, 2026-07-31), which starts a new job and never claims
+  the old process resumed. That remains the whole story; "jobs survive restart"
+  must not be claimed by this repo at all. The honest reporting of an
+  interrupted job is now carried by the `abandoned` state under Packet
+  Computers, promoted from PCMP9 precondition to the primary terminal state and
+  shipped 2026-08-14 as PCMP10.
 - Let background agents request user clarification through Agent View. Routing
   half-exists: `jobApprover` already forwards to `uiApprover.PromptApproval`.
   Four obstacles remain — read-only jobs are refused before reaching the parent
@@ -322,15 +327,25 @@ root-confined core tools via `packetcode --computer <name>`.
   SSH connections, and fail-closed remote Git worktrees. **PCMP9 is cut** — see
   the ruling under Agents, Loops, and Workflows. PCH4's rule stands and is now
   the only rule: anything not genuinely resumed is reported as abandoned.
-- Add an explicit `abandoned`/`indeterminate` terminal state so loss after an
-  acknowledged remote start is never flattened into a confirmed cancellation;
-  include process-group-aware cancellation evidence. Tracked as PCMP10 in the
-  ledger. **Promoted** by the PCMP9 ruling from precondition to the primary
-  honest terminal state, and no longer blocked on the daemon. Today a remote job that started, was acknowledged, and
-  then lost its transport is marked `Cancelled` via `jobCtx.Err()`,
-  indistinguishable from the user pressing cancel. Job records are now
-  versioned, so a new state written by a newer build is reported rather than
-  silently swallowed — that was the blocker.
+- ~~Add an explicit `abandoned` terminal state so a loss is never flattened into
+  a confirmed cancellation.~~ **Shipped 2026-08-14 as PCMP10.** `StateAbandoned`
+  plus an `AbandonCause` (`app-exit` / `transport-lost` / `unknown`), and a
+  durable `CancelRequest` stamped before the context is cancelled — without it a
+  user cancel and a dead transport are the same `context.Canceled`. A running
+  job left by an unclean exit now reconciles as abandoned; a queued one stays
+  cancelled, because it provably never started. Five sites that treated any
+  unrecognised terminal state as a **success** were fixed at the same time (two
+  workflow gates, `spawn_agent`, `collect_agent_results`, Agent View grouping);
+  they now test `State.IsSuccess()` instead of enumerating failures.
+- **Still open from PCMP10: process-group-aware cancellation evidence.** The
+  state is honest about uncertainty but cannot reduce it. `procrun.KillTree`
+  returns a bare `error`, `computers.ExecResult` carries only an exit code, and
+  `jobs.Manager.Cancel` is a fire-and-forget `context.CancelFunc` with no return
+  path, so nothing learns whether a kill worked; on SSH there is no mechanism to
+  evidence at all. Windows already *computes* per-PID survivor data in
+  `killDescendants` and discards it. Until this lands, `transport-lost` is
+  claimed only where a transport error was actually observed. Sequence it after
+  the in-flight `procrun` Job Object work is committed.
 - Add a generation-aware SSH connection manager only with a no-replay rule for
   writes/commands; current jobs intentionally own independent connections.
 - Add asynchronous remote project workflow discovery and an explicit

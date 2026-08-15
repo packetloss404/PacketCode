@@ -37,11 +37,14 @@ What follows from it:
 - **PCH4's rule is now the whole story.** Anything not genuinely resumed is
   reported as abandoned, and `/jobs resubmit` starts a new job that never claims
   the old process resumed.
-- **The `abandoned`/`indeterminate` terminal state is promoted**, from a PCMP9
-  precondition to the primary honest terminal state, and is no longer blocked on
-  the daemon. Job records became versioned on 2026-08-14, which was the blocker
-  for adding a new state: a state written by a newer build is now reported
-  rather than silently swallowed. It is tracked below as PCMP10.
+- **The abandoned terminal state is promoted**, from a PCMP9 precondition to the
+  primary honest terminal state, and is no longer blocked on the daemon. Job
+  records became versioned on 2026-08-14, which was the blocker for adding a new
+  state: a state written by a newer build is now reported rather than silently
+  swallowed. Tracked below as PCMP10, and shipped the same day. It was scoped
+  down from `abandoned`/`indeterminate` to a single `abandoned` state with an
+  `AbandonCause`, because nothing in the runtime can yet evidence
+  "started, outcome unknown" as distinct — see the PCMP10 note.
 
 **PCMP4 transport edit.** The acceptance condition moves off
 `packetcode daemon --listen 127.0.0.1:<port>` to an AF_UNIX socket on POSIX and
@@ -89,12 +92,39 @@ Two hard rules for the whole loop:
 | **PCMP7** | Runtime backend abstraction | `RuntimeBackend` (resolve/read/write/execute) with `LocalBackend` preserving today's behaviour exactly, plus `ComputerBackend` forwarding to a daemon. Tools gain no remote conditionals. | Backend parity suite run against both implementations | PCMP6 | **in-progress 2026-08-01** — core tools use local/direct-SSH backends; daemon parity remains |
 | **PCMP8** | `ComputerID` on jobs | Jobs carry immutable computer/root identity; `/spawn --computer <name>` and whole-workflow routing use independent direct-SSH backends; remote write jobs require isolated worktrees; Agent View labels the computer. Global and computer permissions compose restrictively. | Job routing + permission-preservation + remote worktree tests | PCMP7 | **closed 2026-08-02 (direct-SSH process-lifetime slice)** |
 | **PCMP9** | Persistent job reconcile | *Planned, never built:* the daemon retains job state; a restarted packetcode reconnects and reconciles rather than abandoning. | *Was:* reconnect, cancel-across-restart, and mislabelling regression tests | PCMP8; PCH4 | **cut 2026-08-14** — durable execution after the originating app closes belongs to PacketAgent, so packetcode does not resume jobs across a restart at all. PCH4's rule stands alone: anything not genuinely resumed is reported as abandoned. Cut, not deferred. |
-| **PCMP10** | `abandoned`/`indeterminate` terminal state | An explicit terminal state so loss after an acknowledged start is never flattened into a confirmed cancellation. Today a remote job that started, was acknowledged, and then lost its transport is marked `Cancelled` via `jobCtx.Err()`, indistinguishable from the user pressing cancel. Carries process-group-aware cancellation evidence. | State round-trip through versioned records; cancel-vs-lost discrimination tests; older-build read-back test | PCH4; versioned job records (2026-08-14) | queued |
+| **PCMP10** | `abandoned` terminal state | An explicit terminal state so a loss after work began is never flattened into a confirmed cancellation, plus an `AbandonCause` (`app-exit` / `transport-lost` / `unknown`). Cancel/CancelAll/Shutdown record a durable `CancelRequest` *before* cancelling the context, which is what makes a deliberate stop distinguishable from a loss at all. A running job left by an unclean exit reconciles as `abandoned`; a queued one still reconciles as `cancelled`, because it provably never started. `State.IsSuccess()` replaces the failure allowlists that reported any new state as a pass. | State + cause round-trip through versioned records; cancel-vs-lost discrimination table; older-build read-back; workflow/spawn/collect treat abandoned as an error | PCH4; versioned job records (2026-08-14) | **closed 2026-08-14** |
 
-PCMP10 is independent of the daemon and can be built now. It was blocked on
-versioned job records — a new state written by a newer build had to be reported
-rather than silently swallowed — and that shipped on 2026-08-14. The PCMP9
-ruling promoted it from precondition to the primary honest terminal state.
+PCMP10 was independent of the daemon and shipped without it. It had been
+blocked on versioned job records — a new state written by a newer build had to
+be reported rather than silently swallowed — and that shipped on 2026-08-14.
+The PCMP9 ruling promoted it from precondition to the primary honest terminal
+state.
+
+Two things about PCMP10 are worth keeping, because both were discovered while
+building it rather than while planning it:
+
+- **The defect was wider than "a state is missing".** Five sites treated any
+  unrecognised terminal state as a *success*: two workflow gates, `spawn_agent`,
+  `collect_agent_results`, and Agent View's `groupForState` default. Adding the
+  state without fixing them would have created a new dishonesty — an abandoned
+  sub-agent reported to the parent model as a win — while removing the old one.
+  They now test for success rather than enumerate failures, so the next state
+  added cannot repeat it.
+- **`abandoned`, not `abandoned`/`indeterminate`.** The row originally named two
+  states. One shipped, because nothing in the runtime can currently evidence
+  "started, outcome unknown" as distinct from "abandoned": there is no
+  acknowledged-start record, no remote pid, and no last-successful-operation
+  timestamp. A second state would have been unreachable vocabulary. The
+  `AbandonCause` field carries the distinction the runtime *can* back, and can
+  grow a value when the evidence exists.
+
+**Not shipped with PCMP10:** process-group-aware cancellation evidence. `procrun`
+can kill a tree but reports nothing about whether it succeeded — `KillTree`
+returns a bare `error`, `computers.ExecResult` carries only an exit code, and
+`jobs.Manager.Cancel` is a fire-and-forget `context.CancelFunc` with no return
+path. On SSH there is no mechanism to evidence at all. Until that exists,
+`transport-lost` is claimed only where a transport error was actually observed,
+and everything else honestly reads `unknown`.
 
 ## Sequencing
 
@@ -103,7 +133,7 @@ PCMP1 -> PCMP2 -> PCMP3
    \-> PCMP4 -> PCMP5
         \-> PCMP6 -> PCMP7 -> PCMP8
 
-PCMP10 (independent of the daemon)
+PCMP10 (independent of the daemon; closed 2026-08-14)
 ```
 
 PCMP3 is independent of the daemon and shipped with the direct foreground SSH
@@ -174,6 +204,9 @@ Stated plainly so no reader infers more than shipped:
   to a registered SSH computer for the lifetime of the local process.
 - No daemon exists, so no status is ever live.
 - Direct SSH is process-lifetime only; it is not persistent job execution.
+- An interrupted job reports `abandoned` with a cause (PCMP10), but packetcode
+  still cannot confirm that a detached remote descendant stopped. The state is
+  honest about the uncertainty; it does not remove it.
 
 ## Out of scope, not pending
 

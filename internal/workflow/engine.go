@@ -477,12 +477,8 @@ func (e *Engine) runWorkAttempt(
 	attempt.Agents = e.waitAll(ctx, ids)
 	attempt.JobIDs = append([]string(nil), ids...)
 	for _, result := range attempt.Agents {
-		if result.State == jobs.StateFailed {
-			attempt.Err = fmt.Errorf("step %q: agent %s failed: %s", st.Name, result.JobID, firstNonEmpty(result.Error, result.Reason, "unknown error"))
-			break
-		}
-		if result.State == jobs.StateCancelled {
-			attempt.Err = fmt.Errorf("step %q: agent %s cancelled", st.Name, result.JobID)
+		if err := e.agentOutcomeError(st.Name, "agent "+result.JobID, result); err != nil {
+			attempt.Err = err
 			break
 		}
 	}
@@ -545,13 +541,47 @@ func (e *Engine) runVerifier(
 		return jobs.Result{}, snap.ID, fmt.Errorf("step %q: verifier did not report a result", st.Name)
 	}
 	result := results[0]
-	if result.State == jobs.StateFailed {
-		return result, snap.ID, fmt.Errorf("step %q: verifier failed: %s", st.Name, firstNonEmpty(result.Error, result.Reason, "unknown error"))
-	}
-	if result.State == jobs.StateCancelled {
-		return result, snap.ID, fmt.Errorf("step %q: verifier cancelled", st.Name)
+	if err := e.agentOutcomeError(st.Name, "verifier", result); err != nil {
+		return result, snap.ID, err
 	}
 	return result, snap.ID, nil
+}
+
+// agentOutcomeError reports why a joined agent result is not a success, and
+// nil when it is. The gate is IsSuccess rather than a list of known failure
+// states: with a failure list, every terminal state added later falls through
+// as a pass and the run advances on work that never succeeded. who is the
+// caller's label for the agent ("agent <id>" or "verifier").
+func (e *Engine) agentOutcomeError(stepName, who string, result jobs.Result) error {
+	if result.State.IsSuccess() {
+		return nil
+	}
+	switch result.State {
+	case jobs.StateFailed:
+		return fmt.Errorf("step %q: %s failed: %s", stepName, who, firstNonEmpty(result.Error, result.Reason, "unknown error"))
+	case jobs.StateCancelled:
+		return fmt.Errorf("step %q: %s cancelled", stepName, who)
+	case jobs.StateAbandoned:
+		cause := ""
+		if c := e.abandonCause(result.JobID); c != "" {
+			cause = fmt.Sprintf(" (cause: %s)", c)
+		}
+		return fmt.Errorf("step %q: %s abandoned%s: the outcome could not be confirmed: %s",
+			stepName, who, cause, firstNonEmpty(result.Error, result.Reason, "no detail recorded"))
+	default:
+		return fmt.Errorf("step %q: %s did not succeed: state %s", stepName, who, result.State)
+	}
+}
+
+// abandonCause reads the cause recorded alongside StateAbandoned. jobs.Result
+// carries the state but not the cause, so the job snapshot is the only place
+// to ask why the outcome is unknown.
+func (e *Engine) abandonCause(jobID string) jobs.AbandonCause {
+	snap, ok := e.jobs.Get(jobID)
+	if !ok {
+		return ""
+	}
+	return snap.AbandonCause
 }
 
 func (e *Engine) verifierOutput(result jobs.Result) string {
@@ -641,7 +671,10 @@ func (e *Engine) waitAll(ctx context.Context, ids []string) []jobs.Result {
 			mu.Lock()
 			got[id] = res
 			mu.Unlock()
-			if res.State == jobs.StateFailed || res.State == jobs.StateCancelled {
+			// Any non-success terminal state trips fail-fast, including one
+			// added after this was written: an unconfirmed outcome is not a
+			// reason to leave sibling agents burning budget.
+			if !res.State.IsSuccess() {
 				select {
 				case failed <- struct{}{}:
 				default:

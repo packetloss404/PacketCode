@@ -592,6 +592,10 @@ func renderJobState(s string, w int) string {
 		return lipgloss.NewStyle().Foreground(theme.Error).Render(label)
 	case "cancelled", "canceled":
 		return theme.StyleSecondary.Render(label)
+	case "abandoned":
+		// Warning, not the cancelled grey: an abandoned step agent is an
+		// unresolved outcome, not a stop anyone asked for.
+		return lipgloss.NewStyle().Foreground(theme.Warning).Render(label)
 	default:
 		return theme.StyleDim.Render(label)
 	}

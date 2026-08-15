@@ -159,7 +159,7 @@ func renderCollectedResults(results []JobWaitResult) string {
 
 func anyCollectedError(results []JobWaitResult) bool {
 	for _, res := range results {
-		if res.State == "failed" || res.State == "cancelled" {
+		if !jobStateIsSuccess(res.State) {
 			return true
 		}
 	}

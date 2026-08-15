@@ -335,14 +335,16 @@ func TestManager_Shutdown_Persists(t *testing.T) {
 	for _, id := range ids {
 		snap, ok := mgr.Get(id)
 		require.True(t, ok)
-		assert.Equal(t, StateCancelled, snap.State, "in-flight job persisted as Cancelled")
+		assert.Equal(t, StateAbandoned, snap.State,
+			"an app exit under a running job leaves its outcome unknown")
+		assert.Equal(t, AbandonCauseAppExit, snap.AbandonCause)
 		// File on disk exists.
 		path := filepath.Join(jobsDir, id+".json")
 		_, err := os.Stat(path)
 		require.NoError(t, err, "persisted job file should exist for %s", id)
 	}
 	// A fresh Manager pointed at the same dir should NOT find anything
-	// to resurrect, because Cancelled is terminal.
+	// to resurrect, because Abandoned is terminal.
 	_, recovered, err := NewManager(Config{JobsDir: jobsDir})
 	require.NoError(t, err)
 	assert.Equal(t, 0, recovered, "Cancelled jobs are terminal — nothing to resurrect")
@@ -369,7 +371,9 @@ func TestManager_OrphanRecovery(t *testing.T) {
 
 	got, ok := mgr.Get("orphan01")
 	require.True(t, ok)
-	assert.Equal(t, StateCancelled, got.State)
+	assert.Equal(t, StateAbandoned, got.State,
+		"a job left running by a previous exit has an unknown outcome")
+	assert.Equal(t, AbandonCauseAppExit, got.AbandonCause)
 	// Read the file directly to confirm Reason was persisted.
 	resurrectedJobs, err := loadOrphaned(jobsDir)
 	require.NoError(t, err)

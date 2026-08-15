@@ -500,6 +500,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	if recovered > 0 {
 		fmt.Fprintf(os.Stderr, "packetcode: recovered %d orphan job(s) from previous run\n", recovered)
 	}
+	warnUnreadableJobRecords(os.Stderr, jobsMgr.UnreadableRecords())
 	jobsMgr.SetSpawnToolFactory(func(parentJobID string, parentDepth int, parentAllowWrite bool) tools.Tool {
 		return tools.NewBackgroundSpawnAgentTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth, parentAllowWrite)
 	})
@@ -593,6 +594,36 @@ func shouldRunSetup(cfg *config.Config, providerOverride string) bool {
 		return false
 	}
 	return providerRequiresAPIKey(cfg, cfg.Default.Provider) && cfg.GetProviderKey(cfg.Default.Provider) == ""
+}
+
+// unreadableJobWarningLimit caps how many job records the startup warning
+// names individually. A jobs dir full of records this build cannot read
+// must stay diagnosable without flooding the terminal on every launch.
+const unreadableJobWarningLimit = 3
+
+// warnUnreadableJobRecords reports job files that this build could not
+// load — most often a record written by a newer packetcode. The files are
+// untouched on disk, so the honest phrasing is "not loaded", not "lost",
+// and this never blocks startup.
+func warnUnreadableJobRecords(w io.Writer, records []jobs.UnreadableRecord) {
+	if len(records) == 0 {
+		return
+	}
+	fmt.Fprintf(
+		w,
+		"packetcode: %d job record(s) were not loaded; the files are still on disk, but these jobs are missing from this session\n",
+		len(records),
+	)
+	shown := records
+	if len(shown) > unreadableJobWarningLimit {
+		shown = shown[:unreadableJobWarningLimit]
+	}
+	for _, rec := range shown {
+		fmt.Fprintf(w, "packetcode:   %s — %s\n", rec.Path, rec.Reason)
+	}
+	if rest := len(records) - len(shown); rest > 0 {
+		fmt.Fprintf(w, "packetcode:   ... and %d more not listed\n", rest)
+	}
 }
 
 // welcomeVersion returns the label shown on the welcome splash. We

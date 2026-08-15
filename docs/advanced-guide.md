@@ -286,7 +286,7 @@ Open `/agents`, or press Left Arrow from an empty idle prompt. In list mode:
 | `x` | Ignore a terminal result. |
 | `Esc` | Clear a composer draft, return to the list, or close the view. |
 
-Live transcript refresh preserves your scroll position unless you were already at the bottom. Jobs are grouped by needs-input, working, completed, failed, and cancelled state.
+Live transcript refresh preserves your scroll position unless you were already at the bottom. Jobs are grouped by needs-input, working, completed, failed, cancelled, and abandoned state.
 
 ### Result lifecycle
 

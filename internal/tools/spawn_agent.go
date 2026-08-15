@@ -241,20 +241,28 @@ func (t *SpawnAgentTool) waitAndReport(ctx context.Context, snap JobSpawnResult,
 		if summary == "" {
 			summary = "(no summary)"
 		}
-		content := fmt.Sprintf("[job:%s — %s] %s", res.JobID, res.State, summary)
+		state := res.State
+		if res.AbandonCause != "" {
+			// Say why the outcome is unknown. "abandoned" alone reads as a
+			// tidy stop; "transport-lost" tells the model the remote work may
+			// still be running and must not simply be retried blind.
+			state = fmt.Sprintf("%s: %s", res.State, res.AbandonCause)
+		}
+		content := fmt.Sprintf("[job:%s — %s] %s", res.JobID, state, summary)
 		if manifest := jobArtifactManifest(res.Artifacts, 8); manifest != "" {
 			content += "\n\nArtifacts:\n" + manifest
 		}
 		if wt := waitWorktreeSummary(res); wt != "" {
 			content += "\n" + wt
 		}
-		isError := res.State == "failed" || res.State == "cancelled"
+		isError := !jobStateIsSuccess(res.State)
 		return ToolResult{
 			Content: content,
 			IsError: isError,
 			Metadata: map[string]any{
 				"job_id":          res.JobID,
 				"state":           res.State,
+				"abandon_cause":   res.AbandonCause,
 				"provider":        res.Provider,
 				"model":           res.Model,
 				"computer_id":     res.ComputerID,
@@ -283,6 +291,18 @@ type waitOutcome struct {
 	res JobWaitResult
 	ok  bool
 }
+
+// jobStateCompleted is the sole JobWaitResult.State label that means the
+// sub-agent finished its work — jobs.StateCompleted.String(), mirrored here
+// because the tools package cannot import jobs.
+const jobStateCompleted = "completed"
+
+// jobStateIsSuccess reports whether a sub-agent's terminal state label is a
+// success. It tests for the one success value instead of enumerating known
+// failures, because a failure list reports every state added later to the
+// model as a success — and "abandoned" in particular means packetcode cannot
+// confirm the work was ever done.
+func jobStateIsSuccess(state string) bool { return state == jobStateCompleted }
 
 // nonEmpty returns v if non-empty, else fallback.
 func nonEmpty(v, fallback string) string {

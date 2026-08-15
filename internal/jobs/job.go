@@ -18,7 +18,17 @@ import (
 )
 
 // State enumerates the lifecycle of a Job. Terminal states (Completed,
-// Failed, Cancelled) never transition further.
+// Failed, Cancelled, Abandoned) never transition further.
+//
+// Cancelled and Abandoned are deliberately distinct. Cancelled means the
+// stop was asked for and the outcome is known: either a human cancelled it
+// or it never started. Abandoned means work had begun and packetcode cannot
+// confirm how it ended — the honest verdict when a transport dies or the app
+// exits mid-run. Flattening the second into the first would report a
+// confirmed cancellation that nobody confirmed.
+//
+// Persisted as the String() value, never the int, so appending here is safe
+// for existing records on disk.
 type State int
 
 const (
@@ -26,7 +36,8 @@ const (
 	StateRunning                // worker goroutine started, agent loop active
 	StateCompleted              // agent emitted EventDone
 	StateFailed                 // EventError or panic
-	StateCancelled              // ctx cancelled by user or shutdown
+	StateCancelled              // stop was requested and the job is known to have stopped
+	StateAbandoned              // work began; packetcode cannot confirm the outcome
 )
 
 // String renders a State for logs and the /jobs panel.
@@ -42,6 +53,8 @@ func (s State) String() string {
 		return "failed"
 	case StateCancelled:
 		return "cancelled"
+	case StateAbandoned:
+		return "abandoned"
 	default:
 		return "unknown"
 	}
@@ -51,10 +64,94 @@ func (s State) String() string {
 // publishing snapshots once a job reaches a terminal state.
 func (s State) IsTerminal() bool {
 	switch s {
-	case StateCompleted, StateFailed, StateCancelled:
+	case StateCompleted, StateFailed, StateCancelled, StateAbandoned:
 		return true
 	}
 	return false
+}
+
+// IsSuccess reports whether s is a terminal state that finished its work.
+// Callers deciding "did this agent succeed?" must use this rather than
+// testing for known failure states: an allowlist of failures silently
+// reports every state added later as a success.
+func (s State) IsSuccess() bool { return s == StateCompleted }
+
+// AbandonCause records why a job was abandoned. It is a string enum for the
+// same reason ComputerPolicy's approval axis is: the safe value must survive
+// an absent JSON field, and "" decodes to CauseUnknown rather than to a
+// confident claim.
+type AbandonCause string
+
+const (
+	// AbandonCauseUnknown is the default. It says only that work began and
+	// the outcome was never confirmed.
+	AbandonCauseUnknown AbandonCause = "unknown"
+	// AbandonCauseAppExit is set when packetcode itself stopped: a shutdown
+	// that cancelled a running job, or reconciliation of a record left
+	// active by an unclean exit.
+	AbandonCauseAppExit AbandonCause = "app-exit"
+	// AbandonCauseTransportLost is set when the job's transport died while
+	// work was in flight. On SSH this is the case packetcode explicitly
+	// cannot resolve: a detached remote descendant may still be running.
+	AbandonCauseTransportLost AbandonCause = "transport-lost"
+)
+
+func (c AbandonCause) String() string {
+	if c == "" {
+		return string(AbandonCauseUnknown)
+	}
+	return string(c)
+}
+
+// normalizeAbandonCause coerces an unrecognised cause to Unknown rather than
+// rejecting the record. The cause is descriptive detail hung off the state;
+// coercing it loses nothing that was ever claimed, because "unknown" is
+// exactly what an unreadable cause means. The State itself is not treated
+// this way — see parseKnownState, which reports rather than coerces.
+func normalizeAbandonCause(c AbandonCause) AbandonCause {
+	switch c {
+	case AbandonCauseUnknown, AbandonCauseAppExit, AbandonCauseTransportLost:
+		return c
+	default:
+		return AbandonCauseUnknown
+	}
+}
+
+// CancelRequest records that a stop was explicitly asked for, and by whom.
+// It is stamped and persisted *before* the context is cancelled, because the
+// context itself carries no cause: user cancel, /cancel all, app shutdown,
+// and a dead transport all surface as an identical context.Canceled. Without
+// this field the worker cannot tell a deliberate cancellation from a loss.
+type CancelRequest string
+
+const (
+	CancelRequestNone     CancelRequest = ""         // nobody asked; a stop here is a loss
+	CancelRequestUser     CancelRequest = "user"     // /cancel <id> or /cancel all
+	CancelRequestShutdown CancelRequest = "shutdown" // the app is exiting
+)
+
+// snapshotAbandonCause exposes a cause only for abandoned jobs. Normalizing
+// unconditionally would stamp "unknown" onto every completed and cancelled
+// job, so the UI would show a reason-for-abandonment on work that was never
+// abandoned.
+func snapshotAbandonCause(j *Job) AbandonCause {
+	if j == nil || j.State != StateAbandoned {
+		return ""
+	}
+	return normalizeAbandonCause(j.AbandonCause)
+}
+
+// normalizeCancelRequest coerces an unrecognised request to None. An
+// unreadable request is not evidence that anyone asked to stop, and None is
+// the value that keeps the worker honest: with no recorded request, a stop
+// is classified as a loss rather than as a confirmed cancellation.
+func normalizeCancelRequest(c CancelRequest) CancelRequest {
+	switch c {
+	case CancelRequestUser, CancelRequestShutdown:
+		return c
+	default:
+		return CancelRequestNone
+	}
 }
 
 // ResultStatus records how a terminal job result has been handled after
@@ -101,14 +198,16 @@ type Job struct {
 	StartedAt         time.Time
 	FinishedAt        time.Time
 	UpdatedAt         time.Time
-	Summary           string // short result summary surfaced into main convo
-	Error             string // populated on StateFailed
-	Reason            string // free-form; "previous app exit" / "app shutdown" / etc.
-	LastActivity      string // concise activity label for dashboards
-	LastMessage       string // latest human-visible text/result snippet
-	NeedsInput        bool   // true while a job is blocked on user action
-	NeedsApproval     bool   // true while a job is blocked on tool approval
-	Seq               int64  // monotonic snapshot sequence for stale-update guards
+	Summary           string        // short result summary surfaced into main convo
+	Error             string        // populated on StateFailed and on StateAbandoned
+	Reason            string        // free-form; "previous app exit" / "app shutdown" / etc.
+	AbandonCause      AbandonCause  // why the outcome is unknown; set with StateAbandoned
+	CancelRequest     CancelRequest // durable record that a stop was asked for
+	LastActivity      string        // concise activity label for dashboards
+	LastMessage       string        // latest human-visible text/result snippet
+	NeedsInput        bool          // true while a job is blocked on user action
+	NeedsApproval     bool          // true while a job is blocked on tool approval
+	Seq               int64         // monotonic snapshot sequence for stale-update guards
 	InputTokens       int
 	OutputTokens      int
 	CostUSD           float64
@@ -128,10 +227,12 @@ type Job struct {
 	WorktreeBase      string             // base ref/SHA used to create the worktree
 	WorktreeNote      string             // fallback or setup note when no worktree was created
 
-	// Reconcile lineage. A job abandoned by a previous process exit is
-	// rewritten as Cancelled and marked Recovered; it is never resumed.
-	// Resubmitting one creates a brand-new job, and the two records are
-	// linked in both directions so neither pretends the old run continued.
+	// Reconcile lineage. A job left active by a previous process exit is
+	// rewritten as Abandoned with cause app-exit and marked Recovered; it is
+	// never resumed. Resubmitting one creates a brand-new job, and the two
+	// records are linked in both directions so neither pretends the old run
+	// continued. Records written before the Abandoned state existed carry
+	// Cancelled + Recovered and are still honoured on read.
 	Recovered     bool   // reconciled from a previous app exit
 	ResubmitOf    string // id of the recovered job this job was resubmitted from
 	ResubmittedAs string // id of the new job created from this recovered job
@@ -146,6 +247,7 @@ type Snapshot struct {
 	WorkspaceIdentity                                        string
 	LastActivity, LastMessage                                string
 	State                                                    State
+	AbandonCause                                             AbandonCause
 	ResultStatus                                             ResultStatus
 	CreatedAt, StartedAt, FinishedAt, UpdatedAt              time.Time
 	Tokens                                                   struct{ Input, Output int }
@@ -171,6 +273,7 @@ func snapshotOf(j *Job) Snapshot {
 		Summary:           j.Summary,
 		Error:             j.Error,
 		State:             j.State,
+		AbandonCause:      snapshotAbandonCause(j),
 		ResultStatus:      normalizeResultStatus(j.ResultStatus),
 		CreatedAt:         j.CreatedAt,
 		StartedAt:         j.StartedAt,

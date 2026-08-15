@@ -53,7 +53,8 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 			j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
 		return
 	case <-m.baseCtx.Done():
-		// Manager shut down before we got a slot.
+		// Manager shut down before we got a slot. Still Cancelled, not
+		// Abandoned: the job provably never ran, so its outcome is known.
 		m.markTerminal(j, StateCancelled, "", "", "manager shutdown before start",
 			j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
 		return
@@ -76,7 +77,13 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 		runtimeBackend, backendErr = m.prepareRemoteBackend(jobCtx, j)
 		if backendErr != nil {
 			if jobCtx.Err() != nil {
-				m.markTerminal(j, StateCancelled, "", "", jobCtx.Err().Error(),
+				// Past markRunning, so work may already have begun on the
+				// remote host. Preserve the real setup error instead of
+				// discarding it behind "context canceled". backendErr is
+				// concrete evidence the transport failed, so it earns the
+				// transport-lost cause when nothing requested the stop.
+				state, cause := m.classifyCancelledWithCause(j, AbandonCauseTransportLost)
+				m.markTerminalCause(j, state, cause, "", "prepare remote workspace: "+backendErr.Error(), jobCtx.Err().Error(),
 					j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
 				return
 			}
@@ -92,7 +99,8 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 		worktree, worktreeErr := m.prepareWorktree(jobCtx, j)
 		if worktreeErr != nil {
 			if jobCtx.Err() != nil {
-				m.markTerminal(j, StateCancelled, "", "", jobCtx.Err().Error(),
+				state, cause := m.classifyCancelled(j)
+				m.markTerminalCause(j, state, cause, "", "prepare worktree: "+worktreeErr.Error(), jobCtx.Err().Error(),
 					j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
 				return
 			}
@@ -265,12 +273,25 @@ func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent
 	}
 
 	// Order of precedence for terminal state:
-	//   1. ctx cancelled (Cancel/CancelAll/Shutdown) → Cancelled
+	//   1. ctx cancelled → Cancelled if a stop was actually requested,
+	//      otherwise Abandoned (the context died without anyone asking)
 	//   2. EventError received → Failed
 	//   3. EventDone received → Completed
 	//   4. Channel closed without Done → Failed (treat as silent error)
+	//
+	// Rule 1 previously wrote Cancelled unconditionally and dropped lastErr
+	// on the floor, so a dead transport was reported as a confirmed
+	// cancellation with no error text at all. Both halves of that are fixed
+	// here: the request record decides the state, and any error observed on
+	// the way down is preserved as evidence.
 	if ctx.Err() != nil {
-		m.markTerminal(j, StateCancelled, summarise(lastAssistantText.String()), "", "",
+		state, cause := m.classifyCancelled(j)
+		errMsg := ""
+		if lastErr != nil {
+			errMsg = lastErr.Error()
+			artifacts = appendTextArtifact(artifacts, "error", "agent error", errMsg, "", true, time.Now().UTC())
+		}
+		m.markTerminalCause(j, state, cause, summarise(lastAssistantText.String()), errMsg, "",
 			j.InputTokens, j.OutputTokens, j.CostUSD, transcript, artifacts)
 		return
 	}
@@ -289,6 +310,46 @@ func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent
 	m.markTerminal(j, StateFailed, summarise(lastAssistantText.String()),
 		"agent stream closed without Done event", "",
 		j.InputTokens, j.OutputTokens, j.CostUSD, transcript, artifacts)
+}
+
+// classifyCancelled decides what a context cancellation after the job began
+// actually means. It reads the request stamped by Cancel/CancelAll/Shutdown
+// before the context was cancelled — the only durable evidence that a human
+// or an app exit asked for this, since context.Canceled itself is identical
+// in every case.
+//
+// No request on record means nothing asked the job to stop and it stopped
+// anyway: the transport died, and packetcode cannot say what happened to the
+// work. That is Abandoned. Guessing Cancelled there is the specific
+// dishonesty this exists to remove, and the SSH case makes it concrete —
+// a detached remote descendant may still be running right now.
+func (m *Manager) classifyCancelled(j *Job) (State, AbandonCause) {
+	return m.classifyCancelledWithCause(j, AbandonCauseUnknown)
+}
+
+// classifyCancelledWithCause is classifyCancelled for callers holding
+// independent evidence of *why* the job stopped. The fallback applies only
+// when nothing requested the stop; a recorded request always wins, because
+// the request is the stronger fact.
+//
+// The fallback exists so transport-lost is claimed only where a transport
+// error was actually observed. Every canceller stamps a request, so without
+// that evidence the honest default is Unknown rather than a guess dressed up
+// as a diagnosis.
+func (m *Manager) classifyCancelledWithCause(j *Job, fallback AbandonCause) (State, AbandonCause) {
+	m.mu.RLock()
+	req := normalizeCancelRequest(j.CancelRequest)
+	m.mu.RUnlock()
+	switch req {
+	case CancelRequestUser:
+		return StateCancelled, ""
+	case CancelRequestShutdown:
+		// The app exited underneath a running job. It was not resumed and
+		// will not be, so the outcome is genuinely unknown.
+		return StateAbandoned, AbandonCauseAppExit
+	default:
+		return StateAbandoned, normalizeAbandonCause(fallback)
+	}
 }
 
 // applyUsage records a usage delta from a stream completion against the

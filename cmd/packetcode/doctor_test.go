@@ -473,6 +473,136 @@ func TestDoctorCheckFilterRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestDoctorJobRecordChecks(t *testing.T) {
+	readable := `{"format_version":1,"id":"job_ok","state":"completed"}`
+	future := `{"format_version":99,"id":"job_future","state":"completed"}`
+	unknownState := `{"format_version":1,"id":"job_weird","state":"teleported"}`
+
+	cases := []struct {
+		name       string
+		files      map[string]string
+		wantStatus string
+		wantDetail []string
+		denyDetail []string
+	}{
+		{
+			name:       "empty jobs dir is ok",
+			wantStatus: doctorOK,
+			wantDetail: []string{"0 record(s) in "},
+		},
+		{
+			name: "readable records are counted and non-records ignored",
+			files: map[string]string{
+				"job_a.json":        readable,
+				"job_b.json":        readable,
+				"notes.txt":         "not a job record",
+				".job.tmp.json.tmp": readable,
+				".job.x.json":       readable,
+			},
+			wantStatus: doctorOK,
+			wantDetail: []string{"2 record(s) in "},
+		},
+		{
+			name: "record from a newer build warns without hiding the readable ones",
+			files: map[string]string{
+				"job_a.json":      readable,
+				"job_future.json": future,
+			},
+			wantStatus: doctorWarn,
+			wantDetail: []string{
+				"1 job record(s) not loaded by this build",
+				"files left in place",
+				"1 readable",
+				"job_future.json",
+				"job record version 99 is newer than this build supports (1)",
+			},
+			denyDetail: []string{"more not listed"},
+		},
+		{
+			name: "unrecognised state is reported as unreadable",
+			files: map[string]string{
+				"job_weird.json": unknownState,
+			},
+			wantStatus: doctorWarn,
+			wantDetail: []string{
+				"1 job record(s) not loaded by this build",
+				"job_weird.json",
+				`unrecognised job state "teleported"`,
+			},
+		},
+		{
+			name: "listing is bounded and the remainder is counted",
+			files: map[string]string{
+				"job_1.json": future,
+				"job_2.json": future,
+				"job_3.json": future,
+				"job_4.json": future,
+				"job_5.json": future,
+				"job_6.json": "{not json at all",
+			},
+			wantStatus: doctorWarn,
+			wantDetail: []string{
+				"6 job record(s) not loaded by this build",
+				"0 readable",
+				"... and 3 more not listed",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := isolateDoctorEnv(t)
+			defer restore()
+
+			jobsDir, err := config.JobsDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range tc.files {
+				if err := os.WriteFile(filepath.Join(jobsDir, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := runDoctorCommand([]string{"--json", "--check", "state.jobs.records"}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("doctor exit = %d, stderr=%q", code, stderr.String())
+			}
+			var report doctorReport
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("doctor json: %v\n%s", err, stdout.String())
+			}
+			check := assertDoctorCheck(t, report, "state.jobs.records", tc.wantStatus)
+			for _, want := range tc.wantDetail {
+				if !strings.Contains(check.Message+" "+check.Detail, want) {
+					t.Fatalf("check missing %q; message=%q detail=%q", want, check.Message, check.Detail)
+				}
+			}
+			for _, deny := range tc.denyDetail {
+				if strings.Contains(check.Detail, deny) {
+					t.Fatalf("check unexpectedly contains %q; detail=%q", deny, check.Detail)
+				}
+			}
+			if tc.wantStatus == doctorWarn && check.Fix == "" {
+				t.Fatalf("warning check has no fix hint: %+v", check)
+			}
+
+			// Doctor diagnoses; it must not reconcile. Every file it read is
+			// still on disk, byte-identical.
+			for name, body := range tc.files {
+				got, err := os.ReadFile(filepath.Join(jobsDir, name))
+				if err != nil {
+					t.Fatalf("doctor removed %s: %v", name, err)
+				}
+				if string(got) != body {
+					t.Fatalf("doctor rewrote %s:\n got %s\nwant %s", name, got, body)
+				}
+			}
+		})
+	}
+}
+
 func isolateDoctorEnv(t *testing.T) func() {
 	t.Helper()
 	home := t.TempDir()

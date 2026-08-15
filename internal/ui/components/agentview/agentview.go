@@ -24,6 +24,7 @@ const (
 	StateCompleted = "completed"
 	StateFailed    = "failed"
 	StateCancelled = "cancelled"
+	StateAbandoned = "abandoned"
 )
 
 // Job is the display projection Agent View needs. App code can map this from
@@ -32,6 +33,7 @@ type Job struct {
 	ID, ParentJobID, Prompt, Provider, Model string
 	ComputerID, ComputerName, WorkingDir     string
 	State                                    string
+	AbandonCause                             string
 	ResultStatus                             string
 	Summary, Error                           string
 	LastActivity, LastMessage                string
@@ -69,12 +71,17 @@ type IgnoreMsg struct{ JobID string }
 
 type group int
 
+// Ordinals matter: rebuildRows keeps every group ≤ groupCompleted on screen
+// even when empty, and hides the rest. groupAbandoned belongs on the hidden
+// side — an always-visible "Abandoned" heading would imply lost work is a
+// routine part of the lifecycle.
 const (
 	groupNeedsInput group = iota
 	groupActive
 	groupCompleted
 	groupFailed
 	groupCancelled
+	groupAbandoned
 )
 
 type rowKind int
@@ -173,6 +180,7 @@ func fromSnapshot(s jobspkg.Snapshot) Job {
 		ComputerName:   s.ComputerName,
 		WorkingDir:     s.WorkingDir,
 		State:          s.State.String(),
+		AbandonCause:   string(s.AbandonCause),
 		ResultStatus:   s.ResultStatus.String(),
 		Summary:        s.Summary,
 		Error:          s.Error,
@@ -347,7 +355,9 @@ func (m *Model) rebuildRows() {
 		groups[g] = append(groups[g], j)
 	}
 
-	order := []group{groupNeedsInput, groupActive, groupCompleted, groupFailed, groupCancelled}
+	// Every group must be listed: a group missing from this slice has no rows
+	// built for it, so its jobs disappear from the view entirely.
+	order := []group{groupNeedsInput, groupActive, groupCompleted, groupFailed, groupCancelled, groupAbandoned}
 	m.rows = m.rows[:0]
 	for _, g := range order {
 		items := groups[g]
@@ -385,6 +395,8 @@ func groupForState(s string) group {
 		return groupFailed
 	case StateCancelled, "canceled":
 		return groupCancelled
+	case StateAbandoned:
+		return groupAbandoned
 	default:
 		return groupActive
 	}
@@ -402,6 +414,8 @@ func groupLabel(g group) string {
 		return "Failed"
 	case groupCancelled:
 		return "Cancelled"
+	case groupAbandoned:
+		return "Abandoned"
 	default:
 		return "Jobs"
 	}
@@ -419,6 +433,10 @@ func groupDescription(g group) string {
 		return "Agents that stopped with an error"
 	case groupCancelled:
 		return "Agents stopped before completion"
+	case groupAbandoned:
+		// Spelled out because the two plausible guesses are both wrong: these
+		// agents were neither cancelled nor finished, and none was resumed.
+		return "Agents whose outcome is unknown; they were not resumed"
 	default:
 		return ""
 	}
@@ -589,6 +607,10 @@ func (m Model) renderJobRow(j Job, selected bool, w int) string {
 		icon, iconStyle = "!", theme.StyleError
 	case groupCancelled:
 		icon, iconStyle = "×", theme.StyleSecondary
+	case groupAbandoned:
+		// A question mark, never the completed check or the cancelled cross:
+		// the glyph has to read as "we do not know how this ended".
+		icon, iconStyle = "?", theme.StyleWarning
 	}
 	prompt := truncate(strings.TrimSpace(rowMessage(j)), max(8, w-30))
 	if prompt == "" {
@@ -619,6 +641,25 @@ func statusBadge(j Job) string {
 	case j.NeedsInput:
 		return "input"
 	}
+	// Abandonment outranks both the result-handling status and the last
+	// activity label. Those describe what someone did with the result or what
+	// the agent was last seen doing; neither may stand in for an outcome we
+	// never observed.
+	if groupForState(j.State) == groupAbandoned {
+		badge := StateAbandoned
+		if cause := abandonCauseLabel(j); cause != "" {
+			badge += " (" + cause + ")"
+		}
+		// Keep a final handling label alongside the outcome. Dropping it
+		// would invite a user who already injected or ignored this result to
+		// do it a second time. The outcome still leads: the handling label
+		// says what was done with the result, not whether the work finished.
+		switch status := strings.ToLower(strings.TrimSpace(j.ResultStatus)); status {
+		case "injected", "ignored", "consumed":
+			badge += " · " + status
+		}
+		return badge
+	}
 	switch strings.ToLower(strings.TrimSpace(j.ResultStatus)) {
 	case "consumed":
 		return "consumed"
@@ -646,10 +687,27 @@ func statusBadge(j Job) string {
 	return strings.ToLower(strings.TrimSpace(j.State))
 }
 
+// abandonCauseLabel returns the cause to show alongside the abandoned state,
+// or "" when there is nothing to add. "unknown" is dropped deliberately: the
+// state already says the outcome is unknown, so repeating it as a cause adds
+// no information and reads like a second, distinct fact.
+func abandonCauseLabel(j Job) string {
+	cause := strings.ToLower(strings.TrimSpace(j.AbandonCause))
+	if cause == "" || cause == string(jobspkg.AbandonCauseUnknown) {
+		return ""
+	}
+	return cause
+}
+
+// canCancel is false for every terminal state, abandoned included. There is
+// nothing left to stop, and offering the key implies the job is still live.
 func canCancel(j Job) bool {
 	return groupForState(j.State) == groupActive
 }
 
+// canDecideResult is true for abandoned jobs. Whatever partial work and error
+// text they carry is still the user's to inject or ignore; without a decision
+// the result would sit in the view forever with no way to clear it.
 func canDecideResult(j Job) bool {
 	if groupForState(j.State) == groupActive {
 		return false
@@ -684,6 +742,8 @@ func renderState(s string, w int) string {
 		return lipgloss.NewStyle().Foreground(theme.Error).Render(label)
 	case StateCancelled, "canceled":
 		return theme.StyleSecondary.Render(label)
+	case StateAbandoned:
+		return lipgloss.NewStyle().Foreground(theme.Warning).Render(label)
 	default:
 		return theme.StyleDim.Render(label)
 	}

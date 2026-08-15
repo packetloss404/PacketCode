@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider/codexauth"
 )
@@ -199,6 +200,7 @@ func buildDoctorReport() doctorReport {
 	addStateDirCheck(&r, "state.sessions", "sessions dir", config.SessionsDir)
 	addStateDirCheck(&r, "state.backups", "backups dir", config.BackupsDir)
 	addStateDirCheck(&r, "state.jobs", "jobs dir", config.JobsDir)
+	addJobRecordCheck(&r, config.JobsDir)
 	addStateDirCheck(&r, "state.worktrees", "worktrees dir", config.WorktreesDir)
 	addStateDirCheck(&r, "state.commands", "commands dir", config.UserCommandsDir)
 	addPathCheck(&r, "state.cost_tally", "cost tally path", config.CostTallyPath)
@@ -286,6 +288,61 @@ func addStateDirCheck(r *doctorReport, id, message string, fn func() (string, er
 	}
 	status, detail := writableDirStatus(dir)
 	r.add(id, "state", status, message+" writable", detail, "Fix filesystem permissions for "+dir, "docs/configuration.md")
+}
+
+// unreadableJobRecordListLimit bounds how many unreadable records the
+// doctor detail names individually, matching the startup warning. A jobs
+// dir full of records this build cannot decode must not bury the rest of
+// the report.
+const unreadableJobRecordListLimit = 3
+
+// addJobRecordCheck reports job records this build cannot decode. It reads
+// the jobs dir without writing to it — doctor diagnoses, it never
+// reconciles — so a record named here is still on disk and still readable
+// by a build that understands it.
+func addJobRecordCheck(r *doctorReport, fn func() (string, error)) {
+	dir, err := fn()
+	if err != nil {
+		r.add("state.jobs.records", "state", doctorFail, "job records unavailable", err.Error(), "", "docs/configuration.md")
+		return
+	}
+	readable, unreadable, err := jobs.InspectRecords(dir)
+	if err != nil {
+		r.add("state.jobs.records", "state", doctorFail, "job records unreadable", err.Error(), "Fix filesystem permissions for "+dir, "docs/feature-background-agents.md")
+		return
+	}
+	if len(unreadable) == 0 {
+		r.add("state.jobs.records", "state", doctorOK, "job records readable", fmt.Sprintf("%d record(s) in %s", readable, dir), "", "docs/feature-background-agents.md")
+		return
+	}
+	r.add(
+		"state.jobs.records",
+		"state",
+		doctorWarn,
+		fmt.Sprintf("%d job record(s) not loaded by this build", len(unreadable)),
+		unreadableJobRecordDetail(readable, unreadable),
+		"Upgrade packetcode, or move the listed files out of "+dir,
+		"docs/feature-background-agents.md",
+	)
+}
+
+// unreadableJobRecordDetail renders one doctor detail line: what still
+// loads, then the offending files with their reasons. The files were not
+// lost, only not loaded, and the path is the actionable part.
+func unreadableJobRecordDetail(readable int, unreadable []jobs.UnreadableRecord) string {
+	parts := make([]string, 0, unreadableJobRecordListLimit+3)
+	parts = append(parts, "files left in place", fmt.Sprintf("%d readable", readable))
+	shown := unreadable
+	if len(shown) > unreadableJobRecordListLimit {
+		shown = shown[:unreadableJobRecordListLimit]
+	}
+	for _, rec := range shown {
+		parts = append(parts, rec.Path+": "+rec.Reason)
+	}
+	if rest := len(unreadable) - len(shown); rest > 0 {
+		parts = append(parts, fmt.Sprintf("... and %d more not listed", rest))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func addPathCheck(r *doctorReport, id, message string, fn func() (string, error)) {

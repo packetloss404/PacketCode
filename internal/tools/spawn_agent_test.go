@@ -479,3 +479,77 @@ func TestCollectAgentResultsTool_PartialExplicitCollectionReportsMissing(t *test
 		t.Fatalf("missing_job_ids = %#v, want child-2", res.Metadata["missing_job_ids"])
 	}
 }
+
+// TestSpawnAgentTool_Wait_AbandonedIsError verifies a sub-agent whose outcome
+// packetcode could not confirm is reported to the parent model as an error.
+// Reporting it as a success is the failure mode this guards: the model would
+// build on work that may never have happened.
+func TestSpawnAgentTool_Wait_AbandonedIsError(t *testing.T) {
+	f := &fakeSpawner{
+		spawnResult: JobSpawnResult{ID: "abandon1", Provider: "gemini", Model: "flash"},
+		waitResult: JobWaitResult{
+			JobID: "abandon1", Provider: "gemini", Model: "flash",
+			State: "abandoned", Error: "transport closed while work was in flight",
+		},
+		waitOK: true,
+	}
+	tool := NewSpawnAgentTool(f, "", 0)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"prompt":"do it","wait":true}`))
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("abandoned child must return IsError; got %+v", res)
+	}
+	if !strings.Contains(res.Content, "abandoned") {
+		t.Fatalf("Content %q should surface the abandoned state", res.Content)
+	}
+	if got, _ := res.Metadata["state"].(string); got != "abandoned" {
+		t.Fatalf("metadata state = %v, want abandoned", res.Metadata["state"])
+	}
+}
+
+// TestSpawnAgentTool_Wait_UnknownStateIsError pins the success-test contract:
+// only "completed" is a success, so a terminal state added later is reported
+// as an error rather than silently passing.
+func TestSpawnAgentTool_Wait_UnknownStateIsError(t *testing.T) {
+	f := &fakeSpawner{
+		spawnResult: JobSpawnResult{ID: "future01"},
+		waitResult:  JobWaitResult{JobID: "future01", State: "some-future-state", Summary: "?"},
+		waitOK:      true,
+	}
+	tool := NewSpawnAgentTool(f, "", 0)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"prompt":"do it","wait":true}`))
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("unrecognised terminal state must return IsError; got %+v", res)
+	}
+}
+
+// TestCollectAgentResultsTool_AbandonedResultIsError mirrors the spawn_agent
+// guard for the batch collection path.
+func TestCollectAgentResultsTool_AbandonedResultIsError(t *testing.T) {
+	f := &fakeSpawner{
+		collectOK: true,
+		collectResults: []JobWaitResult{
+			{JobID: "child-1", State: "completed", Summary: "done"},
+			{JobID: "child-2", State: "abandoned", Reason: "app exited mid-run"},
+		},
+	}
+	tool := NewCollectAgentResultsTool(f, "", 0)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"job_ids":["child-1","child-2"]}`))
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("an abandoned child should make the collection IsError")
+	}
+	if !strings.Contains(res.Content, "app exited mid-run") {
+		t.Fatalf("Content %q missing the abandoned child's reason", res.Content)
+	}
+}

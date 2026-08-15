@@ -6,6 +6,21 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Explicit `abandoned` terminal state for background jobs (PCMP10), so a job
+  whose outcome was never observed is no longer reported as a cancellation
+  somebody chose. Carries an `AbandonCause` of `app-exit`, `transport-lost`, or
+  `unknown`, surfaced in Agent View, `/jobs`, the terminal conversation line,
+  and the sub-agent result handed to the parent model. A cancel is now recorded
+  durably *before* the job's context is cancelled, which is what makes a
+  deliberate stop distinguishable from a loss at all — a context alone carries
+  no cause. A job left running by an unclean exit reconciles as abandoned; one
+  left queued still reconciles as cancelled, because it provably never started.
+  packetcode still does not resume jobs across a restart, and `/jobs resubmit`
+  continues to start a new job rather than claiming the old one continued.
+- Unreadable job records are now reported instead of silently disappearing: a
+  bounded stderr warning at startup and a `state.jobs.records` check in
+  `doctor`, both via the new read-only `jobs.InspectRecords`.
+
 - Foreground SSH Packet Computer workspaces: `/computers register|ssh|remove`,
   mandatory SHA256 host-key pinning, SSH-agent or identity-file
   authentication, one process-lifetime SSH/SFTP connection, root-confined
@@ -92,6 +107,15 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- An abandoned background agent is no longer reported as a success. Two
+  workflow gates, `spawn_agent`, `collect_agent_results`, and Agent View's
+  grouping all tested for known failure states, so any terminal state they did
+  not enumerate fell through as passing — a workflow step whose agent was lost
+  would advance the run, and a lost sub-agent was handed to the parent model as
+  a completed one. They now test `State.IsSuccess()` instead.
+- A cancelled job no longer discards the error that actually stopped it. The
+  terminal-state precedence dropped `lastErr` whenever the context was also
+  cancelled, so a dead transport was recorded with no error text at all.
 - Deny permission rules no longer fail open on shell metacharacters. A
   `command_prefix` rule refuses to match anything but a single simple command,
   so that a prefix can never *authorize* a larger shell program — but deny-floor

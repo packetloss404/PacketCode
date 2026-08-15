@@ -711,3 +711,100 @@ func containsRunState(s []RunState, want RunState) bool {
 	}
 	return false
 }
+
+// Test: agentOutcomeError gates on success, not on a list of known failures.
+// Abandoned and any state added after this was written must produce an error;
+// failed and cancelled must keep their distinct existing wording.
+func TestEngine_AgentOutcomeErrorTreatsNonSuccessAsFailure(t *testing.T) {
+	e := NewEngine(newTestManager(t, &fakeProvider{}))
+
+	cases := []struct {
+		name    string
+		result  jobs.Result
+		wantErr bool
+		want    []string
+	}{
+		{
+			name:   "completed passes",
+			result: jobs.Result{JobID: "j1", State: jobs.StateCompleted},
+		},
+		{
+			name:    "failed keeps its error detail",
+			result:  jobs.Result{JobID: "j2", State: jobs.StateFailed, Error: "scripted failure"},
+			wantErr: true,
+			want:    []string{`step "work"`, "agent j2 failed", "scripted failure"},
+		},
+		{
+			name:    "cancelled stays distinct from failed",
+			result:  jobs.Result{JobID: "j3", State: jobs.StateCancelled},
+			wantErr: true,
+			want:    []string{"agent j3 cancelled"},
+		},
+		{
+			name:    "abandoned reports an unconfirmed outcome",
+			result:  jobs.Result{JobID: "j4", State: jobs.StateAbandoned, Reason: "transport closed"},
+			wantErr: true,
+			want:    []string{"agent j4 abandoned", "outcome could not be confirmed", "transport closed"},
+		},
+		{
+			name:    "an unrecognised terminal state does not fall through as a pass",
+			result:  jobs.Result{JobID: "j5", State: jobs.State(99)},
+			wantErr: true,
+			want:    []string{"agent j5 did not succeed"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := e.agentOutcomeError("work", "agent "+tc.result.JobID, tc.result)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tc.want {
+				require.Contains(t, err.Error(), want)
+			}
+		})
+	}
+}
+
+// Test: a verifier whose outcome cannot be confirmed fails the step. An
+// abandoned verifier proves nothing about the work it was asked to check.
+func TestEngine_AbandonedVerifierFailsStep(t *testing.T) {
+	e := NewEngine(newTestManager(t, &fakeProvider{}))
+
+	err := e.agentOutcomeError("work", "verifier", jobs.Result{JobID: "v1", State: jobs.StateAbandoned})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "verifier abandoned")
+}
+
+// Test: an app exit under a running agent abandons its job, and the run must
+// fail on it rather than advance as though the step passed.
+func TestEngine_AbandonedAgentFailsRun(t *testing.T) {
+	mgr := newTestManager(t, &fakeProvider{})
+	e := NewEngine(mgr)
+
+	wf := Workflow{Name: "abandon", Phases: []Phase{{Name: "p", Steps: []Step{{
+		Name: "work", Mode: StepSingle, Agent: AgentSpec{Prompt: "HOLD until the app exits"},
+	}}}}}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+
+	// The job must be running before the shutdown lands, otherwise it would
+	// be cancelled from the queue instead of abandoned mid-run.
+	require.Eventually(t, func() bool {
+		for _, j := range mgr.List() {
+			if j.State == jobs.StateRunning {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+	require.NoError(t, mgr.Shutdown(5*time.Second))
+
+	snap := waitRun(t, e, run.ID, RunFailed, 10*time.Second)
+	require.Contains(t, snap.Err, "abandoned")
+	require.Contains(t, snap.Err, string(jobs.AbandonCauseAppExit))
+	require.Equal(t, jobs.StateAbandoned, mgr.List()[0].State)
+}

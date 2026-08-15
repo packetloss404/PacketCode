@@ -39,7 +39,10 @@ Artifact manifests summarize file changes, commands/tests, searches, child jobs,
 
 ## Current Limits
 
-- Active jobs recover as cancelled after restart rather than resuming.
+- Active jobs never resume after a restart. A job that was running recovers as
+  **abandoned** — its outcome was never observed — and a job that was only
+  queued recovers as cancelled, because it provably never started. Neither is
+  resumed; `/jobs resubmit` starts a new job instead.
 - Arbitrary clarification questions from a sub-agent are not implemented.
 - Live sub-agent output stays in its transcript instead of foreground chat.
 - Renaming, pinning, and grouping by future Packet Computer are deferred.

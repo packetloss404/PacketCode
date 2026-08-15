@@ -117,3 +117,69 @@ func failedRow(table, idPrefix string) string {
 	}
 	return ""
 }
+
+func TestFormatTerminalJobLine_AbandonedIsNotDone(t *testing.T) {
+	started := time.Now().Add(-30 * time.Second)
+	line := formatTerminalJobLine(jobs.Snapshot{
+		ID:           "lost1234",
+		State:        jobs.StateAbandoned,
+		AbandonCause: jobs.AbandonCauseTransportLost,
+		Provider:     "openai",
+		Model:        "gpt-5",
+		Error:        "ssh: connection reset by peer",
+		StartedAt:    started,
+		FinishedAt:   started.Add(30 * time.Second),
+	})
+
+	assert.Contains(t, line, "[job:lost1234 — abandoned (transport-lost)")
+	// "— done" rather than "done": "abandoned" contains the substring.
+	assert.NotContains(t, line, "— done")
+	assert.NotContains(t, line, "cancelled")
+	// The transport error is the only evidence the user has about why the
+	// outcome was never confirmed, so it must survive into the notification.
+	assert.Contains(t, line, "error: ssh: connection reset by peer")
+}
+
+func TestFormatTerminalJobLine_AbandonedWithoutCauseOmitsIt(t *testing.T) {
+	line := formatTerminalJobLine(jobs.Snapshot{
+		ID:    "lost5678",
+		State: jobs.StateAbandoned,
+	})
+	assert.Contains(t, line, "[job:lost5678 — abandoned ·")
+
+	// Completed and cancelled labels are unchanged by the new default.
+	assert.Contains(t, formatTerminalJobLine(jobs.Snapshot{ID: "ok123456", State: jobs.StateCompleted}), "— done ·")
+	assert.Contains(t, formatTerminalJobLine(jobs.Snapshot{ID: "cn123456", State: jobs.StateCancelled}), "— cancelled ·")
+	assert.Contains(t, formatTerminalJobLine(jobs.Snapshot{ID: "fl123456", State: jobs.StateFailed}), "— failed ·")
+}
+
+func TestRenderJobsTable_AbandonedWriteJobDoesNotClaimCleanRoot(t *testing.T) {
+	now := time.Now().Add(-10 * time.Second)
+	out := renderJobsTable([]jobs.Snapshot{{
+		ID:           "lost1234",
+		State:        jobs.StateAbandoned,
+		AbandonCause: jobs.AbandonCauseAppExit,
+		Provider:     "openai",
+		Model:        "gpt-5",
+		Prompt:       "refactor handlers",
+		AllowWrite:   true,
+		CreatedAt:    now,
+	}})
+
+	// "abandoned" is 9 chars and must survive the 10-wide STATE column intact.
+	assert.Contains(t, out, "abandoned")
+	assert.NotContains(t, out, "abandone…")
+	// ROOT must not read "none": that asserts the worktree was released
+	// cleanly, which is precisely what an unconfirmed outcome cannot assert.
+	assert.NotContains(t, failedRow(out, "lost1"), "none")
+	assert.Contains(t, failedRow(out, "lost1"), "failed")
+}
+
+func abandonedRow(table, prefix string) string {
+	for _, line := range strings.Split(table, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
+}

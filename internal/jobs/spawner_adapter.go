@@ -69,6 +69,7 @@ func (a *spawnerAdapter) WaitForJob(id string, timeout time.Duration) (tools.Job
 		Error:          res.Error,
 		Reason:         res.Reason,
 		State:          res.State.String(),
+		AbandonCause:   string(res.AbandonCause),
 		Depth:          res.Depth,
 		ComputerID:     res.ComputerID,
 		ComputerName:   res.ComputerName,
