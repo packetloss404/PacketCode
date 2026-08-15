@@ -431,12 +431,20 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
 		return
 	}
+	// Re-loading a session this connection already holds is allowed — clients
+	// switch between sessions and expect a fresh replay each time — unless a
+	// prompt is currently running on it. The old runtime is replaced.
 	s.stateMu.Lock()
-	_, exists := s.sessions[params.SessionID]
+	existing := s.sessions[params.SessionID]
 	s.stateMu.Unlock()
-	if exists {
-		s.replyError(msg, codeInvalidParams, "session is already loaded on this connection", nil)
-		return
+	if existing != nil {
+		existing.mu.Lock()
+		active := existing.active
+		existing.mu.Unlock()
+		if active {
+			s.replyError(msg, codeSessionBusy, "session already has an active prompt", nil)
+			return
+		}
 	}
 	approver := &permissionApprover{server: s}
 	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{CWD: cwd, MCPServers: mcpServers, SessionID: params.SessionID}, approver)
@@ -461,16 +469,15 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 	approver.sessionID = runtime.ID
 	state := &sessionState{runtime: runtime, approver: approver, cwd: cwd}
 	s.stateMu.Lock()
-	if _, exists := s.sessions[runtime.ID]; exists {
-		s.stateMu.Unlock()
-		if runtime.Close != nil {
-			_ = runtime.Close()
-		}
-		s.replyError(msg, codeInvalidParams, "session is already loaded on this connection", nil)
-		return
-	}
 	s.sessions[runtime.ID] = state
 	s.stateMu.Unlock()
+	// Requests are handled serially, so nothing raced the replacement; the
+	// superseded runtime (if any) just needs its resources released.
+	if existing != nil && existing.runtime.Close != nil {
+		if err := existing.runtime.Close(); err != nil {
+			fmt.Fprintf(s.log, "packetcode acp: close superseded session %s: %v\n", runtime.ID, err)
+		}
+	}
 
 	// ACP requires the full replay to reach the client before the session/load
 	// response. Updates and the result share writeMu-serialized writes, so

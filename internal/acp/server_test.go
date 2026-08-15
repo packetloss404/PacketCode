@@ -215,13 +215,29 @@ func TestServerLoadSessionReplaysHistoryBeforeResponse(t *testing.T) {
 		}
 	}
 
-	// Loading the same session twice on one connection is rejected.
+	// Re-loading an idle session on the same connection replaces its runtime
+	// and replays again — clients switch between sessions and come back.
 	client.send(map[string]any{
 		"jsonrpc": "2.0", "id": "again", "method": "session/load",
 		"params": map[string]any{"sessionId": "resumed-1", "cwd": workspace, "mcpServers": []any{}},
 	})
-	again := client.receiveID("again")
-	assert.Equal(t, json.Number("-32602"), object(t, again["error"])["code"])
+	replayCount := 0
+	var again map[string]any
+	for again == nil {
+		msg := client.receive()
+		if update, ok := sessionUpdate(msg); ok {
+			kind, _ := update["sessionUpdate"].(string)
+			if kind == "user_message_chunk" || kind == "agent_message_chunk" {
+				replayCount++
+			}
+			continue
+		}
+		if idEqual(msg["id"], "again") {
+			again = msg
+		}
+	}
+	require.Nil(t, again["error"], "re-load of an idle session should succeed")
+	assert.Equal(t, 3, replayCount, "second load replays the full transcript again")
 }
 
 func TestServerLoadSessionFactoryErrorIsInternal(t *testing.T) {
