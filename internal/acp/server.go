@@ -44,8 +44,25 @@ type MCPServer struct {
 // per-session overrides from the session/new "_packetcode" params object;
 // empty values mean "use the configured defaults".
 type SessionConfig struct {
-	CWD        string
+	CWD string
+	// MCPServers is the client-supplied stdio MCP server list. It is only
+	// meaningful together with MCPServersSet.
 	MCPServers []MCPServer
+	// MCPServersSet reports whether the request carried an "mcpServers" field
+	// at all, which the factory needs to tell two very different intents apart:
+	//
+	//   absent      (false)          -> the client has no opinion; the factory
+	//                                  should run the agent's own configured
+	//                                  MCP servers, matching the TUI.
+	//   []          (true, len 0)    -> the client explicitly wants no MCP
+	//                                  servers at all. ACP's contract: the
+	//                                  client owns the session's MCP fleet.
+	//   [a, b, ...] (true, len > 0)  -> exactly these, nothing else.
+	//
+	// The wire decode uses *[]wireMCPServer precisely so absent and [] stay
+	// distinguishable; collapsing them would make it impossible for a desktop
+	// client to opt into the agent's configuration without hard-coding it.
+	MCPServersSet bool
 	// SessionID selects the resume path: when non-empty the factory must load
 	// the persisted session with this ID (session/load) instead of creating a
 	// new one, and populate Runtime.History with its transcript for replay.
@@ -87,6 +104,10 @@ type Runtime struct {
 	ID     string
 	Runner Runner
 	Close  func() error
+	// MCPServers is the live per-session MCP fleet, as resolved and started by
+	// the factory. Served by _packetcode/mcp/list when the client passes this
+	// session's ID. Nil when the factory does not report it.
+	MCPServers []MCPServerStatus
 	// History is the persisted transcript of a resumed session, in order.
 	// Only factories answering a SessionConfig.SessionID resume request set
 	// it; the server replays user/assistant text turns to the client before
@@ -167,6 +188,30 @@ type ModelCatalog interface {
 	ListModels() ([]ModelOption, error)
 }
 
+// MCPServerStatus is one MCP server as reported by the _packetcode/mcp/list
+// extension. Fields are additive; clients must tolerate new ones.
+type MCPServerStatus struct {
+	Name string `json:"name"`
+	// Status is "running", "failed", "disabled", or "configured" (known from
+	// configuration but not started in the queried scope).
+	Status    string `json:"status"`
+	ToolCount int    `json:"toolCount"`
+	// Source is "agent" for servers taken from the agent's own configuration
+	// and "client" for servers the ACP client supplied in session/new.
+	Source  string `json:"source,omitempty"`
+	Command string `json:"command,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// MCPLister supplies the agent's configured MCP servers for the
+// _packetcode/mcp/list extension. Optional: when unset the method answers
+// method-not-found, matching older servers. Per-session live status comes
+// from Runtime.MCPServers instead; this reports the static configuration a
+// session created without a client-supplied list would inherit.
+type MCPLister interface {
+	ListMCPServers() ([]MCPServerStatus, error)
+}
+
 // Server is a single ACP stdio connection. It is safe for prompt workers and
 // permission responses to use concurrently.
 type Server struct {
@@ -179,6 +224,7 @@ type Server struct {
 	renamer SessionRenamer
 	catalog ModelCatalog
 	usage   UsageReader
+	mcp     MCPLister
 	// permissionModes, when non-nil, replaces the advertised PermissionModes.
 	permissionModes []string
 
@@ -261,6 +307,12 @@ func (s *Server) SetSessionRenamer(r SessionRenamer) {
 // called before Serve; a nil catalog leaves the method unregistered.
 func (s *Server) SetModelCatalog(c ModelCatalog) {
 	s.catalog = c
+}
+
+// SetMCPLister enables the _packetcode/mcp/list extension. Must be called
+// before Serve; a nil lister leaves the method unregistered.
+func (s *Server) SetMCPLister(l MCPLister) {
+	s.mcp = l
 }
 
 // SetUsageReader enables the _packetcode/sessions/usage extension and
@@ -349,6 +401,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handleSessionsUsage(msg)
 	case "_packetcode/models/list":
 		s.handleModelsList(msg)
+	case "_packetcode/mcp/list":
+		s.handleMCPList(msg)
 	default:
 		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 	}
@@ -389,12 +443,21 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			// Vendor extension surface; underscore-prefixed so spec-only
 			// clients skip it. sessionsList gates _packetcode/sessions/list;
 			// sessionsRename gates _packetcode/sessions/rename; modelsList
-			// gates _packetcode/models/list.
+			// gates _packetcode/models/list; mcpList gates
+			// _packetcode/mcp/list.
+			//
+			// mcpDefaults is a wire-behaviour promise, not a feature toggle:
+			// this agent accepts session/new and session/load WITHOUT an
+			// "mcpServers" field and reads the omission as "use the agent's own
+			// configured MCP servers". Older agents reject the omission with
+			// invalid-params, so clients must send [] unless they see this flag.
 			"_packetcode": map[string]any{
 				"sessionsList":    s.lister != nil,
 				"sessionsRename":  s.renamer != nil,
 				"sessionsUsage":   s.usage != nil,
 				"modelsList":      s.catalog != nil,
+				"mcpList":         s.mcp != nil,
+				"mcpDefaults":     true,
 				"permissionModes": s.advertisedPermissionModes(),
 			},
 		},
@@ -506,6 +569,52 @@ func (s *Server) handleModelsList(msg rpcMessage) {
 	s.sendResult(msg.ID, map[string]any{"models": models})
 }
 
+// handleMCPList answers _packetcode/mcp/list. With a sessionId it reports that
+// live session's MCP fleet (what actually started, with tool counts); without
+// one it reports the agent's configured servers, which is what a session
+// created without a client-supplied mcpServers list would inherit.
+func (s *Server) handleMCPList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/mcp/list notification; a request ID is required")
+		return
+	}
+	if s.mcp == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	var params struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := decodeParams(msg.Params, &params); err != nil {
+		s.replyError(msg, codeInvalidParams, "invalid _packetcode/mcp/list parameters", nil)
+		return
+	}
+	if id := strings.TrimSpace(params.SessionID); id != "" {
+		s.stateMu.Lock()
+		state := s.sessions[id]
+		s.stateMu.Unlock()
+		if state == nil {
+			s.replyError(msg, codeInvalidParams, fmt.Sprintf("unknown session %q", id), nil)
+			return
+		}
+		servers := state.runtime.MCPServers
+		if servers == nil {
+			servers = []MCPServerStatus{}
+		}
+		s.sendResult(msg.ID, map[string]any{"servers": servers})
+		return
+	}
+	servers, err := s.mcp.ListMCPServers()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list MCP servers: %v", err), nil)
+		return
+	}
+	if servers == nil {
+		servers = []MCPServerStatus{}
+	}
+	s.sendResult(msg.ID, map[string]any{"servers": servers})
+}
+
 type wireMCPServer struct {
 	Type    string   `json:"type"`
 	Name    string   `json:"name"`
@@ -548,15 +657,16 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		s.replyError(msg, codeInvalidParams, "cwd must be an existing directory", nil)
 		return
 	}
-	if params.MCPServers == nil {
-		s.replyError(msg, codeInvalidParams, "mcpServers is required", nil)
-		return
-	}
 	if len(params.AdditionalDirectories) > 0 {
 		s.replyError(msg, codeInvalidParams, "additionalDirectories are not supported", nil)
 		return
 	}
-	mcpServers, err := parseMCPServers(*params.MCPServers)
+	// ACP marks mcpServers required, but this agent is deliberately lenient on
+	// input: an omitted field means "no opinion", which the factory answers
+	// with the agent's own configured servers. An explicit [] still means none.
+	// Being lenient here costs nothing (every spec-conformant client sends the
+	// field) and is the only way a client can defer to the agent's config.
+	mcpServers, err := parseOptionalMCPServers(params.MCPServers)
 	if err != nil {
 		s.replyError(msg, codeInvalidParams, err.Error(), nil)
 		return
@@ -565,7 +675,7 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 		s.replyError(msg, codeInternalError, "session factory is not configured", nil)
 		return
 	}
-	sessionConfig := SessionConfig{CWD: cwd, MCPServers: mcpServers}
+	sessionConfig := SessionConfig{CWD: cwd, MCPServers: mcpServers, MCPServersSet: params.MCPServers != nil}
 	if params.Packetcode != nil {
 		sessionConfig.Provider = strings.TrimSpace(params.Packetcode.Provider)
 		sessionConfig.Model = strings.TrimSpace(params.Packetcode.Model)
@@ -638,11 +748,9 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 		s.replyError(msg, codeInvalidParams, "cwd must be an existing directory", nil)
 		return
 	}
-	if params.MCPServers == nil {
-		s.replyError(msg, codeInvalidParams, "mcpServers is required", nil)
-		return
-	}
-	mcpServers, err := parseMCPServers(*params.MCPServers)
+	// Same absent-vs-empty contract as session/new: omitting mcpServers defers
+	// to the agent's configured servers, [] means run with none.
+	mcpServers, err := parseOptionalMCPServers(params.MCPServers)
 	if err != nil {
 		s.replyError(msg, codeInvalidParams, err.Error(), nil)
 		return
@@ -667,7 +775,10 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 		}
 	}
 	approver := &permissionApprover{server: s}
-	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{CWD: cwd, MCPServers: mcpServers, SessionID: params.SessionID}, approver)
+	runtime, err := s.factory.NewSession(s.ctx, SessionConfig{
+		CWD: cwd, MCPServers: mcpServers, MCPServersSet: params.MCPServers != nil,
+		SessionID: params.SessionID,
+	}, approver)
 	if err != nil {
 		s.replyError(msg, codeInternalError, "load PacketCode session: "+err.Error(), nil)
 		return
@@ -722,6 +833,16 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 		})
 	}
 	s.sendResult(msg.ID, map[string]any{})
+}
+
+// parseOptionalMCPServers validates a possibly-absent wire mcpServers field.
+// An absent field yields a nil slice; the caller records the distinction in
+// SessionConfig.MCPServersSet.
+func parseOptionalMCPServers(in *[]wireMCPServer) ([]MCPServer, error) {
+	if in == nil {
+		return nil, nil
+	}
+	return parseMCPServers(*in)
 }
 
 func parseMCPServers(in []wireMCPServer) ([]MCPServer, error) {

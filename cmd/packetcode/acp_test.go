@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,6 +15,7 @@ import (
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 func TestServerSessionRenamerPersistsSanitizedName(t *testing.T) {
@@ -237,4 +242,119 @@ func TestServerPermissionCeilingDefaults(t *testing.T) {
 	cfg.Behavior.TrustMode = false
 	cfg.Permissions.Profile = "my-custom-profile"
 	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+}
+
+// TestPacketACPFactoryMCPServersFallback pins the absent-vs-empty decision at
+// the factory boundary: a client that says nothing about MCP inherits the
+// operator's [mcp.<name>] blocks (the TUI's fleet), while a client that sends
+// an explicit list — empty or not — gets exactly that list.
+func TestPacketACPFactoryMCPServersFallback(t *testing.T) {
+	cfg := config.Default()
+	cfg.MCP = map[string]config.MCPServerConfig{
+		"github": {Command: "gh-mcp", Args: []string{"serve"}},
+		"fs":     {Command: "fs-mcp"},
+	}
+
+	// Absent: the agent's own configuration, alphabetically ordered like the
+	// TUI's fleet, and NOT flagged as a client choice.
+	servers, clientSupplied := mcpServersForSession(acp.SessionConfig{}, cfg)
+	assert.False(t, clientSupplied)
+	require.Len(t, servers, 2)
+	assert.Equal(t, "fs", servers[0].Name)
+	assert.Equal(t, "github", servers[1].Name)
+	assert.Equal(t, []string{"serve"}, servers[1].Args)
+
+	// Explicit empty: the client owns the fleet and asked for none. The
+	// operator's config must NOT leak back in.
+	servers, clientSupplied = mcpServersForSession(
+		acp.SessionConfig{MCPServersSet: true, MCPServers: []acp.MCPServer{}}, cfg)
+	assert.True(t, clientSupplied)
+	assert.Empty(t, servers)
+
+	// Explicit non-empty: exactly the client's list wins over the config.
+	servers, clientSupplied = mcpServersForSession(acp.SessionConfig{
+		MCPServersSet: true,
+		MCPServers: []acp.MCPServer{
+			{Name: "client-only", Command: "/opt/tool", Args: []string{"-x"}, Env: map[string]string{"K": "v"}},
+		},
+	}, cfg)
+	assert.True(t, clientSupplied)
+	require.Len(t, servers, 1)
+	assert.Equal(t, "client-only", servers[0].Name)
+	assert.Equal(t, "/opt/tool", servers[0].Command)
+	assert.True(t, servers[0].Enabled)
+
+	// A disabled [mcp.<name>] block still reaches the manager, which reports
+	// it "disabled" rather than starting it.
+	disabled := false
+	cfg.MCP = map[string]config.MCPServerConfig{"off": {Command: "x", Enabled: &disabled}}
+	servers, _ = mcpServersForSession(acp.SessionConfig{}, cfg)
+	require.Len(t, servers, 1)
+	assert.False(t, servers[0].Enabled)
+}
+
+// TestPacketACPFactoryMCPStartupFailureSemantics pins the deliberate split: a
+// broken operator-configured server degrades the session, a broken
+// client-requested server fails it.
+func TestPacketACPFactoryMCPStartupFailureSemantics(t *testing.T) {
+	broken := filepath.Join(t.TempDir(), "definitely-not-an-executable")
+
+	// Agent defaults: log and continue, so one bad config block cannot make
+	// every ACP session uncreatable.
+	cfg := config.Default()
+	cfg.MCP = map[string]config.MCPServerConfig{"broken": {Command: broken, TimeoutSec: 2}}
+	var logs bytes.Buffer
+	factory := &packetACPFactory{cfg: cfg, log: &logs}
+	degraded, statuses, err := factory.startMCP(t.Context(), acp.SessionConfig{}, tools.NewRegistry())
+	require.NoError(t, err)
+	require.NotNil(t, degraded)
+	t.Cleanup(func() { _ = degraded.Shutdown(time.Second) })
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "broken", statuses[0].Name)
+	assert.Equal(t, "failed", statuses[0].Status)
+	assert.Equal(t, "agent", statuses[0].Source)
+	assert.NotEmpty(t, statuses[0].Error)
+	assert.Contains(t, logs.String(), "mcp broken: failed")
+
+	// Client-requested: the client named this server for this session, so
+	// silently dropping it would hand the agent a fleet it did not ask for.
+	factory = &packetACPFactory{cfg: config.Default(), log: io.Discard}
+	_, _, err = factory.startMCP(t.Context(), acp.SessionConfig{
+		MCPServersSet: true,
+		MCPServers:    []acp.MCPServer{{Name: "broken", Command: broken}},
+	}, tools.NewRegistry())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `MCP server "broken" failed to start`)
+
+	// No servers at all: no manager, and an empty (not nil) status list so the
+	// mcp/list extension reports "none" rather than "unknown".
+	factory = &packetACPFactory{cfg: config.Default(), log: io.Discard}
+	none, statuses, err := factory.startMCP(t.Context(), acp.SessionConfig{}, tools.NewRegistry())
+	require.NoError(t, err)
+	assert.Nil(t, none)
+	assert.NotNil(t, statuses)
+	assert.Empty(t, statuses)
+}
+
+func TestPacketMCPListerReportsConfiguredServers(t *testing.T) {
+	cfg := config.Default()
+	disabled := false
+	cfg.MCP = map[string]config.MCPServerConfig{
+		"github": {Command: "gh-mcp"},
+		"off":    {Command: "x", Enabled: &disabled},
+	}
+	servers, err := (&packetMCPLister{cfg: cfg}).ListMCPServers()
+	require.NoError(t, err)
+	require.Len(t, servers, 2)
+	assert.Equal(t, "github", servers[0].Name)
+	assert.Equal(t, "configured", servers[0].Status)
+	assert.Equal(t, "agent", servers[0].Source)
+	assert.Equal(t, "gh-mcp", servers[0].Command)
+	assert.Equal(t, "off", servers[1].Name)
+	assert.Equal(t, "disabled", servers[1].Status)
+
+	// No [mcp] blocks: an empty list, never nil-shaped surprises.
+	empty, err := (&packetMCPLister{cfg: config.Default()}).ListMCPServers()
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }

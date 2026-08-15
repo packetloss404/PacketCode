@@ -762,11 +762,185 @@ func TestServerModelsListWithoutCatalogIsMethodNotFound(t *testing.T) {
 	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
 }
 
+type staticMCPLister struct {
+	servers []MCPServerStatus
+	err     error
+}
+
+func (l *staticMCPLister) ListMCPServers() ([]MCPServerStatus, error) {
+	return l.servers, l.err
+}
+
+func TestServerMCPListExtension(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{mcpStatuses: []MCPServerStatus{
+		{Name: "github", Status: "running", ToolCount: 7, Source: "agent"},
+		{Name: "broken", Status: "failed", Source: "agent", Error: "exec: not found"},
+	}}
+	lister := &staticMCPLister{servers: []MCPServerStatus{
+		{Name: "broken", Status: "configured", Source: "agent"},
+		{Name: "github", Status: "configured", Source: "agent"},
+	}}
+	client := newTestClientConfigured(t, factory, func(s *Server) { s.SetMCPLister(lister) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	extension := object(t, object(t, object(t, initialized["result"])["agentCapabilities"])["_packetcode"])
+	assert.Equal(t, true, extension["mcpList"])
+	// The absent-vs-empty wire promise is unconditional on this agent.
+	assert.Equal(t, true, extension["mcpDefaults"])
+
+	// Without a sessionId: the agent's configured servers.
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/mcp/list", "params": map[string]any{}})
+	configured, ok := object(t, client.receiveID(2)["result"])["servers"].([]any)
+	require.True(t, ok)
+	require.Len(t, configured, 2)
+	assert.Equal(t, "broken", object(t, configured[0])["name"])
+	assert.Equal(t, "configured", object(t, configured[0])["status"])
+
+	// With a sessionId: that live session's fleet, including tool counts and
+	// the failure a config-only view cannot know about.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{"cwd": workspace},
+	})
+	sessionID := object(t, client.receiveID(3)["result"])["sessionId"]
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "_packetcode/mcp/list",
+		"params": map[string]any{"sessionId": sessionID},
+	})
+	live, ok := object(t, client.receiveID(4)["result"])["servers"].([]any)
+	require.True(t, ok)
+	require.Len(t, live, 2)
+	running := object(t, live[0])
+	assert.Equal(t, "github", running["name"])
+	assert.Equal(t, "running", running["status"])
+	assert.Equal(t, json.Number("7"), running["toolCount"])
+	assert.Equal(t, "agent", running["source"])
+	assert.Equal(t, "failed", object(t, live[1])["status"])
+	assert.Equal(t, "exec: not found", object(t, live[1])["error"])
+
+	// An unknown sessionId is a client mistake, not an empty fleet.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 5, "method": "_packetcode/mcp/list",
+		"params": map[string]any{"sessionId": "no-such-session"},
+	})
+	assert.Equal(t, json.Number("-32602"), object(t, client.receiveID(5)["error"])["code"])
+}
+
+func TestServerMCPListWithoutListerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	extension := object(t, object(t, object(t, initialized["result"])["agentCapabilities"])["_packetcode"])
+	assert.Equal(t, false, extension["mcpList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/mcp/list", "params": map[string]any{}})
+	assert.Equal(t, json.Number("-32601"), object(t, client.receiveID(2)["error"])["code"])
+}
+
+// TestServerNewSessionMCPServersAbsentEmptyExplicit pins the three-way wire
+// contract the factory's defaults fallback depends on: an omitted mcpServers
+// field, an explicit [], and a populated list must reach the factory as three
+// distinguishable SessionConfigs.
+func TestServerNewSessionMCPServersAbsentEmptyExplicit(t *testing.T) {
+	workspace := t.TempDir()
+	command := filepath.Join(workspace, "mcp-server")
+	factory := &recordingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	// Absent: the client has no opinion; the factory falls back to the agent's
+	// configured servers.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/new",
+		"params": map[string]any{"cwd": workspace},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(1)["result"])["sessionId"])
+
+	// Explicit empty: the client owns the fleet and wants none.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(2)["result"])["sessionId"])
+
+	// Populated: exactly these.
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "session/new",
+		"params": map[string]any{"cwd": workspace, "mcpServers": []any{
+			map[string]any{
+				"type": "stdio", "name": "fs", "command": command,
+				"args": []any{"--root", workspace},
+				"env":  []any{map[string]any{"name": "TOKEN", "value": "t"}},
+			},
+		}},
+	})
+	require.NotEmpty(t, object(t, client.receiveID(3)["result"])["sessionId"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 3)
+	assert.False(t, configs[0].MCPServersSet, "absent mcpServers must not read as an explicit choice")
+	assert.Empty(t, configs[0].MCPServers)
+	assert.True(t, configs[1].MCPServersSet, "an explicit [] must read as an explicit choice")
+	assert.Empty(t, configs[1].MCPServers)
+	assert.True(t, configs[2].MCPServersSet)
+	require.Len(t, configs[2].MCPServers, 1)
+	assert.Equal(t, "fs", configs[2].MCPServers[0].Name)
+	assert.Equal(t, filepath.Clean(command), configs[2].MCPServers[0].Command)
+	assert.Equal(t, []string{"--root", workspace}, configs[2].MCPServers[0].Args)
+	assert.Equal(t, map[string]string{"TOKEN": "t"}, configs[2].MCPServers[0].Env)
+}
+
+// session/load carries the same contract: a resumed session must be able to
+// inherit the agent's MCP configuration rather than silently losing it.
+func TestServerLoadSessionMCPServersAbsentEmptyExplicit(t *testing.T) {
+	workspace := t.TempDir()
+	factory := &recordingFactory{}
+	client := newTestClient(t, factory)
+	defer client.close()
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": 1}})
+	client.receiveID("init")
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-absent", "cwd": workspace},
+	})
+	require.Nil(t, client.receiveID(1)["error"])
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "session/load",
+		"params": map[string]any{"sessionId": "resumed-empty", "cwd": workspace, "mcpServers": []any{}},
+	})
+	require.Nil(t, client.receiveID(2)["error"])
+
+	configs := factory.recorded()
+	require.Len(t, configs, 2)
+	assert.False(t, configs[0].MCPServersSet)
+	assert.True(t, configs[1].MCPServersSet)
+}
+
 // recordingFactory captures the SessionConfig session/new hands to the
 // factory and rejects providers and permission modes outside its allow-lists
 // the way the production factory does.
 type recordingFactory struct {
 	knownProviders []string
+	// mcpStatuses is stamped onto every Runtime this factory returns, standing
+	// in for the live fleet the production factory reports.
+	mcpStatuses []MCPServerStatus
 
 	mu      sync.Mutex
 	configs []SessionConfig
@@ -801,7 +975,10 @@ func (f *recordingFactory) NewSession(_ context.Context, cfg SessionConfig, _ ag
 	f.configs = append(f.configs, cfg)
 	id := fmt.Sprintf("recorded-session-%d", len(f.configs))
 	f.mu.Unlock()
-	return &Runtime{ID: id, Runner: blockingRunner{}}, nil
+	if cfg.SessionID != "" {
+		id = cfg.SessionID
+	}
+	return &Runtime{ID: id, Runner: blockingRunner{}, MCPServers: f.mcpStatuses}, nil
 }
 
 func (f *recordingFactory) recorded() []SessionConfig {

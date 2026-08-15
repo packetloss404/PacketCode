@@ -157,6 +157,7 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	server.SetSessionRenamer(&packetSessionRenamer{dir: sessionsDir})
 	server.SetUsageReader(&packetUsageReader{dir: sessionsDir})
 	server.SetModelCatalog(&packetModelCatalog{cfg: cfg, activeProvider: activeProvider, activeModel: activeModel})
+	server.SetMCPLister(&packetMCPLister{cfg: cfg})
 	server.SetPermissionModes(allowedPermissionModes(ceiling))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
@@ -314,6 +315,110 @@ func (r *packetUsageReader) ReadUsage(sessionID string) (acp.SessionUsage, error
 	}, nil
 }
 
+// packetMCPLister serves the operator's configured MCP servers to ACP clients
+// via the _packetcode/mcp/list extension. It reports configuration, not live
+// process state — a session's actual fleet is reported from its Runtime when
+// the client passes a sessionId.
+type packetMCPLister struct {
+	cfg *config.Config
+}
+
+func (l *packetMCPLister) ListMCPServers() ([]acp.MCPServerStatus, error) {
+	servers := mcpServerConfigsFrom(l.cfg)
+	out := make([]acp.MCPServerStatus, 0, len(servers))
+	for _, server := range servers {
+		status := "configured"
+		if !server.Enabled {
+			status = "disabled"
+		}
+		out = append(out, acp.MCPServerStatus{
+			Name: server.Name, Status: status, Source: "agent", Command: server.Command,
+		})
+	}
+	return out, nil
+}
+
+// mcpServersForSession resolves which MCP servers one ACP session runs with,
+// and reports whether the client chose them.
+//
+// The ACP contract is that the client owns the session's MCP fleet, so a
+// client-supplied list — even an explicitly empty one — is used verbatim. But
+// "the client said nothing" is not the same as "the client said none": ACP
+// clients that do not manage MCP themselves (the PacketCode desktop app) omit
+// the field, and answering that with an empty fleet is what made a user's
+// configured [mcp.<name>] tools silently absent from desktop sessions while the
+// TUI had them. An omitted field therefore inherits the agent's own config.
+func mcpServersForSession(sc acp.SessionConfig, cfg *config.Config) (servers []mcp.ServerConfig, clientSupplied bool) {
+	if !sc.MCPServersSet {
+		return mcpServerConfigsFrom(cfg), false
+	}
+	out := make([]mcp.ServerConfig, 0, len(sc.MCPServers))
+	for _, server := range sc.MCPServers {
+		out = append(out, mcp.ServerConfig{
+			Name: server.Name, Command: server.Command, Args: server.Args,
+			Env: server.Env, Enabled: true,
+		})
+	}
+	return out, true
+}
+
+// startMCP spawns the session's MCP fleet and registers its tools.
+//
+// Failure semantics differ by who chose the servers, deliberately:
+//   - client-supplied: a server that fails to start fails session creation.
+//     The client named exactly these servers for this session; silently
+//     running without one would hand the agent a fleet it did not ask for.
+//   - agent-configured defaults: a failed server is logged and skipped, the
+//     session proceeds. This matches the TUI (see runTUI, where MCP failures
+//     "are logged but never block startup") and keeps one broken [mcp.<name>]
+//     block in config.toml from making every desktop session uncreatable —
+//     which, with the defaults fallback above, would otherwise turn a config
+//     typo into an unusable GUI.
+func (f *packetACPFactory) startMCP(
+	ctx context.Context, cfg acp.SessionConfig, toolReg *tools.Registry,
+) (*mcp.Manager, []acp.MCPServerStatus, error) {
+	servers, clientSupplied := mcpServersForSession(cfg, f.cfg)
+	if len(servers) == 0 {
+		return nil, []acp.MCPServerStatus{}, nil
+	}
+	source := "agent"
+	if clientSupplied {
+		source = "client"
+	}
+	logDir, _ := config.HomeDir()
+	manager := mcp.NewManager(mcp.Config{
+		Servers: servers, LogDir: logDir,
+		ClientInfo: mcp.ClientInfo{Name: "packetcode-acp", Version: welcomeVersion()},
+	})
+	startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	reports := manager.Start(startupCtx)
+	cancel()
+
+	statuses := make([]acp.MCPServerStatus, 0, len(reports))
+	for _, report := range reports {
+		if report.Status != "running" && clientSupplied {
+			_ = manager.Shutdown(2 * time.Second)
+			return nil, nil, fmt.Errorf("MCP server %q failed to start: %s", report.Name, report.Err)
+		}
+		switch report.Status {
+		case "running":
+			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %d tools, pid %d\n", report.Name, report.ToolCount, report.PID)
+		default:
+			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %s — %s\n", report.Name, report.Status, report.Err)
+		}
+		statuses = append(statuses, acp.MCPServerStatus{
+			Name: report.Name, Status: report.Status, ToolCount: report.ToolCount,
+			Source: source, Command: report.Command, Error: report.Err,
+		})
+	}
+	for _, report := range mcp.RegisterTools(toolReg, manager.Clients()) {
+		if report.Status == "skipped" {
+			fmt.Fprintf(f.log, "packetcode acp: mcp %s.%s skipped alias %s: %s\n", report.Server, report.Tool, report.Alias, report.Err)
+		}
+	}
+	return manager, statuses, nil
+}
+
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
 	// Resolve the per-session policy first so an invalid permissionMode fails
 	// before any session state is created.
@@ -407,35 +512,9 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	toolReg.Register(tools.NewWriteFileTool(root, backups))
 	toolReg.Register(tools.NewPatchFileTool(root, backups))
 
-	var mcpManager *mcp.Manager
-	if len(cfg.MCPServers) > 0 {
-		servers := make([]mcp.ServerConfig, 0, len(cfg.MCPServers))
-		for _, server := range cfg.MCPServers {
-			servers = append(servers, mcp.ServerConfig{
-				Name: server.Name, Command: server.Command, Args: server.Args,
-				Env: server.Env, Enabled: true,
-			})
-		}
-		logDir, _ := config.HomeDir()
-		mcpManager = mcp.NewManager(mcp.Config{
-			Servers: servers, LogDir: logDir,
-			ClientInfo: mcp.ClientInfo{Name: "packetcode-acp", Version: welcomeVersion()},
-		})
-		startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		reports := mcpManager.Start(startupCtx)
-		cancel()
-		for _, report := range reports {
-			if report.Status != "running" {
-				_ = mcpManager.Shutdown(2 * time.Second)
-				return nil, fmt.Errorf("MCP server %q failed to start: %s", report.Name, report.Err)
-			}
-			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %d tools, pid %d\n", report.Name, report.ToolCount, report.PID)
-		}
-		for _, report := range mcp.RegisterTools(toolReg, mcpManager.Clients()) {
-			if report.Status == "skipped" {
-				fmt.Fprintf(f.log, "packetcode acp: mcp %s.%s skipped alias %s: %s\n", report.Server, report.Tool, report.Alias, report.Err)
-			}
-		}
+	mcpManager, mcpStatuses, err := f.startMCP(ctx, cfg, toolReg)
+	if err != nil {
+		return nil, err
 	}
 
 	hookRunner := hooks.New(f.cfg.Hooks, root)
@@ -446,7 +525,7 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 		SugarCache:    packetcodeSugarCacheConfig(f.cfg),
 		ConduitShadow: packetcodeConduitShadowConfig(f.cfg),
 	})
-	runtime := &acp.Runtime{ID: current.ID, Runner: runner}
+	runtime := &acp.Runtime{ID: current.ID, Runner: runner, MCPServers: mcpStatuses}
 	if resumed != nil {
 		runtime.History = resumed.Messages
 	}
