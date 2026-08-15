@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -64,6 +65,26 @@ type SessionFactory interface {
 	NewSession(context.Context, SessionConfig, agent.Approver) (*Runtime, error)
 }
 
+// SessionSummary is the wire projection served by the _packetcode/sessions/list
+// extension method. Fields are additive; clients must tolerate new ones.
+type SessionSummary struct {
+	SessionID    string    `json:"sessionId"`
+	Name         string    `json:"name"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	WorkingDir   string    `json:"workingDir,omitempty"`
+	MessageCount int       `json:"messageCount"`
+	CostUSD      float64   `json:"costUsd"`
+}
+
+// SessionLister supplies persisted session history for the
+// _packetcode/sessions/list extension. Optional: when unset the method
+// answers method-not-found, matching older servers.
+type SessionLister interface {
+	ListSessions() ([]SessionSummary, error)
+}
+
 // Server is a single ACP stdio connection. It is safe for prompt workers and
 // permission responses to use concurrently.
 type Server struct {
@@ -72,6 +93,7 @@ type Server struct {
 	log     io.Writer
 	factory SessionFactory
 	version string
+	lister  SessionLister
 
 	writeMu          sync.Mutex
 	stateMu          sync.Mutex
@@ -134,6 +156,12 @@ func NewServer(in io.Reader, out, logWriter io.Writer, factory SessionFactory, v
 		sessions: make(map[string]*sessionState),
 		pending:  make(map[string]chan rpcResponse),
 	}
+}
+
+// SetSessionLister enables the _packetcode/sessions/list extension. Must be
+// called before Serve; a nil lister leaves the method unregistered.
+func (s *Server) SetSessionLister(l SessionLister) {
+	s.lister = l
 }
 
 // Serve processes ACP messages until stdin closes or ctx is cancelled.
@@ -201,6 +229,8 @@ func (s *Server) handleRequest(msg rpcMessage) {
 		s.handlePrompt(msg)
 	case "session/cancel":
 		s.handleCancel(msg)
+	case "_packetcode/sessions/list":
+		s.handleSessionsList(msg)
 	default:
 		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
 	}
@@ -238,10 +268,33 @@ func (s *Server) handleInitialize(msg rpcMessage) {
 			},
 			"mcpCapabilities":     map[string]bool{"http": false, "sse": false},
 			"sessionCapabilities": map[string]any{},
+			// Vendor extension surface; underscore-prefixed so spec-only
+			// clients skip it. sessionsList gates _packetcode/sessions/list.
+			"_packetcode": map[string]any{"sessionsList": s.lister != nil},
 		},
 		"agentInfo":   map[string]string{"name": "packetcode", "title": "PacketCode", "version": s.version},
 		"authMethods": []any{},
 	})
+}
+
+func (s *Server) handleSessionsList(msg rpcMessage) {
+	if len(msg.ID) == 0 {
+		fmt.Fprintln(s.log, "packetcode acp: ignoring _packetcode/sessions/list notification; a request ID is required")
+		return
+	}
+	if s.lister == nil {
+		s.replyError(msg, codeMethodNotFound, "Method not found", nil)
+		return
+	}
+	summaries, err := s.lister.ListSessions()
+	if err != nil {
+		s.replyError(msg, codeInternalError, fmt.Sprintf("list sessions: %v", err), nil)
+		return
+	}
+	if summaries == nil {
+		summaries = []SessionSummary{}
+	}
+	s.sendResult(msg.ID, map[string]any{"sessions": summaries})
 }
 
 type wireMCPServer struct {

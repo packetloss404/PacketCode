@@ -101,11 +101,39 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		sessionsDir: sessionsDir, backupsDir: backupsDir, log: stderr,
 	}
 	server := acp.NewServer(stdin, stdout, stderr, factory, welcomeVersion())
+	server.SetSessionLister(&packetSessionLister{dir: sessionsDir})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "packetcode acp: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// packetSessionLister serves persisted session history to ACP clients via the
+// _packetcode/sessions/list extension.
+type packetSessionLister struct {
+	dir string
+}
+
+func (l *packetSessionLister) ListSessions() ([]acp.SessionSummary, error) {
+	summaries, err := session.NewManager(l.dir).List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]acp.SessionSummary, 0, len(summaries))
+	for _, s := range summaries {
+		out = append(out, acp.SessionSummary{
+			SessionID:    s.ID,
+			Name:         s.Name,
+			UpdatedAt:    s.UpdatedAt,
+			Provider:     s.Provider,
+			Model:        s.Model,
+			WorkingDir:   s.WorkingDir,
+			MessageCount: s.MessageCount,
+			CostUSD:      s.Cost.TotalUSD,
+		})
+	}
+	return out, nil
 }
 
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {

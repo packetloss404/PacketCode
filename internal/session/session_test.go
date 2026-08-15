@@ -204,6 +204,19 @@ func TestManager_ListIncludesUsageSummary(t *testing.T) {
 	assert.InDelta(t, 0.006, listings[0].Cost.TotalUSD, 1e-9)
 }
 
+func TestManager_ListIncludesWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	_, err := m.New("openai", "gpt-4.1")
+	require.NoError(t, err)
+	require.NoError(t, m.BindWorkspace("", filepath.Join("d:", "projects", "demo")))
+
+	listings, err := m.List()
+	require.NoError(t, err)
+	require.Len(t, listings, 1)
+	assert.Equal(t, filepath.Join("d:", "projects", "demo"), listings[0].WorkingDir)
+}
+
 func TestManager_ResolveID(t *testing.T) {
 	dir := t.TempDir()
 	m := NewManager(dir)

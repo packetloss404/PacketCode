@@ -113,6 +113,65 @@ func TestServerNativeAgentPermissionAndEvents(t *testing.T) {
 	assert.Equal(t, json.Number("-32601"), object(t, unknown["error"])["code"])
 }
 
+type staticSessionLister struct {
+	summaries []SessionSummary
+	err       error
+}
+
+func (l *staticSessionLister) ListSessions() ([]SessionSummary, error) {
+	return l.summaries, l.err
+}
+
+func TestServerSessionsListExtension(t *testing.T) {
+	updated := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	lister := &staticSessionLister{summaries: []SessionSummary{{
+		SessionID: "abc-123", Name: "wire acp", UpdatedAt: updated,
+		Provider: "codex", Model: "gpt-5.3", WorkingDir: "/proj/gui",
+		MessageCount: 4, CostUSD: 1.25,
+	}}}
+	client := newTestClientConfigured(t, blockingFactory{}, func(s *Server) { s.SetSessionLister(lister) })
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, true, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	sessions, ok := object(t, reply["result"])["sessions"].([]any)
+	require.True(t, ok)
+	require.Len(t, sessions, 1)
+	entry := object(t, sessions[0])
+	assert.Equal(t, "abc-123", entry["sessionId"])
+	assert.Equal(t, "wire acp", entry["name"])
+	assert.Equal(t, "codex", entry["provider"])
+	assert.Equal(t, "/proj/gui", entry["workingDir"])
+	assert.Equal(t, json.Number("4"), entry["messageCount"])
+}
+
+func TestServerSessionsListWithoutListerIsMethodNotFound(t *testing.T) {
+	client := newTestClient(t, blockingFactory{})
+	defer client.close()
+
+	client.send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}},
+	})
+	initialized := client.receiveID(1)
+	capabilities := object(t, object(t, initialized["result"])["agentCapabilities"])
+	extension := object(t, capabilities["_packetcode"])
+	assert.Equal(t, false, extension["sessionsList"])
+
+	client.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "_packetcode/sessions/list", "params": map[string]any{}})
+	reply := client.receiveID(2)
+	assert.Equal(t, json.Number("-32601"), object(t, reply["error"])["code"])
+}
+
 func TestServerCancelReturnsTerminalCancelledAndFailsOpenTool(t *testing.T) {
 	workspace := t.TempDir()
 	factory := blockingFactory{}
@@ -323,10 +382,18 @@ type testClient struct {
 
 func newTestClient(t *testing.T, factory SessionFactory) *testClient {
 	t.Helper()
+	return newTestClientConfigured(t, factory, nil)
+}
+
+func newTestClientConfigured(t *testing.T, factory SessionFactory, configure func(*Server)) *testClient {
+	t.Helper()
 	serverIn, clientIn := io.Pipe()
 	clientOut, serverOut := io.Pipe()
 	client := &testClient{t: t, in: clientIn, lines: make(chan map[string]any, 32), errors: make(chan error, 1), done: make(chan error, 1)}
 	server := NewServer(serverIn, serverOut, io.Discard, factory, "test")
+	if configure != nil {
+		configure(server)
+	}
 	go func() {
 		client.done <- server.Serve(context.Background())
 		_ = serverOut.Close()
