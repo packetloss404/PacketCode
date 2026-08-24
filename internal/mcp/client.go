@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 // defaultInitTimeoutSec is the fall-back timeout applied to initialize,
@@ -479,6 +481,7 @@ func (c *Client) reaperLoop() {
 		return
 	}
 	err := c.cmd.Wait()
+	_ = procrun.ReleaseTree(c.cmd)
 	if err == nil {
 		c.markDead(eofExit(io.EOF))
 	} else {
@@ -524,7 +527,7 @@ func (c *Client) Close(timeout time.Duration) error {
 	case <-time.After(timeout):
 		// Hard kill.
 		if c.cmd != nil && c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
+			_ = procrun.KillTree(c.cmd)
 		}
 		select {
 		case <-done:
@@ -559,7 +562,7 @@ func closeExitErr(reason error) error {
 // handshake errors. Best-effort kill + Wait + close log file.
 func (c *Client) killAndWait(timeout time.Duration) error {
 	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
+		_ = procrun.KillTree(c.cmd)
 	}
 	if c.stdin != nil {
 		_ = c.stdin.Close()

@@ -11,6 +11,8 @@ func configurePlatform(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+func configureTrackedPlatform(cmd *exec.Cmd) { configurePlatform(cmd) }
+
 func KillTree(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
@@ -21,3 +23,7 @@ func KillTree(cmd *exec.Cmd) error {
 	}
 	return nil
 }
+
+func trackTree(_ *exec.Cmd) error { return nil }
+
+func releaseTree(_ *exec.Cmd) error { return nil }
