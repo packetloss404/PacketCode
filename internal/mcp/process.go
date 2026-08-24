@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 // spawnServerProcess starts the MCP server child described by cfg, wires
@@ -22,7 +24,8 @@ import (
 // servers are configured local code, but they do not need packetcode's
 // full provider/API-key environment by default.
 func spawnServerProcess(cfg ServerConfig, logDir string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, *os.File, error) {
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	cmd := exec.CommandContext(context.Background(), cfg.Command, cfg.Args...)
+	procrun.ConfigureTrackedTreeCancel(cmd)
 	cmd.Env = serverEnv(os.Environ(), cfg.Env, cfg.EnvFrom)
 
 	stdin, err := cmd.StdinPipe()
@@ -69,6 +72,15 @@ func spawnServerProcess(cfg ServerConfig, logDir string) (*exec.Cmd, io.WriteClo
 		_ = stderr.Close()
 		_ = logFile.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start: %w", err)
+	}
+	if err := procrun.TrackTree(cmd); err != nil {
+		_ = procrun.KillTree(cmd)
+		_ = cmd.Wait()
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		_ = logFile.Close()
+		return nil, nil, nil, nil, fmt.Errorf("track process tree: %w", err)
 	}
 
 	// Stderr-tee runs until the child closes its stderr (typically on

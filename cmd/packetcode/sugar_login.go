@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/provider/sugar"
@@ -48,6 +50,16 @@ type sugarAPIError struct {
 var (
 	sugarLoginSleep       = waitForSugarPoll
 	sugarLoginOpenBrowser = openSugarBrowser
+	sugarLoginHostname    = os.Hostname
+)
+
+// Sugar rejects a client name outside these bounds with 400 invalid_client.
+// Only the length rule is mirrored here; Sugar owns the character policy and
+// reports it clearly enough through invalid_client.
+const (
+	sugarClientNameMin      = 2
+	sugarClientNameMax      = 80
+	sugarFallbackClientName = "friend"
 )
 
 func runSugarLoginCommand(args []string, stdout, stderr io.Writer) int {
@@ -55,11 +67,10 @@ func runSugarLoginCommand(args []string, stdout, stderr io.Writer) int {
 }
 
 func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, client *http.Client) int {
-	_ = stdin // Retained in the internal signature for command test compatibility.
 	fs := flag.NewFlagSet("sugar login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	server := fs.String("server", "", "Sugar service URL (for example https://sugar.example)")
-	name := fs.String("name", "friend", "name attached to the Sugar API key")
+	name := fs.String("name", "", "name attached to the Sugar API key (default: this machine's hostname)")
 	noBrowser := fs.Bool("no-browser", false, "do not open the Sugar approval page automatically")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -72,7 +83,10 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 	}
 	baseURL := strings.TrimSpace(*server)
 	if baseURL == "" {
-		baseURL = sugarBaseURL(cfg)
+		baseURL = configuredSugarBaseURL(cfg)
+	}
+	if baseURL == "" {
+		baseURL = promptSugarService(stdin, stdout)
 	}
 	baseURL = sugar.NormalizeBaseURL(baseURL)
 	if err := validateSugarLoginURL(baseURL); err != nil {
@@ -80,9 +94,18 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 		return 2
 	}
 
+	clientName := strings.TrimSpace(*name)
+	if clientName == "" {
+		clientName = defaultSugarClientName()
+	}
+	if err := validateSugarClientName(clientName); err != nil {
+		fmt.Fprintf(stderr, "packetcode: %v\n", err)
+		return 2
+	}
+
 	payload, _ := json.Marshal(map[string]string{
 		"client_id":   "packetcode",
-		"client_name": strings.TrimSpace(*name),
+		"client_name": clientName,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/auth/device/code", bytes.NewReader(payload))
@@ -106,6 +129,10 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 		return 1
 	}
 	if resp.StatusCode/100 != 2 {
+		if sugarErrorCode(body) == "invalid_client" {
+			reportSugarInvalidClient(stderr, body, resp.StatusCode, baseURL, clientName)
+			return 1
+		}
 		fmt.Fprintf(stderr, "packetcode: Sugar sign-in failed: %s\n", sugarErrorMessage(body, resp.StatusCode))
 		return 1
 	}
@@ -190,6 +217,9 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 		case "slow_down":
 			interval += 5 * time.Second
 			continue
+		case "invalid_client":
+			reportSugarInvalidClient(stderr, pollBody, pollResponse.StatusCode, baseURL, clientName)
+			return 1
 		case "access_denied", "expired_token":
 			message := strings.TrimSpace(tokenError.ErrorDescription)
 			if message == "" {
@@ -258,6 +288,77 @@ func sugarErrorMessage(body []byte, status int) string {
 		return strings.TrimSpace(tokenError.ErrorDescription)
 	}
 	return fmt.Sprintf("status %d", status)
+}
+
+// sugarErrorCode reads the failure code out of either error shape Sugar uses:
+// the RFC 8628 {"error":"..."} form and the {"error":{"code":"..."}} envelope.
+func sugarErrorCode(body []byte) string {
+	var tokenError sugarDeviceTokenError
+	if json.Unmarshal(body, &tokenError) == nil && strings.TrimSpace(tokenError.Error) != "" {
+		return strings.TrimSpace(tokenError.Error)
+	}
+	var apiError sugarAPIError
+	if json.Unmarshal(body, &apiError) == nil {
+		return strings.TrimSpace(apiError.Error.Code)
+	}
+	return ""
+}
+
+// reportSugarInvalidClient names both ways Sugar rejects a client: a name it
+// will not accept, and a client_id its registry does not know.
+func reportSugarInvalidClient(stderr io.Writer, body []byte, status int, baseURL, clientName string) {
+	fmt.Fprintf(stderr, "packetcode: Sugar rejected this client: %s\n", sugarErrorMessage(body, status))
+	fmt.Fprintf(stderr, "  The name %q must be %d-%d characters with no control, zero-width, or bidirectional characters; set another with --name.\n", clientName, sugarClientNameMin, sugarClientNameMax)
+	fmt.Fprintf(stderr, "  If the name is fine, %s does not have \"packetcode\" in its client registry.\n", baseURL)
+}
+
+// defaultSugarClientName names the key after the machine, so a list of issued
+// keys says which computer each one belongs to. Anything the host cannot
+// supply falls back to the generic name rather than failing a sign-in nobody
+// misused.
+func defaultSugarClientName() string {
+	host, err := sugarLoginHostname()
+	if err != nil {
+		return sugarFallbackClientName
+	}
+	host = strings.TrimSpace(host)
+	if runes := []rune(host); len(runes) > sugarClientNameMax {
+		host = strings.TrimSpace(string(runes[:sugarClientNameMax]))
+	}
+	if validateSugarClientName(host) != nil {
+		return sugarFallbackClientName
+	}
+	return host
+}
+
+// validateSugarClientName mirrors Sugar's length rule so a bad --name is
+// reported here instead of arriving as a 400 from the service.
+func validateSugarClientName(name string) error {
+	switch count := utf8.RuneCountInString(name); {
+	case count < sugarClientNameMin:
+		return fmt.Errorf("--name must be at least %d characters", sugarClientNameMin)
+	case count > sugarClientNameMax:
+		return fmt.Errorf("--name must be at most %d characters", sugarClientNameMax)
+	}
+	return nil
+}
+
+// promptSugarService runs only on a machine that has never been pointed at a
+// Sugar service. The hosted deployment is offered rather than assumed: the
+// answer is persisted and the sign-in mints a live credential, so which service
+// is being trusted stays a decision someone made. Enter accepts it; a
+// non-interactive stdin takes the offer.
+func promptSugarService(stdin io.Reader, stdout io.Writer) string {
+	fmt.Fprintf(stdout, "Sugar service URL [%s]: ", sugar.HostedService)
+	line, err := bufio.NewReader(stdin).ReadString('\n')
+	answer := strings.TrimSpace(line)
+	if err != nil && answer == "" {
+		fmt.Fprintln(stdout) // No terminal echoed a newline for us.
+	}
+	if answer == "" {
+		return sugar.HostedService
+	}
+	return answer
 }
 
 func waitForSugarPoll(ctx context.Context, duration time.Duration) error {

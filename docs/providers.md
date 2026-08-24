@@ -86,8 +86,13 @@ provider; configure an API key or choose another provider.
 Sugar is a built-in provider. Connect it with member-approved device sign-in:
 
 ```text
-packetcode sugar login --server https://your-sugar-service.up.railway.app --name your-name
+packetcode sugar login
 ```
+
+The first sign-in on a machine asks which Sugar service to use, offering the
+hosted deployment as the default, then remembers the answer; `--server
+https://your-sugar-service.example` answers it up front. The key is named after
+the machine's hostname unless `--name your-name` overrides it.
 
 Packetcode requests a short-lived device code, opens Sugar's approval page, and polls only at the interval Sugar returns. After the signed-in member confirms the code and device name, Sugar atomically issues a revocable API key owned by that member. Packetcode validates the key, saves the service URL, and pulls the current model catalog from Sugar's authenticated `/models` endpoint. The default model is `sugar/conduit`, which lets Conduit pick the stable model for each task. Use `--no-browser` to open the printed HTTPS URL yourself.
 

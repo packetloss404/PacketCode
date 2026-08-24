@@ -159,6 +159,17 @@ func builtInProviderSlugs() []string {
 }
 
 func sugarBaseURL(cfg *config.Config) string {
+	if base := configuredSugarBaseURL(cfg); base != "" {
+		return base
+	}
+	return sugar.DefaultBaseURL
+}
+
+// configuredSugarBaseURL returns the Sugar service this machine has been told
+// to use — environment override first, then saved config — or "" when it has
+// never been told. Sign-in needs that distinction: sugarBaseURL's local
+// fallback is a sensible runtime default but a poor first-login guess.
+func configuredSugarBaseURL(cfg *config.Config) string {
 	if base := strings.TrimSpace(os.Getenv("PACKETCODE_SUGAR_BASE_URL")); base != "" {
 		return sugar.NormalizeBaseURL(base)
 	}
@@ -167,7 +178,7 @@ func sugarBaseURL(cfg *config.Config) string {
 			return sugar.NormalizeBaseURL(pc.BaseURL)
 		}
 	}
-	return sugar.DefaultBaseURL
+	return ""
 }
 
 // codexAuthPath resolves the Codex auth.json location. An explicit
