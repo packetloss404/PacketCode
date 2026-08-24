@@ -69,8 +69,28 @@ data directory.
 To connect the built-in Sugar provider and pull its live Conduit/direct-model catalog:
 
 ```text
-packetcode sugar login --server https://your-sugar-service.up.railway.app --name your-name
+packetcode sugar login
 ```
+
+Both flags are optional. The first sign-in on a machine asks which Sugar service
+to use and offers the hosted one; press Enter to accept it, or type your own
+deployment. The API key is named after the machine's hostname, so a member's key
+list says which computer each key belongs to:
+
+```text
+Sugar service URL [https://usesugar.dev]:
+Open https://usesugar.dev/portal/connect?user_code=NGC4-MSB2
+Enter code: NGC4-MSB2
+Waiting for approval…
+```
+
+On success the service URL is saved, so later sign-ins on that machine skip the
+question. Override either default with `--server https://your-sugar-service.example`
+or `--name your-name`; `PACKETCODE_SUGAR_BASE_URL` overrides the saved URL for one
+machine. Sugar accepts key names of 2-80 characters — Packetcode checks the length
+before sending, and reports a client Sugar refuses (a name it will not take, or a
+service that does not register `packetcode`) with the fix instead of a bare HTTP
+error.
 
 Packetcode opens Sugar's approval page and prints the same short code in the terminal. Sign in as yourself, confirm the code and device name, then approve. Packetcode polls at Sugar's required interval, saves the member-owned revocable key with user-only file permissions, and pulls the live catalog. Add `--no-browser` when you want to open the printed URL manually.
 

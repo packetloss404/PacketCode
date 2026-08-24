@@ -24,6 +24,13 @@ const (
 	DefaultModel   = "sugar/conduit"
 )
 
+// HostedService is the Sugar deployment offered during sign-in on a machine
+// that has never connected to one. DefaultBaseURL stays local so no runtime
+// path silently reaches the public internet; this value is only ever a
+// suggestion the operator confirms. It is a var so a fork can point its own
+// builds elsewhere with -ldflags "-X ...sugar.HostedService=https://...".
+var HostedService = "https://usesugar.dev"
+
 var brandColor = lipgloss.Color("#A8D34F")
 
 type Provider struct {

@@ -16,8 +16,19 @@ Packetcode's built-in `sugar` provider connects the existing local Go agent to t
 ## Login
 
 ```text
-packetcode sugar login --server https://your-sugar-service.up.railway.app --name your-name
+packetcode sugar login
 ```
+
+Both flags are optional. On a machine that has never connected to a Sugar
+service, the command asks for the service URL and offers the hosted deployment
+as the default; the answer is persisted, so it is asked once. `--server
+https://your-sugar-service.example` skips the question, and
+`PACKETCODE_SUGAR_BASE_URL` overrides both. The API key is named after the
+machine's hostname unless `--name your-name` says otherwise, so a member's key
+list identifies which computer each key belongs to. Sugar accepts names of 2-80
+characters; Packetcode checks the length before sending and reports a rejected
+client (bad name, or a `client_id` the service does not register) as
+`invalid_client` with the fix.
 
 The command requests a short-lived device code, opens Sugar's approval page, and shows the same code in the terminal. A signed-in member reviews the named device and approves it; Packetcode polls at Sugar's required interval until it receives a one-time, member-owned API key. It then validates the live model list, persists the provider with user-only config permissions, and activates `sugar/conduit`. Use `--no-browser` to open the printed URL manually.
 
