@@ -25,9 +25,9 @@ func configureTrackedPlatform(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED}
 }
 
-func KillTree(cmd *exec.Cmd) error {
+func killTree(cmd *exec.Cmd) (KillOutcome, error) {
 	if cmd == nil || cmd.Process == nil {
-		return nil
+		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
 	}
 	pid := uint32(cmd.Process.Pid)
 	if value, ok := trackedJobs.LoadAndDelete(cmd); ok {
@@ -35,16 +35,32 @@ func KillTree(cmd *exec.Cmd) error {
 		err := windows.TerminateJobObject(job, 1)
 		_ = windows.CloseHandle(job)
 		if err == nil {
-			return nil
+			// The job contains the tree, so terminating it is proof rather
+			// than a best effort. This is the only Confirmed path here.
+			return KillOutcome{Method: KillMethodJobObject, Confirmed: true}, nil
 		}
 	}
-	if err := killDescendants(pid); err != nil {
+	out := KillOutcome{Method: KillMethodTreeWalk}
+	survivors, err := killDescendants(pid)
+	out.Survivors = survivors
+	if err != nil {
+		// The walk could not finish, so fall back to the blunt instrument and
+		// stop claiming to know what is left.
+		out.Method = KillMethodTaskkill
+		out.Reason = "descendant walk failed, fell back to taskkill: " + err.Error()
 		_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+	} else if len(survivors) > 0 {
+		out.Reason = "processes were still alive after TerminateProcess"
+	} else {
+		// A completed walk that found nothing left is as good as this tier
+		// gets: every process the snapshot could see is gone. It still cannot
+		// see a process reparented away between snapshot and terminate.
+		out.Reason = "descendant walk completed; a process reparented mid-walk would not have been seen"
 	}
 	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return err
+		return out, err
 	}
-	return nil
+	return out, nil
 }
 
 func trackTree(cmd *exec.Cmd) error {
@@ -82,32 +98,46 @@ func trackTree(cmd *exec.Cmd) error {
 	}
 	trackedJobs.Store(cmd, job)
 	if status, _, _ := ntResumeProcess.Call(uintptr(processHandle)); int32(status) < 0 {
-		_ = KillTree(cmd)
+		_, _ = killTree(cmd)
 		return fmt.Errorf("resume process: NTSTATUS 0x%08x", uint32(status))
 	}
 	return nil
 }
 
-func releaseTree(cmd *exec.Cmd) error {
+// releaseTree closes the job object. Kill-on-close means this is also the
+// point at which descendants left behind by a normally exiting root die, so
+// the close itself is the containment guarantee, not just cleanup.
+func releaseTree(cmd *exec.Cmd) (KillOutcome, error) {
 	value, ok := trackedJobs.LoadAndDelete(cmd)
 	if !ok {
-		return nil
+		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
 	}
-	return windows.CloseHandle(value.(windows.Handle))
+	if err := windows.CloseHandle(value.(windows.Handle)); err != nil {
+		return KillOutcome{Method: KillMethodJobObject, Reason: err.Error()}, err
+	}
+	return KillOutcome{Method: KillMethodJobObject, Confirmed: true}, nil
 }
 
-func killDescendants(root uint32) error {
+// killDescendants terminates every descendant of root and reports the pids
+// that were still alive afterwards. The survivor list used to be computed and
+// thrown away, which left callers unable to say whether a teardown worked.
+func killDescendants(root uint32) ([]int, error) {
 	children, err := processChildren()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var errs []error
+	var survivors []int
 	for _, pid := range postorder(root, children) {
-		if err := terminateProcess(pid); err != nil {
+		alive, err := terminateProcess(pid)
+		if alive {
+			survivors = append(survivors, int(pid))
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return survivors, errors.Join(errs...)
 }
 
 func processChildren() (map[uint32][]uint32, error) {
@@ -150,24 +180,28 @@ func postorder(root uint32, children map[uint32][]uint32) []uint32 {
 	return out
 }
 
-func terminateProcess(pid uint32) error {
+// terminateProcess kills one pid. The bool reports whether it was still alive
+// when we stopped waiting, which is the single most useful piece of evidence
+// this tier produces.
+func terminateProcess(pid uint32) (alive bool, err error) {
 	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, pid)
 	if err != nil {
 		if err == windows.ERROR_INVALID_PARAMETER {
-			return nil
+			// The pid is gone, which is the outcome we wanted.
+			return false, nil
 		}
-		return fmt.Errorf("open process %d: %w", pid, err)
+		return false, fmt.Errorf("open process %d: %w", pid, err)
 	}
 	defer windows.CloseHandle(h)
 	if err := windows.TerminateProcess(h, 1); err != nil {
-		return fmt.Errorf("terminate process %d: %w", pid, err)
+		return true, fmt.Errorf("terminate process %d: %w", pid, err)
 	}
 	event, err := windows.WaitForSingleObject(h, 500)
 	if err != nil {
-		return fmt.Errorf("wait for process %d: %w", pid, err)
+		return true, fmt.Errorf("wait for process %d: %w", pid, err)
 	}
 	if event == uint32(windows.WAIT_TIMEOUT) {
-		return fmt.Errorf("wait for process %d: timeout", pid)
+		return true, fmt.Errorf("wait for process %d: timeout", pid)
 	}
-	return nil
+	return false, nil
 }
