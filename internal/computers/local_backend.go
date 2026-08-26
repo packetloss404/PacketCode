@@ -243,16 +243,27 @@ func (b *LocalBackend) Execute(ctx context.Context, command, cwd string, output 
 	cmd.Dir = resolved
 	cmd.Stdout = output
 	cmd.Stderr = output
-	procrun.ConfigureTreeCancel(cmd)
+	teardown := procrun.ConfigureTreeCancelRecorder(cmd)
 	runErr := cmd.Run()
 	if runErr == nil {
 		return ExecResult{ExitCode: 0}, nil
 	}
+	// The cancellation check must come FIRST. Killing the tree makes the child
+	// exit non-zero, so cmd.Run reports an *exec.ExitError even though the
+	// command did not choose that status -- testing for ExitError first would
+	// return a meaningless exit code and, worse, discard the teardown evidence
+	// entirely.
+	if ctx.Err() != nil {
+		// Report what the teardown managed, not merely that one was asked
+		// for: the caller has to tell a user whether the command stopped.
+		res := ExecResult{ExitCode: -1}
+		if outcome, ran := teardown(); ran {
+			res.Teardown = &outcome
+		}
+		return res, nil
+	}
 	if exitErr, ok := runErr.(*exec.ExitError); ok {
 		return ExecResult{ExitCode: exitErr.ExitCode()}, nil
-	}
-	if ctx.Err() != nil {
-		return ExecResult{ExitCode: -1}, nil
 	}
 	return ExecResult{}, runErr
 }

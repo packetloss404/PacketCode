@@ -7,8 +7,6 @@ import (
 
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/permissions"
-	"github.com/packetcode/packetcode/internal/provider"
-	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // uiApprover is the bridge between the agent's blocking Approver call
@@ -336,9 +334,4 @@ func stripJobApprovalPrefix(name string) string {
 		}
 	}
 	return name
-}
-
-// describeRequest is a small helper for the conversation log.
-func describeRequest(t tools.Tool, c provider.ToolCall) string {
-	return t.Name() + ": " + c.Arguments
 }

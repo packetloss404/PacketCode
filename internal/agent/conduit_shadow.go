@@ -123,6 +123,12 @@ func (s *conduitShadowState) providerFailure(ctx context.Context, err error) {
 }
 
 func (s *conduitShadowState) blocked(ctx context.Context, call provider.ToolCall, reason string) {
+	// Guard before fingerprint(): it reads s.salt, so an inactive-shadow call
+	// would hash for nothing and a nil receiver would panic. providerFailure
+	// and toolResult already lead with the same check.
+	if s == nil || !s.active {
+		return
+	}
 	category := classifyTool(call)
 	s.emit(ctx, sugar.RuntimeEvent{
 		Type:               sugar.RuntimeBlocked,
@@ -269,7 +275,10 @@ func (s *conduitShadowState) fingerprint(parts ...string) string {
 
 func classifyTool(call provider.ToolCall) sugar.RuntimeToolCategory {
 	switch call.Name {
-	case "write_file", "patch_file", "read_file", "search_files", "list_files", "get_diagnostics":
+	// These are the registered tool names (see internal/tools). Getting one
+	// wrong is silent: the call falls through to RuntimeToolOther and the
+	// shadow record claims the turn touched no files.
+	case "write_file", "patch_file", "read_file", "search_codebase", "list_directory", "get_diagnostics":
 		if call.Name == "get_diagnostics" {
 			return sugar.RuntimeToolTypecheck
 		}

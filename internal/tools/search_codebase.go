@@ -35,6 +35,10 @@ const (
 type SearchCodebaseTool struct {
 	Root    string
 	Backend computers.RuntimeBackend
+	// backendErr records a backend that failed to construct. A nil Backend is
+	// the ordinary local mode, so unlike the other tools this cannot be
+	// inferred from Backend alone and has to be tracked explicitly.
+	backendErr error
 	// rgPath caches the ripgrep binary lookup. Empty until first use.
 	rgPath string
 	rgOnce sync.Once
@@ -46,7 +50,10 @@ func NewSearchCodebaseTool(root string) *SearchCodebaseTool {
 
 func NewSearchCodebaseToolWithBackend(backend computers.RuntimeBackend) *SearchCodebaseTool {
 	if backend == nil {
-		return &SearchCodebaseTool{}
+		// Root would stay empty and the local walker resolves "" to the
+		// process working directory, so a nil backend would quietly search
+		// outside any project root instead of failing.
+		return &SearchCodebaseTool{backendErr: fmt.Errorf("runtime backend is nil")}
 	}
 	return &SearchCodebaseTool{Root: backend.Root(), Backend: backend}
 }
@@ -74,6 +81,9 @@ func (t *SearchCodebaseTool) Execute(ctx context.Context, raw json.RawMessage) (
 	}
 	if strings.TrimSpace(p.Pattern) == "" {
 		return ToolResult{Content: "search_codebase: pattern is empty", IsError: true}, nil
+	}
+	if t.backendErr != nil {
+		return ToolResult{Content: fmt.Sprintf("search_codebase: %s", t.backendErr), IsError: true}, nil
 	}
 	limit := p.MaxResults
 	if limit <= 0 {

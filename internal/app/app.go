@@ -1717,23 +1717,6 @@ func (a *App) reentrantHandle(b agentEventBatch) (tea.Model, tea.Cmd) {
 	return model, tea.Batch(cmd, next)
 }
 
-// injectPendingJobResults is the legacy drain path retained for
-// migration safety. New UI flows should call injectJobResultForAgent
-// with an explicit job id so background summaries do not silently enter
-// the next model turn.
-func (a *App) injectPendingJobResults() {
-	if a.jobs == nil {
-		return
-	}
-	results := a.jobs.DrainResults(32)
-	if len(results) == 0 {
-		return
-	}
-	for _, r := range results {
-		_ = a.addJobResultToSession(r)
-	}
-}
-
 // injectJobResultForAgent explicitly marks one terminal job result as
 // injected and appends it as a user-role context message. The agent's
 // next ChatRequest picks it up via buildMessages. We deliberately use
@@ -1809,7 +1792,7 @@ func hasErrorDetail(snap jobs.Snapshot) bool {
 // formatTerminalJobLine renders a single-line inline notification for a
 // job that has just reached a terminal state. Matches the spec:
 //
-//	[job:7f3a — done · 12s · gemini/2.5-flash · $0.0031]
+//	[job:7f3a — done · 12s · local · gemini/2.5-flash · $0.0031]
 //	14 call sites in 8 files; …
 func formatTerminalJobLine(snap jobs.Snapshot) string {
 	// The default is the state's own name, not "done". A hardcoded success
@@ -1824,7 +1807,7 @@ func formatTerminalJobLine(snap jobs.Snapshot) string {
 		// "the transport died and a remote agent may still be running", so it
 		// belongs in the line the user actually reads.
 		if cause := snap.AbandonCause; cause != "" && cause != jobs.AbandonCauseUnknown {
-			label += " (" + cause.String() + ")"
+			label += " (" + string(cause) + ")"
 		}
 	}
 	dur := time.Duration(0)
@@ -2152,11 +2135,7 @@ func (a *App) handleJobsResubmit(args []string) (tea.Model, tea.Cmd) {
 		var b strings.Builder
 		b.WriteString("jobs resubmit: usage /jobs resubmit <id>\nabandoned jobs available to re-run:\n")
 		for _, s := range pending {
-			prompt := s.Prompt
-			if len(prompt) > 60 {
-				prompt = prompt[:57] + "..."
-			}
-			fmt.Fprintf(&b, "  %-5s %s\n", trunc(s.ID, 5), prompt)
+			fmt.Fprintf(&b, "  %-5s %s\n", trunc(s.ID, 5), truncOneLine(s.Prompt, 60))
 		}
 		a.conversation.AppendSystem(strings.TrimRight(b.String(), "\n"))
 		return a, nil
@@ -2369,10 +2348,10 @@ func renderJobsTable(snaps []jobs.Snapshot) string {
 		}
 		age := roundedDuration(now.Sub(s.CreatedAt))
 		tok := fmt.Sprintf("%d/%d", s.Tokens.Input, s.Tokens.Output)
-		prompt := s.Prompt
-		if len(prompt) > 50 {
-			prompt = prompt[:47] + "..."
-		}
+		// truncOneLine, not a byte slice: a prompt is arbitrary user text, so
+		// it can carry multi-byte runes (which byte slicing would cut in half)
+		// and newlines (which would break the row out of the table).
+		prompt := truncOneLine(s.Prompt, 50)
 		rootMode := "main"
 		if s.WorktreePath != "" {
 			rootMode = "worktree"
@@ -2492,12 +2471,30 @@ func (a *App) pickerProviders() []provider.Provider {
 	return out
 }
 
+// knownProviderDisplayOrder is the fixed presentation order for the providers
+// packetcode ships with. It is the single source of truth for "is this slug a
+// built-in?": listing a slug here but omitting it from the membership test
+// would show that provider twice in the picker.
+var knownProviderDisplayOrder = []string{
+	"sugar", "openai", "codex", "anthropic", "gemini",
+	"minimax", "deepseek", "grok", "mistral", "openrouter", "ollama",
+}
+
+func isKnownProviderSlug(slug string) bool {
+	for _, known := range knownProviderDisplayOrder {
+		if known == slug {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 	if a.deps.Factories == nil {
 		return nil
 	}
 	var out []string
-	for _, slug := range []string{"sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama"} {
+	for _, slug := range knownProviderDisplayOrder {
 		if _, exists := a.deps.Factories[slug]; exists {
 			out = append(out, slug)
 		}
@@ -2507,12 +2504,10 @@ func (a *App) factoryDisplaySlugs(seen map[string]struct{}) []string {
 		if _, alreadyListed := seen[slug]; alreadyListed {
 			continue
 		}
-		switch slug {
-		case "sugar", "openai", "codex", "anthropic", "gemini", "minimax", "deepseek", "grok", "mistral", "openrouter", "ollama":
+		if isKnownProviderSlug(slug) {
 			continue
-		default:
-			customSlugs = append(customSlugs, slug)
 		}
+		customSlugs = append(customSlugs, slug)
 	}
 	sort.Strings(customSlugs)
 	return append(out, customSlugs...)

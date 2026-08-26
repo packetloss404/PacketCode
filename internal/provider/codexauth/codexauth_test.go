@@ -199,3 +199,38 @@ func TestRefreshServerError(t *testing.T) {
 		t.Fatal("expected error on 401 refresh")
 	}
 }
+
+// oneByteReader delivers a single byte per Read, which io.Reader permits and
+// a TLS record boundary can produce for real. The snippet must still be whole.
+type oneByteReader struct {
+	data []byte
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	p[0] = r.data[0]
+	r.data = r.data[1:]
+	return 1, nil
+}
+
+func TestReadSnippetToleratesShortReads(t *testing.T) {
+	body := `{"error":"invalid_grant","error_description":"refresh token expired"}`
+	if got := readSnippet(&oneByteReader{data: []byte(body)}); got != body {
+		t.Fatalf("readSnippet = %q, want %q", got, body)
+	}
+}
+
+func TestReadSnippetCapsLongBodies(t *testing.T) {
+	body := make([]byte, 4096)
+	for i := range body {
+		body[i] = 'x'
+	}
+	if got := readSnippet(&oneByteReader{data: body}); len(got) != 512 {
+		t.Fatalf("readSnippet length = %d, want 512", len(got))
+	}
+}

@@ -190,13 +190,13 @@ func (s RunState) IsTerminal() bool {
 
 // AgentSnapshot is a UI-safe projection of one agent within a step. Job is
 // the live jobs.Snapshot (fetched from the manager) so the view can reuse the
-// agent-view rendering; Err, when non-empty, is a spawn error recorded before
-// any job existed.
+// agent-view rendering; HasJob is false when the manager no longer knows the
+// id. A spawn failure never reaches here — it is recorded on the step as
+// StepSnapshot.Err, because no agent row exists for a job that never spawned.
 type AgentSnapshot struct {
 	JobID   string
 	Job     jobs.Snapshot
 	HasJob  bool
-	Err     string
 	Role    string // "work" or "verifier"
 	Attempt int
 }

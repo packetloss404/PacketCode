@@ -96,13 +96,6 @@ const (
 	AbandonCauseTransportLost AbandonCause = "transport-lost"
 )
 
-func (c AbandonCause) String() string {
-	if c == "" {
-		return string(AbandonCauseUnknown)
-	}
-	return string(c)
-}
-
 // normalizeAbandonCause coerces an unrecognised cause to Unknown rather than
 // rejecting the record. The cause is descriptive detail hung off the state;
 // coercing it loses nothing that was ever claimed, because "unknown" is

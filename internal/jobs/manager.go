@@ -235,8 +235,10 @@ type Manager struct {
 // NewManager constructs a Manager with sane fallbacks for unset Config
 // fields. It also runs orphan recovery against cfg.JobsDir so that any
 // jobs left in non-terminal states by a previous app exit are rewritten
-// as Cancelled and surfaced via List(). The recovered count is returned
-// alongside any error encountered while reading existing job files.
+// as terminal and surfaced via List(): a running job becomes Abandoned
+// (its outcome was never witnessed) and a queued job becomes Cancelled
+// (it provably never ran). The recovered count is returned alongside any
+// error encountered while reading existing job files.
 func NewManager(cfg Config) (*Manager, int, error) {
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = 4
@@ -1424,10 +1426,6 @@ func (m *Manager) savePersistedSnapshotLocked(p persistedJob) error {
 	return savePersistedSnapshot(m.cfg.JobsDir, p)
 }
 
-func (m *Manager) touchJobLocked(j *Job, activity, message string) {
-	m.stampSnapshotLocked(j, time.Now().UTC(), activity, message, j.NeedsInput, j.NeedsApproval)
-}
-
 // acquirePathLock returns (creating if needed) the mutex guarding the
 // given absolute path. Used by pathLockTool to serialise concurrent
 // writes from sibling jobs targeting the same file.
@@ -1472,15 +1470,3 @@ func newShortID() string {
 	}
 	return string(out)
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Sentinel errors
-// ─────────────────────────────────────────────────────────────────────────
-
-var (
-	// ErrJobNotFound is returned when a Manager API is called with an id
-	// that no job currently has. Most public methods use ok-bool returns
-	// instead of errors; this exists for callers that need a typed
-	// sentinel (e.g. logging).
-	ErrJobNotFound = errors.New("jobs: not found")
-)

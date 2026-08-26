@@ -123,8 +123,8 @@ func (c *Client) ListModels(ctx context.Context) ([]provider.Model, error) {
 	return out, nil
 }
 
-// ValidateKey performs a 5-second HEAD-equivalent (a GET /models with a
-// short timeout) to confirm the key authenticates. Any 2xx is success.
+// ValidateKey performs a GET /models under a 10-second timeout to confirm the
+// key authenticates. Any 2xx is success.
 func (c *Client) ValidateKey(ctx context.Context, apiKey string) error {
 	if apiKey == "" {
 		return fmt.Errorf("api key is empty")

@@ -17,9 +17,10 @@ const MaxResubmitPromptBytes = 32 << 10
 // its agent loop cannot be continued, and pretending otherwise would be a
 // lie the rest of the job record cannot support. Instead:
 //
-//   - the recovered job keeps its Cancelled state, its "previous app exit"
-//     reason, and all of its evidence (artifacts, transcript, worktree
-//     references, token and cost totals);
+//   - the recovered job keeps the terminal state reconciliation gave it
+//     (Abandoned for work that had begun, Cancelled for work that provably
+//     never ran), its "previous app exit" reason, and all of its evidence
+//     (artifacts, transcript, worktree references, token and cost totals);
 //   - a brand-new job is spawned from the saved prompt/provider/model;
 //   - the two records are linked in both directions (ResubmittedAs on the
 //     old job, ResubmitOf on the new one) so the lineage stays inspectable.

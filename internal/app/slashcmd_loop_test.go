@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,5 +203,34 @@ func TestParseLoopDecision_RejectsMalformedOrUnknownVersions(t *testing.T) {
 	)
 	if !ok || stop {
 		t.Fatalf("continue decision should be valid without stopping")
+	}
+}
+
+// a.loops is a map, so /loop list has to impose an order of its own. Twelve
+// entries make both failure modes visible: Go's randomised map iteration, and
+// a lexical sort that would place loop10 between loop1 and loop2.
+func TestRenderLoops_ListsInCreationOrder(t *testing.T) {
+	r := newTestApp(t)
+	r.app.loops = map[string]*loopState{}
+	for i := 1; i <= 12; i++ {
+		id := fmt.Sprintf("loop%d", i)
+		r.app.loops[id] = &loopState{
+			id:       id,
+			seq:      i,
+			mode:     loopInterval,
+			interval: time.Minute,
+			body:     "check the build",
+		}
+	}
+
+	rows := strings.Split(r.app.renderLoops(), "\n")[1:]
+	if len(rows) != 12 {
+		t.Fatalf("expected 12 rows, got %d", len(rows))
+	}
+	for i, row := range rows {
+		want := fmt.Sprintf("loop%d", i+1)
+		if got := strings.Fields(row)[0]; got != want {
+			t.Fatalf("row %d = %q, want %q (full list:\n%s)", i, got, want, r.app.renderLoops())
+		}
 	}
 }

@@ -210,6 +210,27 @@ func TestFindReferencesTool_SkipsSymlinkEscapeDuringWorkspaceScan(t *testing.T) 
 	assert.Equal(t, 0, res.Metadata["reference_count"])
 }
 
+// scope_path may name a single FILE, in which case collectReferences calls its
+// walk function directly with a nil fs.DirEntry. Every other branch guards for
+// that; one size check did not, and dereferenced the nil entry.
+func TestFindReferencesTool_ScopePathIsASingleFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "a.go", `package main
+func NewServer() {}
+`)
+	writeTestFile(t, root, "b.go", `package main
+func other() { NewServer() }
+`)
+
+	res, err := NewFindReferencesTool(root).Execute(context.Background(),
+		json.RawMessage(`{"symbol":"NewServer","scope_path":"b.go"}`))
+	require.NoError(t, err)
+	require.False(t, res.IsError, res.Content)
+	assert.Equal(t, 1, res.Metadata["reference_count"])
+	assert.Contains(t, res.Content, "b.go:2")
+	assert.NotContains(t, res.Content, "a.go:", "scope_path must confine the scan to that file")
+}
+
 func TestCodeIntelligenceLimitsAreFocusedAndStillUseful(t *testing.T) {
 	assert.Equal(t, 50, defaultSymbolLimit)
 	assert.Equal(t, 200, maxSymbolLimit)

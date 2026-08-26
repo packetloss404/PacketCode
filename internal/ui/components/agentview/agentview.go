@@ -725,30 +725,6 @@ func canDecideResult(j Job) bool {
 	}
 }
 
-func renderState(s string, w int) string {
-	state := strings.ToLower(strings.TrimSpace(s))
-	if state == "" {
-		state = "unknown"
-	}
-	label := padOrTrunc(state, w)
-	switch state {
-	case StateRunning:
-		return lipgloss.NewStyle().Foreground(theme.Info).Render(label)
-	case StateQueued:
-		return lipgloss.NewStyle().Foreground(theme.Warning).Render(label)
-	case StateCompleted, "done", "success", "succeeded":
-		return lipgloss.NewStyle().Foreground(theme.Success).Render(label)
-	case StateFailed, "error":
-		return lipgloss.NewStyle().Foreground(theme.Error).Render(label)
-	case StateCancelled, "canceled":
-		return theme.StyleSecondary.Render(label)
-	case StateAbandoned:
-		return lipgloss.NewStyle().Foreground(theme.Warning).Render(label)
-	default:
-		return theme.StyleDim.Render(label)
-	}
-}
-
 func providerLabel(j Job) string {
 	if j.Provider == "" {
 		return j.Model
@@ -844,17 +820,6 @@ func shortDuration(d time.Duration) string {
 	m := int(d / time.Minute)
 	s := int((d % time.Minute) / time.Second)
 	return fmt.Sprintf("%dm%02ds", m, s)
-}
-
-func padOrTrunc(s string, w int) string {
-	r := []rune(s)
-	if len(r) > w {
-		if w <= 1 {
-			return string(r[:w])
-		}
-		return string(r[:w-1]) + "…"
-	}
-	return s + strings.Repeat(" ", w-len(r))
 }
 
 func truncate(s string, w int) string {

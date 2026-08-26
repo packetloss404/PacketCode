@@ -183,7 +183,18 @@ func (a *spawnerAdapter) canCollect(parentID, scope, id string) bool {
 }
 
 func (a *spawnerAdapter) isDescendantLocked(id, parentID string) bool {
+	// Bounded by the number of jobs. Spawn only ever mints fresh ids, so a
+	// cycle cannot form in memory -- but these records are read back from
+	// ~/.packetcode/jobs/, which is exactly the input the persistence layer
+	// treats as potentially hostile. A cyclic ParentJobID chain here would
+	// spin forever while holding the manager's read lock, hanging every
+	// caller rather than failing one.
+	seen := make(map[string]struct{}, len(a.m.jobs))
 	for {
+		if _, loop := seen[id]; loop {
+			return false
+		}
+		seen[id] = struct{}{}
 		j := a.m.jobs[id]
 		if j == nil || j.ParentJobID == "" {
 			return false

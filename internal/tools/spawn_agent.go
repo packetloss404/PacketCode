@@ -333,7 +333,7 @@ func jobArtifactManifest(artifacts []JobArtifact, limit int) string {
 		if a.Truncated {
 			body += " [truncated]"
 		}
-		lines = append(lines, fmt.Sprintf("- %s %s: %s", nonEmpty(a.ID, fmt.Sprintf("A%d", i+1)), kind, truncateToolRunes(body, 140)))
+		lines = append(lines, fmt.Sprintf("- %s %s: %s", nonEmpty(a.ID, fmt.Sprintf("A%d", i+1)), kind, truncateRunes(body, 140)))
 	}
 	if len(artifacts) > limit {
 		lines = append(lines, fmt.Sprintf("- ... %d more", len(artifacts)-limit))
@@ -354,9 +354,9 @@ func jobArtifactMetadata(artifacts []JobArtifact, limit int) []map[string]any {
 		item := map[string]any{
 			"id":        nonEmpty(a.ID, fmt.Sprintf("A%d", i+1)),
 			"kind":      nonEmpty(a.Kind, "artifact"),
-			"title":     truncateToolRunes(a.Title, 140),
-			"summary":   truncateToolRunes(a.Summary, 280),
-			"path":      truncateToolRunes(a.Path, 280),
+			"title":     truncateRunes(a.Title, 140),
+			"summary":   truncateRunes(a.Summary, 280),
+			"path":      truncateRunes(a.Path, 280),
 			"truncated": a.Truncated,
 			"is_error":  a.IsError,
 		}
@@ -377,15 +377,4 @@ func waitWorktreeSummary(res JobWaitResult) string {
 		parts = append(parts, "base "+res.WorktreeBase)
 	}
 	return strings.Join(parts, " · ")
-}
-
-func truncateToolRunes(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	rs := []rune(s)
-	if len(rs) <= max {
-		return s
-	}
-	return string(rs[:max])
 }

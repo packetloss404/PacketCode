@@ -72,7 +72,7 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("validate key: %w", err)
+		return fmt.Errorf("validate key: %w", redactAPIKey(err, apiKey))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -81,6 +81,42 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	}
 	return nil
 }
+
+// redactAPIKey strips the API key out of an error's message while preserving
+// the error chain for errors.Is/As.
+//
+// Gemini authenticates with a ?key=<secret> query parameter rather than a
+// header, and net/http wraps every transport failure in *url.Error, whose
+// Error() prints the full request URL — query string included. Without this,
+// a single "connection refused" or DNS failure writes the user's API key into
+// the TUI, into whatever captures stderr, and into any bug report pasted from
+// it. url.Error's own redaction only covers userinfo passwords.
+func redactAPIKey(err error, apiKey string) error {
+	if err == nil || apiKey == "" {
+		return err
+	}
+	message := err.Error()
+	// Both forms: the raw key and the percent-encoded spelling that actually
+	// appears in the URL. They are identical for typical keys, but a key with
+	// a reserved character must not slip through in its escaped form.
+	for _, form := range []string{apiKey, url.QueryEscape(apiKey)} {
+		message = strings.ReplaceAll(message, form, "[REDACTED]")
+	}
+	if message == err.Error() {
+		return err
+	}
+	return &redactedError{message: message, cause: err}
+}
+
+// redactedError reports a sanitized message but still unwraps to the original
+// error, so callers keep errors.Is(err, context.DeadlineExceeded) and friends.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e *redactedError) Error() string { return e.message }
+func (e *redactedError) Unwrap() error { return e.cause }
 
 // modelsResponse is the Gemini /models response payload.
 type modelsResponse struct {
@@ -100,7 +136,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("list models: %w", err)
+		return nil, fmt.Errorf("list models: %w", redactAPIKey(err, p.apiKey))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -365,7 +401,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 	resp, err := provider.DoWithRetry(sctx, p.httpClient, provider.ConfiguredRetry(), newReq)
 	if err != nil {
 		guard.Stop()
-		return nil, fmt.Errorf("request: %w", err)
+		return nil, fmt.Errorf("request: %w", redactAPIKey(err, p.apiKey))
 	}
 	if resp.StatusCode/100 != 2 {
 		errBody := provider.ReadErrorBody(resp.Body)

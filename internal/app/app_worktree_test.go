@@ -175,11 +175,48 @@ func TestRenderJobsTable_AbandonedWriteJobDoesNotClaimCleanRoot(t *testing.T) {
 	assert.Contains(t, failedRow(out, "lost1"), "failed")
 }
 
-func abandonedRow(table, prefix string) string {
-	for _, line := range strings.Split(table, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return line
-		}
-	}
-	return ""
+// Prompts and session names are arbitrary user text. The table cells used to
+// be clipped with a byte slice, which cuts a multi-byte rune in half (the
+// terminal then renders U+FFFD) and leaves the cell's byte length disagreeing
+// with the rune-counting padRight that aligns the next column.
+func TestRenderJobsTable_PromptTruncationIsRuneSafe(t *testing.T) {
+	out := renderJobsTable([]jobs.Snapshot{{
+		ID:        "utf81234",
+		State:     jobs.StateRunning,
+		Provider:  "openai",
+		Model:     "gpt-5",
+		Prompt:    strings.Repeat("π", 80), // 80 runes, 160 bytes
+		CreatedAt: time.Now(),
+	}})
+
+	assert.NotContains(t, out, "�")
+	assert.True(t, strings.HasSuffix(out, strings.Repeat("π", 47)+"..."),
+		"prompt cell should end in 47 whole runes plus an ellipsis, got %q", out)
+}
+
+func TestRenderJobsTable_MultilinePromptStaysOnItsOwnRow(t *testing.T) {
+	out := renderJobsTable([]jobs.Snapshot{{
+		ID:        "nl123456",
+		State:     jobs.StateRunning,
+		Prompt:    "first line\nsecond line",
+		CreatedAt: time.Now(),
+	}})
+
+	// Header + exactly one row: an embedded newline must not break the table.
+	assert.Len(t, strings.Split(out, "\n"), 2)
+	assert.Contains(t, out, "first line second line")
+}
+
+func TestRenderSessionsTable_NameTruncationIsRuneSafe(t *testing.T) {
+	out := renderSessionsTable([]session.Summary{{
+		ID:           "abcdefgh1234",
+		Name:         strings.Repeat("é", 40), // 40 runes, 80 bytes
+		Provider:     "openai",
+		Model:        "gpt-5",
+		MessageCount: 3,
+		UpdatedAt:    time.Now(),
+	}}, "")
+
+	assert.NotContains(t, out, "�")
+	assert.Contains(t, out, strings.Repeat("é", 29)+"...")
 }

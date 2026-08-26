@@ -326,6 +326,47 @@ func TestAgent_SetPolicyDuringRunAppliesToLaterToolCall(t *testing.T) {
 	}
 }
 
+// SetApprover is documented as a mid-conversation swap (/trust), so the write
+// races the running turn's read in handleToolCall. Under -race this pins that
+// the swap is synchronised; it also pins that the swapped-in approver is the
+// one actually consulted for the turn's later tool call.
+func TestAgent_SetApproverDuringRunAppliesToLaterToolCall(t *testing.T) {
+	prov := &gatedToolProvider{started: make(chan struct{}), release: make(chan struct{})}
+	tool := &recordingTool{name: "execute_command", approval: true}
+	a, _, _ := newAgentRig(t, prov, tool)
+	a.SetPolicy(permissions.DefaultPolicy().WithProfile(permissions.ProfileAsk))
+
+	events := a.Run(context.Background(), "run tests")
+	select {
+	case <-prov.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider turn did not start")
+	}
+	a.SetApprover(AutoReject("user switched to manual mid-turn"))
+	close(prov.release)
+
+	sawRejected := false
+	for _, ev := range collect(events) {
+		if ev.Type == EventToolCallRejected {
+			sawRejected = true
+			assert.Contains(t, ev.Text, "user switched to manual mid-turn")
+		}
+	}
+	assert.True(t, sawRejected, "the approver installed mid-run must be the one consulted")
+	if got := atomic.LoadInt32(&tool.executed); got != 0 {
+		t.Fatalf("tool executions = %d, want 0 after live switch to reject", got)
+	}
+}
+
+// A nil approver must not become a nil-panic on the next tool call; New()
+// already substitutes AutoReject, and the setter has to hold that line.
+func TestAgent_SetApproverNilFallsBackToReject(t *testing.T) {
+	a := New(Config{})
+	a.SetApprover(nil)
+	decision := a.currentApprover().Approve(context.Background(), ApprovalRequest{})
+	assert.False(t, decision.Approved)
+}
+
 func TestAgent_DropsTextOnToolCallTurn(t *testing.T) {
 	prov := &scriptedProvider{turns: [][]provider.StreamEvent{
 		{
@@ -781,7 +822,10 @@ func TestAgent_Run_CancelDuringTool(t *testing.T) {
 
 	select {
 	case <-ct.started:
-	case <-time.After(200 * time.Millisecond):
+	// Generous: this is only the barrier that gets us to the interesting part.
+	// The assertions below bound how fast cancellation is observed; a tight
+	// bound here just makes the test fail on a loaded machine before it runs.
+	case <-time.After(5 * time.Second):
 		t.Fatal("tool did not start")
 	}
 	cancel()
