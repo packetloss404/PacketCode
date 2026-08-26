@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -658,9 +657,6 @@ func ollamaHost(cfg *config.Config) string {
 	}
 	return ""
 }
-
-// avoid "imported and not used" if filepath is conditionally referenced.
-var _ = filepath.Join
 
 // computerWorkspaceIdentity freezes the endpoint and registered root a job
 // was approved for without changing the user-facing registry ID. Removing and

@@ -250,6 +250,7 @@ func parseCostArgs(args []string) (reset, yes bool, err error) {
 //	logs <name>           — tail the named server's stderr log
 //	status <name>         — show server health/config detail
 //	tools <name>          — list tools exposed by one server
+//	restart <name>        — reconnect one server process
 func parseMCPArgs(args []string) (sub, name string, err error) {
 	if len(args) == 0 {
 		return "", "", nil

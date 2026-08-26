@@ -28,14 +28,17 @@ func (a *App) renderHelp() string {
 	return out
 }
 
-// renderHelp iterates the five keymap groups in a stable order and
-// concatenates them into a single monospace block. Keys column is 20
-// characters wide; overflow wraps to the next line with an empty key
-// slot so the descriptions stay aligned.
+// renderHelp renders the help block against the built-in slash-command
+// list, ignoring any markdown commands the user has installed. Only tests
+// use it; the App path goes through (*App).renderHelp so user commands show up.
 func renderHelp() string {
 	return renderHelpWithSlashCommands(SlashCommands)
 }
 
+// renderHelpWithSlashCommands iterates the keymap groups in a stable order and
+// concatenates them into a single monospace block. Keys column is 20
+// characters wide; overflow wraps to the next line with an empty key
+// slot so the descriptions stay aligned.
 func renderHelpWithSlashCommands(slashRows []KeyHelp) string {
 	sections := []struct {
 		title string

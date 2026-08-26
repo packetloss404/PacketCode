@@ -673,11 +673,10 @@ func collectReferences(ctx context.Context, root, targetPath, symbol, glob strin
 		if !isCodeIntelSource(path) {
 			return nil
 		}
+		// fileTooLarge is the only size gate here. d is deliberately not
+		// consulted for it: when scope_path names a single file this function
+		// is invoked directly with a nil fs.DirEntry.
 		if fileTooLarge(path, maxCodeIntelFileBytes) {
-			return nil
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil || info.Size() > maxCodeIntelFileBytes {
 			return nil
 		}
 		data, readErr := readFileBounded(path)

@@ -175,3 +175,48 @@ func TestConduitShadowDisabledOrUnavailablePreservesNormalRun(t *testing.T) {
 		})
 	}
 }
+
+// classifyTool keys off tool names as strings, so a name that drifts from the
+// registry fails silently — the call lands in RuntimeToolOther and the shadow
+// record reports the turn as touching no files. Pin the names against the
+// registry rather than against a hand-copied list.
+func TestClassifyToolMatchesRegisteredToolNames(t *testing.T) {
+	root := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewReadFileTool(root))
+	registry.Register(tools.NewSearchCodebaseTool(root))
+	registry.Register(tools.NewListDirectoryTool(root))
+	registry.Register(tools.NewWriteFileTool(root, nil))
+	registry.Register(tools.NewPatchFileTool(root, nil))
+
+	for _, registered := range registry.All() {
+		name := registered.Name()
+		t.Run(name, func(t *testing.T) {
+			got := classifyTool(provider.ToolCall{Name: name, Arguments: "{}"})
+			assert.Equal(t, sugar.RuntimeToolFile, got,
+				"%s is a registered file tool but classifies as %s", name, got)
+		})
+	}
+}
+
+func TestClassifyToolCategorisesShellCommands(t *testing.T) {
+	call := func(command string) provider.ToolCall {
+		args, err := json.Marshal(map[string]string{"command": command})
+		require.NoError(t, err)
+		return provider.ToolCall{Name: "execute_command", Arguments: string(args)}
+	}
+	assert.Equal(t, sugar.RuntimeToolTest, classifyTool(call("go test ./...")))
+	assert.Equal(t, sugar.RuntimeToolBuild, classifyTool(call("go build ./...")))
+	assert.Equal(t, sugar.RuntimeToolTypecheck, classifyTool(call("go vet ./...")))
+	assert.Equal(t, sugar.RuntimeToolShell, classifyTool(call("git status")))
+	assert.Equal(t, sugar.RuntimeToolOther, classifyTool(provider.ToolCall{Name: "spawn_agent", Arguments: "{}"}))
+}
+
+// blocked() hashes into s.salt, so it must lead with the same inactive-shadow
+// guard its siblings use rather than doing work an inactive run discards.
+func TestConduitShadowBlockedIsInertWhenInactive(t *testing.T) {
+	state := &conduitShadowState{}
+	state.blocked(context.Background(), provider.ToolCall{Name: "write_file"}, "denied")
+	assert.Empty(t, state.capsule.Evidence)
+	assert.Zero(t, state.seq)
+}

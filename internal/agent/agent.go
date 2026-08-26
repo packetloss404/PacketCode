@@ -76,6 +76,7 @@ type Agent struct {
 	toolRegistry  *tools.Registry
 	session       *session.Manager
 	costTracker   *cost.Tracker
+	approverMu    sync.RWMutex
 	approver      Approver
 	policyMu      sync.RWMutex
 	policy        *permissions.Policy
@@ -135,9 +136,26 @@ func New(cfg Config) *Agent {
 }
 
 // SetApprover swaps the approver at runtime — used by /trust to flip
-// between user-prompted and auto-approve modes mid-conversation.
+// between user-prompted and auto-approve modes mid-conversation. The swap
+// therefore races the running turn's read in handleToolCall, so it is
+// guarded the same way SetPolicy is.
 func (a *Agent) SetApprover(approver Approver) {
+	if approver == nil {
+		approver = AutoReject("no approver configured")
+	}
+	a.approverMu.Lock()
 	a.approver = approver
+	a.approverMu.Unlock()
+}
+
+func (a *Agent) currentApprover() Approver {
+	a.approverMu.RLock()
+	approver := a.approver
+	a.approverMu.RUnlock()
+	if approver == nil {
+		return AutoReject("no approver configured")
+	}
+	return approver
 }
 
 func (a *Agent) SetPolicy(policy *permissions.Policy) {
@@ -428,7 +446,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		}
 	}
 	if policyResult.Decision == permissions.DecisionAsk {
-		decision := a.approver.Approve(ctx, ApprovalRequest{
+		decision := a.currentApprover().Approve(ctx, ApprovalRequest{
 			Tool:     tool,
 			ToolCall: call,
 			Params:   params,

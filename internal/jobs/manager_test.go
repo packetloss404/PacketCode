@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -1175,6 +1174,3 @@ func readDirOrEmpty(dir string) ([]os.DirEntry, error) {
 	}
 	return es, nil
 }
-
-// _ keeps the agent import live in case other tests are pruned.
-var _ = agent.AutoApprove

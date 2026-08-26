@@ -219,6 +219,10 @@ func (m *Model) AppendToolCall(toolName, args string) {
 // callers (and tests) that do not have a call id.
 func (m *Model) AppendToolCallWithID(toolName, args, callID string) {
 	if m.pending != nil && m.pending.Kind == KindAgent {
+		// Discarded, not flushed: text streamed immediately before a tool
+		// call is usually the raw call scaffolding some providers leak
+		// (e.g. `<|python_tag|>{...}`), which must never reach scrollback.
+		// See TestAppendToolCallDiscardsPendingAgentText.
 		m.pending = nil
 	} else {
 		m.flushPending()
@@ -348,8 +352,11 @@ func (m *Model) emit(rendered string) {
 }
 
 // flushPending commits any pending message to scrollback. Used when a
-// new pending slot is about to overwrite the current one (e.g. a tool
-// call proposed while agent text was still streaming).
+// new pending slot is about to overwrite the current one (e.g. agent
+// text starting while a tool call is still pending). Note that the
+// reverse case — a tool call proposed while agent text was streaming —
+// deliberately DISCARDS the pending agent text rather than flushing it;
+// see AppendToolCallWithID.
 func (m *Model) flushPending() {
 	if m.pending == nil {
 		return
@@ -548,9 +555,16 @@ func tryRenderDiffResult(content string, width int) (string, bool) {
 	return out, true
 }
 
+// truncate clips s to at most max runes, adding an ellipsis on overflow.
+// Rune-based, not byte-based: slicing a UTF-8 string by byte offset can cut a
+// multi-byte rune in half and emit U+FFFD into the transcript.
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	if max < 0 {
+		max = 0
+	}
+	return string(r[:max]) + "…"
 }

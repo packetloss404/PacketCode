@@ -67,3 +67,15 @@ func TestSearchCodebase_EmptyPattern(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 }
+
+// A nil backend leaves Root empty, and the local walker resolves "" to the
+// process working directory — so the failure mode is not "no results" but a
+// search of whatever tree the binary happens to be running in.
+func TestSearchCodebase_NilBackendIsAnErrorNotACWDSearch(t *testing.T) {
+	tool := NewSearchCodebaseToolWithBackend(nil)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"pattern":"func "}`))
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content, "runtime backend is nil")
+	assert.NotContains(t, res.Content, "Found ")
+}

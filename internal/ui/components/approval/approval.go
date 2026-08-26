@@ -220,5 +220,5 @@ func summariseParams(args string) string {
 		buf, _ := json.MarshalIndent(pretty, "", "  ")
 		return theme.StylePrimary.Render(string(buf))
 	}
-	return fmt.Sprintf("%s", trimmed)
+	return trimmed
 }

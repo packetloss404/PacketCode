@@ -56,13 +56,15 @@ func (a *App) renderQueue() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// truncOneLine collapses s to a single space-separated line and clips it to
+// n runes, spending the last three on an ellipsis when there is room for one.
+// Rune-based throughout: byte slicing would split a multi-byte character and
+// emit a replacement glyph into a table cell, and the padRight helpers that
+// align those cells count runes too.
 func truncOneLine(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len([]rune(s)) <= n {
 		return s
-	}
-	if n <= 1 {
-		return trunc(s, n)
 	}
 	if n <= 3 {
 		return trunc(s, n)

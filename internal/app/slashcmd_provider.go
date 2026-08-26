@@ -1,9 +1,6 @@
 package app
 
 import (
-	"fmt"
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -50,44 +47,4 @@ func (a *App) handleModelCommand(args []string) (tea.Model, tea.Cmd) {
 		a.conversation.AppendSystem("model: " + err.Error())
 	}
 	return a, nil
-}
-
-// renderProvidersTable builds the ASCII table shown by bare /provider.
-// Fixed column widths: slug=10, name=14, default model=28, active=5.
-func (a *App) renderProvidersTable() string {
-	provs := a.deps.Registry.List()
-	if len(provs) == 0 {
-		return "no providers registered"
-	}
-	active, _ := a.deps.Registry.Active()
-	activeSlug := ""
-	if active != nil {
-		activeSlug = active.Slug()
-	}
-	var b strings.Builder
-	// Leading two spaces in the header accounts for the active marker
-	// column ("* " or "  ") that prefixes each row.
-	b.WriteString("  PROVIDER   NAME           DEFAULT MODEL                ACTIVE\n")
-	for _, p := range provs {
-		marker := "  "
-		activeCol := "no"
-		if p.Slug() == activeSlug {
-			marker = "* "
-			activeCol = "yes"
-		}
-		defModel := "(none)"
-		if a.deps.Config != nil {
-			if pc, ok := a.deps.Config.Providers[p.Slug()]; ok && pc.DefaultModel != "" {
-				defModel = pc.DefaultModel
-			}
-		}
-		fmt.Fprintf(&b, "%s%s %s %s %s\n",
-			marker,
-			padRight(trunc(p.Slug(), 10), 10),
-			padRight(trunc(p.Name(), 14), 14),
-			padRight(trunc(defModel, 28), 28),
-			padRight(activeCol, 5),
-		)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }

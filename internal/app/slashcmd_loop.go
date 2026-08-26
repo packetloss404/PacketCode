@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,7 +45,11 @@ type loopDecision struct {
 const selfPacedMaxIters = 25
 
 type loopState struct {
-	id         string
+	id string
+	// seq is the creation order behind id ("loop3" → 3). loops is a map, so
+	// /loop list has to sort by something; sorting the ids as strings would
+	// put loop10 before loop2 once ten loops exist.
+	seq        int
 	mode       loopMode
 	interval   time.Duration
 	body       string
@@ -84,6 +89,7 @@ func (a *App) handleLoopCommand(args []string) (tea.Model, tea.Cmd) {
 	a.loopSeq++
 	ls := &loopState{
 		id:       fmt.Sprintf("loop%d", a.loopSeq),
+		seq:      a.loopSeq,
 		mode:     mode,
 		interval: interval,
 		body:     body,
@@ -253,13 +259,21 @@ func (a *App) renderLoops() string {
 	if len(a.loops) == 0 {
 		return "no active loops"
 	}
+	// Map iteration order is randomised, so list in creation order instead:
+	// otherwise two /loop list calls a second apart reshuffle the rows.
+	ordered := make([]*loopState, 0, len(a.loops))
+	for _, ls := range a.loops {
+		ordered = append(ordered, ls)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].seq < ordered[j].seq })
+
 	var b strings.Builder
 	b.WriteString("Active loops:\n")
-	for id, ls := range a.loops {
+	for _, ls := range ordered {
 		if ls.mode == loopInterval {
-			fmt.Fprintf(&b, "  %s — every %s · %d run(s) · %s\n", id, ls.interval, ls.iterations, ls.body)
+			fmt.Fprintf(&b, "  %s — every %s · %d run(s) · %s\n", ls.id, ls.interval, ls.iterations, ls.body)
 		} else {
-			fmt.Fprintf(&b, "  %s — self-paced · %d/%d iters · %s\n", id, ls.iterations, ls.maxIters, ls.body)
+			fmt.Fprintf(&b, "  %s — self-paced · %d/%d iters · %s\n", ls.id, ls.iterations, ls.maxIters, ls.body)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -357,14 +357,13 @@ func extractErrorMessage(body []byte) string {
 // sseEvent is the common envelope; only the fields relevant to a given
 // event.type are populated by the server.
 type sseEvent struct {
-	Type        string          `json:"type"`
-	OutputIndex int             `json:"output_index"`
-	Delta       string          `json:"delta"`
-	Item        *sseItem        `json:"item"`
-	Response    *sseResponse    `json:"response"`
-	Message     string          `json:"message"` // top-level "error" events
-	Code        string          `json:"code"`
-	Raw         json.RawMessage `json:"-"`
+	Type        string       `json:"type"`
+	OutputIndex int          `json:"output_index"`
+	Delta       string       `json:"delta"`
+	Item        *sseItem     `json:"item"`
+	Response    *sseResponse `json:"response"`
+	Message     string       `json:"message"` // top-level "error" events
+	Code        string       `json:"code"`
 }
 
 type sseItem struct {

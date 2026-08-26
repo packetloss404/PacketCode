@@ -121,7 +121,7 @@ func NewClient(ctx context.Context, cfg ServerConfig, logDir string, info Client
 	return c, nil
 }
 
-// NewClientFromIO is a test seam: it wires an existing pair of pipes
+// newClientFromIO is a test seam: it wires an existing pair of pipes
 // (and an optional logFile/cmd) into a Client and runs the handshake.
 // Production callers go through NewClient. logFile may be nil.
 func newClientFromIO(ctx context.Context, name string, stdin io.WriteCloser, stdout io.ReadCloser, logFile *os.File, cmd *exec.Cmd, timeout time.Duration, info ClientInfo) (*Client, error) {

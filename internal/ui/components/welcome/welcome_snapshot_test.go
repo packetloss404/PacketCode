@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,7 +16,9 @@ func TestRenderFixedCellSnapshots(t *testing.T) {
 		width, height int
 		wantArt       bool
 	}{{100, 30, true}, {120, 40, true}, {60, 20, false}} {
-		t.Run(strings.Join([]string{"cells", string(rune(tc.width)), string(rune(tc.height))}, "-"), func(t *testing.T) {
+		// strconv.Itoa, not string(rune(...)): the latter turns 100 into "d"
+		// and 30 into a raw control byte, producing unreadable subtest names.
+		t.Run(strings.Join([]string{"cells", strconv.Itoa(tc.width), strconv.Itoa(tc.height)}, "-"), func(t *testing.T) {
 			got := escapeSequence.ReplaceAllString(Render(tc.width, tc.height, "v-test"), "")
 			lines := strings.Split(got, "\n")
 			if len(lines) != tc.height {

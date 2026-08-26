@@ -152,9 +152,10 @@ func (cm *ContextManager) CompactWithUsage(
 	if len(body) <= keepRecent {
 		return normalizeToolTranscript(messages), nil, nil
 	}
-	toSummarize := modelBody[:len(modelBody)-keepRecent]
+	// Never split an assistant tool-call message from its tool results: the
+	// cut moves back to the start of the group that would be straddled.
 	tailStart := compactTailStart(modelBody, len(modelBody)-keepRecent)
-	toSummarize = modelBody[:tailStart]
+	toSummarize := modelBody[:tailStart]
 	tail := body[tailStart:]
 
 	prompt := buildSummaryPrompt(toSummarize)

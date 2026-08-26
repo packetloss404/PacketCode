@@ -205,7 +205,9 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 // consumeEvents drains the agent event channel, updating job
 // counters as usage events arrive and recording the final assistant
 // text for the summary. On EventDone we mark Completed; on EventError
-// we mark Failed; on ctx cancellation we mark Cancelled.
+// we mark Failed; on ctx cancellation we mark whatever classifyCancelled
+// decides — Cancelled only when a stop was actually requested, otherwise
+// Abandoned.
 func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent.AgentEvent, sess *session.Manager, runtimeBackend computers.RuntimeBackend) {
 	var lastAssistantText strings.Builder
 	var inflightAssistant strings.Builder

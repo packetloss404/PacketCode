@@ -55,7 +55,6 @@ func NewEngine(m *jobs.Manager) *Engine {
 	}
 }
 
-// SetMaxAgents overrides the per-run agent cap. Values <= 0 are ignored.
 // SetTokenBudget sets an aggregate input+output boundary budget per workflow
 // run. Zero disables the budget. A concurrently running fan-out step may
 // finish above the boundary; no later step is spawned after the boundary is
@@ -69,6 +68,7 @@ func (e *Engine) SetTokenBudget(n int) {
 	e.mu.Unlock()
 }
 
+// SetMaxAgents overrides the per-run agent cap. Values <= 0 are ignored.
 func (e *Engine) SetMaxAgents(n int) {
 	if n <= 0 {
 		return
@@ -187,9 +187,8 @@ func (e *Engine) drive(ctx context.Context, run *Run, wf Workflow) {
 outer:
 	for pi, ph := range wf.Phases {
 		for si, st := range ph.Steps {
-			used := workflowTokens(run)
-			if tokenBudget > 0 && used >= tokenBudget {
-				firstErr = fmt.Errorf("workflow token budget exhausted: used %d tokens (budget %d)", used, tokenBudget)
+			if err := workflowBudgetError(run, tokenBudget); err != nil {
+				firstErr = err
 				break outer
 			}
 			if err := ctx.Err(); err != nil {
@@ -232,8 +231,8 @@ outer:
 	e.emit(run)
 }
 
-// runStep executes a single step and records its result into the run at
-// [pi][si], emitting a snapshot as spawns land and after the join.
+// workflowTokens sums the input+output tokens every agent in the run has
+// reported so far, across every attempt and verifier.
 func workflowTokens(run *Run) int {
 	run.mu.Lock()
 	defer run.mu.Unlock()
@@ -259,6 +258,8 @@ func workflowTokens(run *Run) int {
 	return total
 }
 
+// runStep executes a single step and records its result into the run at
+// [pi][si], emitting a snapshot as spawns land and after the join.
 func (e *Engine) runStep(
 	ctx context.Context,
 	run *Run,

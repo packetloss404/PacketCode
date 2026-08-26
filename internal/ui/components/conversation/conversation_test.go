@@ -258,3 +258,15 @@ func TestToolDisplayUsesClaudeStyleBuiltInNames(t *testing.T) {
 		assert.Contains(t, stripANSI(got), want)
 	}
 }
+
+// TestToolDisplayTruncatesOnRuneBoundary pins the tool-detail cap at 120
+// runes and, critically, that the cut never lands mid-rune. Byte slicing a
+// multi-byte detail emitted U+FFFD into the transcript.
+func TestToolDisplayTruncatesOnRuneBoundary(t *testing.T) {
+	detail := strings.Repeat("界", 200) // 3 bytes per rune
+	out := stripANSI(toolDisplay("execute_command", `{"command":"`+detail+`"}`))
+
+	assert.NotContains(t, out, "�", "truncation must not split a rune")
+	assert.Contains(t, out, "…")
+	assert.Equal(t, 120, strings.Count(out, "界"), "keeps 120 runes, not 120 bytes")
+}

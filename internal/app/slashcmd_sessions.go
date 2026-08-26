@@ -316,10 +316,10 @@ func renderSessionsTable(summaries []session.Summary, currentID string) string {
 			marker = "* "
 			active = "yes"
 		}
-		name := s.Name
-		if len(name) > 32 {
-			name = name[:29] + "..."
-		}
+		// Session names come from /sessions rename, so they are arbitrary user
+		// text. Clip by runes: a byte slice would split a multi-byte character
+		// and desynchronise the cell from the rune-counting padRight below.
+		name := truncOneLine(s.Name, 32)
 		provModel := s.Provider
 		if s.Model != "" {
 			if provModel != "" {
