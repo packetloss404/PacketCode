@@ -248,18 +248,22 @@ func (b *LocalBackend) Execute(ctx context.Context, command, cwd string, output 
 	if runErr == nil {
 		return ExecResult{ExitCode: 0}, nil
 	}
-	if exitErr, ok := runErr.(*exec.ExitError); ok {
-		return ExecResult{ExitCode: exitErr.ExitCode()}, nil
-	}
+	// The cancellation check must come FIRST. Killing the tree makes the child
+	// exit non-zero, so cmd.Run reports an *exec.ExitError even though the
+	// command did not choose that status -- testing for ExitError first would
+	// return a meaningless exit code and, worse, discard the teardown evidence
+	// entirely.
 	if ctx.Err() != nil {
-		// Cancelled. Report what the teardown managed, not merely that one
-		// was asked for: the caller has to tell a user whether the command
-		// actually stopped.
+		// Report what the teardown managed, not merely that one was asked
+		// for: the caller has to tell a user whether the command stopped.
 		res := ExecResult{ExitCode: -1}
 		if outcome, ran := teardown(); ran {
 			res.Teardown = &outcome
 		}
 		return res, nil
+	}
+	if exitErr, ok := runErr.(*exec.ExitError); ok {
+		return ExecResult{ExitCode: exitErr.ExitCode()}, nil
 	}
 	return ExecResult{}, runErr
 }

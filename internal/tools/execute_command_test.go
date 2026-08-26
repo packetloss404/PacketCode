@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,7 +65,17 @@ func TestExecuteCommand_Timeout(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 	assert.Contains(t, res.Content, "timed out")
-	assert.Contains(t, res.Content, "process tree cancellation requested")
+	// A real teardown ran, so the line must report what it achieved rather
+	// than the nil-outcome wording. Asserting the old "cancellation
+	// requested" text is what hid the fact that the evidence never reached
+	// here at all: killing the tree makes the child exit non-zero, and the
+	// backend used to return that ExitError before it recorded the teardown.
+	assert.NotContains(t, res.Content, "outcome unknown",
+		"the teardown evidence must reach the caller")
+	assert.Regexp(t, `process tree (stopped|NOT confirmed stopped)`, res.Content)
+	teardown, ok := res.Metadata["teardown"].(map[string]any)
+	require.True(t, ok, "metadata must carry structured teardown evidence, got %#v", res.Metadata["teardown"])
+	assert.NotEmpty(t, teardown["method"])
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
 
@@ -168,18 +179,13 @@ func TestExecuteCommand_TruncatesCapturedOutput(t *testing.T) {
 	assert.Equal(t, true, res.Metadata["truncated"])
 }
 
-// --- Phase 1 Round 4: output streaming (producer side) ---
+// --- output streaming (producer side) ---
 //
-// These tests pin down the OBSERVABLE behavior the streaming round must
-// preserve. The incremental-streaming hook itself (Part 1) is not yet final —
-// execute_command currently buffers into a procrun.BoundedBuffer and returns on
-// exit (see execute_command.go). Rather than assert against an unstable API
-// surface, these tests assert the invariants that must hold both today and
-// after streaming lands: a slow, multi-line command runs to completion with all
-// output captured, the bounded cap survives high-volume output, and
-// cancellation still tears the process down promptly. See
-// TestExecuteCommand_StreamsIncrementally_Stub below for the streaming-specific
-// assertion that should be enabled once the Part 1 hook is finalized.
+// These tests pin the OBSERVABLE behavior the live feed must not disturb: a
+// slow, multi-line command runs to completion with all output captured, the
+// bounded cap survives high-volume output, and cancellation still tears the
+// process down promptly. TestExecuteCommand_StreamsIncrementally below covers
+// the sink itself.
 
 // slowMultiLineCommand emits several lines spaced out in time so that a true
 // incremental streamer would deliver early lines well before process exit.
@@ -265,28 +271,79 @@ func TestExecuteCommand_StreamingStillCancels(t *testing.T) {
 	assert.Less(t, elapsed, 2*time.Second, "cancellation must return promptly while streaming; took %s", elapsed)
 }
 
-// TestExecuteCommand_StreamsIncrementally_Stub is the streaming-specific
-// assertion for Part 1. It is intentionally skipped until the incremental
-// streaming hook is finalized, because the exact callback/sink API is not yet
-// settled (today execute_command writes to a procrun.BoundedBuffer and returns
-// only on exit).
+// recordingSink captures every chunk with the time it arrived. WriteChunk runs
+// on the goroutine draining the child's pipe, so it must be safe to call
+// concurrently with the test's own reads.
+type recordingSink struct {
+	mu     sync.Mutex
+	chunks []string
+	firstA time.Time
+}
+
+func (r *recordingSink) WriteChunk(chunk string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.firstA.IsZero() {
+		r.firstA = time.Now()
+	}
+	r.chunks = append(r.chunks, chunk)
+}
+
+func (r *recordingSink) snapshot() ([]string, time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.chunks...), r.firstA
+}
+
+// TestExecuteCommand_StreamsIncrementally proves the sink sees output WHILE the
+// command is still running, not in one burst at exit. The command prints a line,
+// then idles for seconds, then prints again; if chunks were only delivered on
+// exit, the first chunk would land at (essentially) the moment Execute returns.
 //
-// When Part 1 lands, enable this test and assert against the real hook, e.g.:
-//
-//	var firstChunkAt time.Time
-//	sink := func(chunk []byte) {
-//	        if firstChunkAt.IsZero() { firstChunkAt = time.Now() }
-//	}
-//	start := time.Now()
-//	_, _ = tool.ExecuteStreaming(ctx, body, sink) // or whatever the final API is
-//	// The first chunk must arrive well before the ~0.6s command exits:
-//	assert.Less(t, firstChunkAt.Sub(start), 400*time.Millisecond)
-//
-// The producer-side invariants this stub depends on (every line captured,
-// cap preserved, cancellation works) are already covered by the three tests
-// above, so they are not regressed in the meantime.
-func TestExecuteCommand_StreamsIncrementally_Stub(t *testing.T) {
-	t.Skip("Part 1 incremental-streaming hook not finalized; enable once execute_command exposes a stream sink. Producer invariants covered by TestExecuteCommand_SlowMultiLineCapturesAll / _StreamingPreservesBoundedCap / _StreamingStillCancels.")
+// Deliberately asserted as a MINIMUM gap rather than a maximum latency: machine
+// load can only stretch the interval between the first line and process exit,
+// so this direction cannot fail spuriously under a busy CPU.
+func TestExecuteCommand_StreamsIncrementally(t *testing.T) {
+	command := "printf 'line1\n'; sleep 2; printf 'line2\n'"
+	if runtime.GOOS == "windows" {
+		// ping -n 4 waits ~3s between the two echoes.
+		command = "echo line1& ping -n 4 127.0.0.1 >NUL& echo line2"
+	}
+	tool := NewExecuteCommandTool(t.TempDir())
+	body, _ := json.Marshal(map[string]any{"command": command})
+	sink := &recordingSink{}
+
+	res, err := tool.ExecuteStreaming(context.Background(), body, sink)
+	returnedAt := time.Now()
+	require.NoError(t, err)
+	require.False(t, res.IsError, res.Content)
+
+	chunks, firstAt := sink.snapshot()
+	require.NotEmpty(t, chunks, "sink must receive live output")
+	require.False(t, firstAt.IsZero())
+	assert.Contains(t, chunks[0], "line1", "the first chunk must be the first line, not the whole run")
+	assert.GreaterOrEqual(t, returnedAt.Sub(firstAt), 500*time.Millisecond,
+		"first chunk arrived %s before Execute returned; that is a single end-of-run flush, not streaming",
+		returnedAt.Sub(firstAt))
+
+	streamed := strings.Join(chunks, "")
+	assert.Contains(t, streamed, "line1")
+	assert.Contains(t, streamed, "line2")
+	// The sink is additive: the bounded, model-facing result is unchanged.
+	assert.Contains(t, res.Content, "line1")
+	assert.Contains(t, res.Content, "line2")
+	assert.Contains(t, res.Content, "[exit 0]")
+}
+
+// A nil sink must be exactly Execute: same result, no panic on the chunker.
+func TestExecuteCommand_NilSinkMatchesExecute(t *testing.T) {
+	tool := NewExecuteCommandTool(t.TempDir())
+	body, _ := json.Marshal(map[string]any{"command": shellEcho("nil-sink")})
+	res, err := tool.ExecuteStreaming(context.Background(), body, nil)
+	require.NoError(t, err)
+	assert.False(t, res.IsError)
+	assert.Contains(t, res.Content, "nil-sink")
+	assert.Contains(t, res.Content, "[exit 0]")
 }
 
 func TestExecuteCommand_CancelsPOSIXProcessGroup(t *testing.T) {
