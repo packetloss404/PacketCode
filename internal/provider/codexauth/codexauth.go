@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -298,8 +299,11 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-func readSnippet(r interface{ Read([]byte) (int, error) }) string {
-	buf := make([]byte, 512)
-	n, _ := r.Read(buf)
-	return strings.TrimSpace(string(buf[:n]))
+// readSnippet returns the leading bytes of an error body for a diagnostic
+// message. It reads until the cap rather than taking whatever one Read call
+// happens to return: a single Read is allowed to deliver one byte, which would
+// truncate the OAuth error description the user needs to act on.
+func readSnippet(r io.Reader) string {
+	buf, _ := io.ReadAll(io.LimitReader(r, 512))
+	return strings.TrimSpace(string(buf))
 }

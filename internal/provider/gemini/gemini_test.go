@@ -440,3 +440,52 @@ func TestProvider_ChatCompletion_ErrorStatus(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "400")
 }
+
+// Gemini authenticates with a ?key= query parameter, so net/http's *url.Error
+// carries the API key in its message. Every transport-error path must redact
+// it before it reaches the UI or a log.
+func TestProvider_TransportErrors_RedactAPIKey(t *testing.T) {
+	const secret = "AIza-super-secret-gemini-key"
+
+	// A server that is closed immediately gives us a deterministic dial
+	// failure against a URL nothing else is listening on.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := server.URL
+	server.Close()
+
+	p := NewWithBaseURL(deadURL, secret)
+
+	t.Run("ValidateKey", func(t *testing.T) {
+		err := p.ValidateKey(context.Background(), secret)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secret)
+		assert.Contains(t, err.Error(), "[REDACTED]")
+	})
+
+	t.Run("ListModels", func(t *testing.T) {
+		_, err := p.ListModels(context.Background())
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secret)
+		assert.Contains(t, err.Error(), "[REDACTED]")
+	})
+
+	t.Run("ChatCompletion", func(t *testing.T) {
+		_, err := p.ChatCompletion(context.Background(), provider.ChatRequest{Model: "gemini-2.5-pro"})
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secret)
+		assert.Contains(t, err.Error(), "[REDACTED]")
+	})
+}
+
+func TestRedactAPIKey_PreservesErrorChain(t *testing.T) {
+	const secret = "sekret"
+	wrapped := fmt.Errorf("Get %q: %w", "https://example.test/models?key="+secret, context.DeadlineExceeded)
+	got := redactAPIKey(wrapped, secret)
+	assert.NotContains(t, got.Error(), secret)
+	assert.True(t, errors.Is(got, context.DeadlineExceeded), "redaction must not break errors.Is")
+
+	// Nothing to redact: the original error is returned untouched.
+	plain := errors.New("no credential here")
+	assert.Same(t, plain, redactAPIKey(plain, secret))
+	assert.Same(t, plain, redactAPIKey(plain, ""))
+}
