@@ -243,7 +243,7 @@ func (b *LocalBackend) Execute(ctx context.Context, command, cwd string, output 
 	cmd.Dir = resolved
 	cmd.Stdout = output
 	cmd.Stderr = output
-	procrun.ConfigureTreeCancel(cmd)
+	teardown := procrun.ConfigureTreeCancelRecorder(cmd)
 	runErr := cmd.Run()
 	if runErr == nil {
 		return ExecResult{ExitCode: 0}, nil
@@ -252,7 +252,14 @@ func (b *LocalBackend) Execute(ctx context.Context, command, cwd string, output 
 		return ExecResult{ExitCode: exitErr.ExitCode()}, nil
 	}
 	if ctx.Err() != nil {
-		return ExecResult{ExitCode: -1}, nil
+		// Cancelled. Report what the teardown managed, not merely that one
+		// was asked for: the caller has to tell a user whether the command
+		// actually stopped.
+		res := ExecResult{ExitCode: -1}
+		if outcome, ran := teardown(); ran {
+			res.Teardown = &outcome
+		}
+		return res, nil
 	}
 	return ExecResult{}, runErr
 }

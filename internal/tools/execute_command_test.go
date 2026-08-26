@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/procrun"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -324,4 +325,84 @@ func TestExecuteCommand_CancelsPOSIXProcessGroup(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return exec.Command("kill", "-0", strconv.Itoa(pid)).Run() != nil
 	}, time.Second, 20*time.Millisecond, "child process should be killed with the shell process group")
+}
+
+// The old wording said cancellation was "requested", which is true in every
+// case and so distinguishes nothing: it read identically whether the process
+// had stopped or was still running. These pin the three states apart.
+func TestDescribeTeardown_SeparatesConfirmedFromUnknown(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome *procrun.KillOutcome
+		want    []string
+		absent  []string
+	}{
+		{
+			name:    "no teardown ran",
+			outcome: nil,
+			want:    []string{"outcome unknown"},
+			absent:  []string{"NOT confirmed"},
+		},
+		{
+			name:    "job object contained the tree",
+			outcome: &procrun.KillOutcome{Method: procrun.KillMethodJobObject, Confirmed: true},
+			want:    []string{"tree stopped (", "job-object"},
+			absent:  []string{"NOT confirmed", "unknown"},
+		},
+		{
+			name: "survivors are named, not summarised away",
+			outcome: &procrun.KillOutcome{
+				Method:    procrun.KillMethodTreeWalk,
+				Survivors: []int{4242, 4243},
+			},
+			want:   []string{"NOT confirmed", "tree-walk", "4242", "4243"},
+			absent: []string{"tree stopped ("},
+		},
+		{
+			name: "an unconfirmed remote teardown keeps its reason",
+			outcome: &procrun.KillOutcome{
+				Method: procrun.KillMethodNone,
+				Reason: "sshd may ignore channel signals",
+			},
+			want:   []string{"NOT confirmed", "sshd may ignore channel signals"},
+			absent: []string{"tree stopped ("},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := describeTeardown(tc.outcome)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("describeTeardown = %q, want it to contain %q", got, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(got, absent) {
+					t.Fatalf("describeTeardown = %q, want it NOT to contain %q", got, absent)
+				}
+			}
+		})
+	}
+}
+
+// A nil outcome must stay nil in metadata. Emitting a zero value would report
+// "not confirmed" for commands that were never cancelled at all.
+func TestTeardownMetadata_NilStaysNil(t *testing.T) {
+	if got := teardownMetadata(nil); got != nil {
+		t.Fatalf("teardownMetadata(nil) = %v, want nil", got)
+	}
+	meta := teardownMetadata(&procrun.KillOutcome{
+		Method:    procrun.KillMethodProcessGroup,
+		Survivors: []int{7},
+		Reason:    "why",
+	})
+	if meta["method"] != "process-group" || meta["confirmed"] != false {
+		t.Fatalf("unexpected metadata: %v", meta)
+	}
+	if meta["reason"] != "why" {
+		t.Fatalf("reason dropped: %v", meta)
+	}
+	if _, ok := meta["survivors"]; !ok {
+		t.Fatalf("survivors dropped: %v", meta)
+	}
 }

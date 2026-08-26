@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"io/fs"
+
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 // RuntimeBackend is the workspace boundary used by PacketCode's core tools.
@@ -38,4 +40,10 @@ type FileEntry struct {
 // normal result; transport/start failures are returned as errors.
 type ExecResult struct {
 	ExitCode int
+	// Teardown carries what is known about killing the process tree when the
+	// command was cancelled, and is nil when nothing was torn down. A backend
+	// that cannot observe a teardown must report an unconfirmed outcome
+	// rather than leaving this nil, because nil reads as "nothing to say"
+	// and the difference matters to whoever is told the job stopped.
+	Teardown *procrun.KillOutcome
 }

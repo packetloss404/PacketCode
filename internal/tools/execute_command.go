@@ -148,11 +148,12 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 	if truncated {
 		b.WriteString("...[output truncated at 100KB]...\n")
 	}
+	teardown := describeTeardown(execResult.Teardown)
 	switch {
 	case timedOut:
-		fmt.Fprintf(&b, "[timed out after %s; process tree cancellation requested]\n", timeout)
+		fmt.Fprintf(&b, "[timed out after %s; %s]\n", timeout, teardown)
 	case canceled:
-		b.WriteString("[canceled; process tree cancellation requested]\n")
+		fmt.Fprintf(&b, "[canceled; %s]\n", teardown)
 	case exitCode == 0:
 		b.WriteString("[exit 0]")
 	default:
@@ -172,6 +173,7 @@ func (t *ExecuteCommandTool) ExecuteStreaming(ctx context.Context, raw json.RawM
 			"canceled":  canceled,
 			"truncated": truncated,
 			"cwd":       cwd,
+			"teardown":  teardownMetadata(execResult.Teardown),
 		},
 	}, nil
 }
@@ -357,4 +359,45 @@ func lookPath(file string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// describeTeardown turns kill evidence into one honest clause. The previous
+// wording said cancellation was "requested", which is true of every case and
+// therefore tells the reader nothing: it reads identically whether the process
+// is gone or still running.
+func describeTeardown(outcome *procrun.KillOutcome) string {
+	if outcome == nil {
+		return "process tree cancellation requested, outcome unknown"
+	}
+	if outcome.Confirmed {
+		return "process tree stopped (" + string(outcome.Method) + ")"
+	}
+	detail := outcome.Reason
+	if len(outcome.Survivors) > 0 {
+		detail = fmt.Sprintf("%d process(es) still alive: %v", len(outcome.Survivors), outcome.Survivors)
+	}
+	if detail == "" {
+		detail = "no evidence either way"
+	}
+	return "process tree NOT confirmed stopped (" + string(outcome.Method) + "): " + detail
+}
+
+// teardownMetadata mirrors describeTeardown for structured consumers. A nil
+// outcome yields nil rather than a zero value, so "no teardown happened" is
+// not reported as an unconfirmed one.
+func teardownMetadata(outcome *procrun.KillOutcome) map[string]any {
+	if outcome == nil {
+		return nil
+	}
+	meta := map[string]any{
+		"method":    string(outcome.Method),
+		"confirmed": outcome.Confirmed,
+	}
+	if outcome.Reason != "" {
+		meta["reason"] = outcome.Reason
+	}
+	if len(outcome.Survivors) > 0 {
+		meta["survivors"] = outcome.Survivors
+	}
+	return meta
 }

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/procrun"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -542,10 +543,14 @@ func (b *SSHBackend) Execute(ctx context.Context, command, cwd string, output io
 		}
 		return ExecResult{}, runErr
 	case <-ctx.Done():
-		_ = session.Signal(ssh.SIGTERM)
+		// One SIGTERM to the channel leader, which many sshd configurations
+		// ignore outright, and no remote process group to fall back on. This
+		// is reported as unconfirmed rather than success-shaped, because a
+		// detached remote descendant may still be running.
+		signalErr := session.Signal(ssh.SIGTERM)
 		_ = session.Close()
 		drainSSHSession(done, sshCancelDrainTimeout)
-		return ExecResult{ExitCode: -1}, nil
+		return ExecResult{ExitCode: -1, Teardown: sshTeardownOutcome(signalErr)}, nil
 	}
 }
 
@@ -554,6 +559,18 @@ func (b *SSHBackend) Execute(ctx context.Context, command, cwd string, output io
 // turn application shutdown) forever after Session.Close has been issued.
 // Closing SSHBackend remains the authoritative way to tear down the shared
 // transport if the session goroutine does not exit within this window.
+// sshTeardownOutcome describes a remote cancellation honestly. There is no
+// remote job object and no remote process group here, so nothing this
+// function can say is ever Confirmed; the value exists so callers can tell
+// "we could not verify" apart from "there was nothing to stop".
+func sshTeardownOutcome(signalErr error) *procrun.KillOutcome {
+	reason := "SIGTERM was sent to the remote session and the channel closed, but SSH offers no process-group teardown and sshd may ignore channel signals; a detached remote descendant may still be running"
+	if signalErr != nil {
+		reason = "the remote session could not even be signalled (" + signalErr.Error() + "); " + reason
+	}
+	return &procrun.KillOutcome{Method: procrun.KillMethodNone, Reason: reason}
+}
+
 func drainSSHSession(done <-chan error, timeout time.Duration) {
 	if timeout <= 0 {
 		return

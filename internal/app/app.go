@@ -1824,7 +1824,7 @@ func formatTerminalJobLine(snap jobs.Snapshot) string {
 		// "the transport died and a remote agent may still be running", so it
 		// belongs in the line the user actually reads.
 		if cause := snap.AbandonCause; cause != "" && cause != jobs.AbandonCauseUnknown {
-			label += " (" + cause.String() + ")"
+			label += " (" + string(cause) + ")"
 		}
 	}
 	dur := time.Duration(0)
