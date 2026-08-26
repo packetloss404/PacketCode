@@ -188,7 +188,14 @@ outer:
 	for pi, ph := range wf.Phases {
 		for si, st := range ph.Steps {
 			if err := workflowBudgetError(run, tokenBudget); err != nil {
-				firstErr = err
+				// Guarded like the ctx.Err() check below it. In a
+				// ContinueOnError phase firstErr may already hold the failure
+				// the user actually needs to see; overwriting it reports
+				// "token budget exhausted" for a run that really broke for
+				// another reason two steps earlier.
+				if firstErr == nil {
+					firstErr = err
+				}
 				break outer
 			}
 			if err := ctx.Err(); err != nil {

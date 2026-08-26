@@ -59,6 +59,66 @@ copy its code or prompt text.
   `TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
   60s deadline. Both predate 2026-08-14.
 
+## Review findings 2026-08-25 — verified, not yet fixed
+
+From a package-by-package review pass. Each was confirmed against the code;
+they were left unfixed for the reason given, not for lack of a diagnosis.
+
+- **Agent View and workflow rows are truncated mid-ANSI-escape.**
+  `agentview.go:622` and `workflowview.go:485/512/538` size their columns with
+  `lipgloss.Width` (display-aware) and then clip with a **rune-counting**
+  helper. Each styled segment carries ~15-20 runes of invisible SGR escape, so
+  a row whose visible width is ~40 counts as ~150 and is cut early. The
+  committed goldens prove it is live, not theoretical: in
+  `testdata/tui/golden/packetcode/agents/100x30.txt` the row reads
+  `▶ ✻ a1b2c3d4  running focused te…` — stopping at ~35 of 100 columns, with
+  the age column never rendering at all. Fix is `ansi.Truncate` from
+  `charmbracelet/x/ansi`, already a dependency and already used in
+  `topbar.go:515`. Blocked only on regenerating the goldens, which the capture
+  harness refuses to do off POSIX (`scripts/tui_capture.py:207`).
+- **A self-paced `/loop` started during a streaming turn never advances.** In
+  `slashcmd_loop.go`, `runLoopBody`'s `if a.streaming { queueInput; return }`
+  guard sits before `a.activeLoopID = ls.id`, so `agentDoneMsg` never re-runs
+  the body. The loop registers, appears in `/loop list` forever, and does
+  nothing. Slash commands dispatch during a stream, so typing `/loop <prompt>`
+  mid-turn hits this every time. A correct fix re-attaches loop ownership to
+  the queued turn.
+- **`formatTerminalJobLine` drops the artifacts line** (`app.go:1852`) when a
+  job has no summary, error or worktree: it returns before the
+  `jobs.ArtifactDigest` block, so `artifacts: … · /agents <id>` is lost.
+- **MCP death reason can report EOF instead of the real exit status.** A
+  child's stdout closes before it is reaped, so `readerLoop` usually wins the
+  `markDead` race with a bare `eofExit(io.EOF)`; `reaperLoop` then overwrites
+  `deadErr` with the real `exec.ExitError`, but `IsAlive()` has already
+  flipped. Anything reading `DeathReason()` right after seeing `!IsAlive()` —
+  including `Manager.Reports()` — can print `exited: EOF` for a server that
+  died with `exit status 7`. Diagnostic-only, but every candidate fix reorders
+  process-lifecycle concurrency; it needs the lifecycle contract decided first.
+- **Provider SSE parsers send on an unguarded channel.** Every
+  `ch <- provider.StreamEvent{...}` in `openaicompat`, `responses`,
+  `anthropic`, `gemini`, and `ollama` is a bare send on an 8-buffered channel
+  with no `select` on `ctx.Done()`. Latent today because the consumer in
+  `internal/agent` drains, but it is a contract held by convention across five
+  providers rather than by construction.
+- **`agent.ToolDecider` / `DecideTool` is a half-wired interface.** Nothing in
+  `internal/agent` ever type-asserts to it, yet `internal/app.uiApprover`
+  implements `DecideTool` and it is never called. Either the agent is missing
+  a consult site or both halves are dead; deleting is unsafe without knowing
+  which.
+- **Session persistence.** `Load`/`New` return the live `*Session` the manager
+  holds while `Current()` deliberately returns a clone, so callers can mutate
+  manager-owned state outside the mutex; `List()` silently skips unreadable
+  files, so a corrupt session simply vanishes from `/resume`; and
+  `writeSessionFile` never fsyncs before rename, so the package doc's "atomic
+  writes" claim covers naming but not durability. Same fsync gap exists in
+  `internal/jobs/persistence.go`, so it is a repo-wide durability decision
+  rather than a local fix.
+- **Several tests are timing-brittle under CPU load.** `internal/jobs` and
+  `internal/mcp` tests using short `waitFor` deadlines fail in batches on a
+  loaded machine and pass in isolation — e.g. a job spawning a PowerShell hook
+  gets a 2s budget. They are not broken, but they cannot distinguish a slow
+  machine from a regression, which is the one thing a test must do.
+
 ## TUI and Interaction Parity
 
 - Add transcript search/filter and a compact jump-to-latest affordance.
