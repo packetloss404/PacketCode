@@ -80,7 +80,14 @@ workflow_token_budget = 0
 provider_max_retries = 3
 provider_stall_timeout = 60
 
+[packet_computers]
+enabled = true # set false to disable registry loading, SSH, and remote placement
+
+[acp]
+enabled = true # set false to reject the optional local stdio ACP server
+
 [sugar]
+# enabled = true                     # absent = auto; false = hard off
 cache_mode = "auto"                 # auto or off
 cache_retention = "provider_default" # provider_default, 5m, 30m, or 1h
 privacy = "standard"                # standard or zdr_required
@@ -133,18 +140,44 @@ timeout_sec = 10
 
 `[behavior]` controls trust mode, input height, automatic compaction, provider resilience, and background/workflow limits. Context occupancy includes the system prompt, transcript, tool schemas, and pending input estimate; compaction runs automatically before an over-threshold turn when enough history exists.
 
-`[sugar]` controls the private cache-affinity envelope sent only to Sugar. The
-client defaults are `auto`, `provider_default`, and `standard`. A Sugar
+`[packet_computers]` gates the optional computer registry and all remote
+placement. It defaults to enabled for compatibility. Set `enabled = false` or
+`PACKETCODE_PACKET_COMPUTERS_ENABLED=false` for standalone local PacketCode.
+When disabled, normal local sessions, jobs, and workflows still work, while
+`--computer`, `/computers`, and `--computer` placement on `/spawn` or
+`/workflows` fail closed. PacketCode does not load or create the computer
+registry, start SSH, or perform remote-computer network work in this mode.
+
+`[acp]` gates the optional Agent Client Protocol stdio server. It defaults to
+enabled for compatibility but starts only for an explicit `packetcode acp`
+invocation; ordinary PacketCode startup never initializes it. Set
+`enabled = false` or `PACKETCODE_ACP_ENABLED=false` to make that command exit
+before protocol, provider, session, or MCP initialization.
+
+`[sugar]` gates the optional built-in Sugar provider and controls its private
+cache-affinity envelope. `enabled` is tri-state: when absent, a fresh non-Sugar
+install is auto-inactive, while an existing configured/default Sugar provider
+stays active for compatibility. `packetcode sugar login` explicitly activates
+Sugar unless it has been hard-disabled. Set `enabled = false` or
+`PACKETCODE_SUGAR_ENABLED=false` to remove Sugar from
+provider registration and block `packetcode sugar login`. Disabled Sugar also
+suppresses its cache metadata and forces the subordinate Conduit shadow runtime
+off. The client defaults are `auto`, `provider_default`, and `standard`. A Sugar
 workspace may enforce stricter retention or privacy server-side; Packetcode's
 settings cannot weaken that policy. Environment variables override TOML:
 
+- `PACKETCODE_SUGAR_ENABLED`
 - `PACKETCODE_SUGAR_CACHE_MODE`
 - `PACKETCODE_SUGAR_CACHE_RETENTION`
 - `PACKETCODE_SUGAR_PRIVACY`
 
+The three `*_ENABLED` environment overrides affect only the current process;
+an unrelated configuration save does not copy them into `config.toml`.
+
 `[conduit]` controls the optional Conduit shadow governor. It is off by
 default. `PACKETCODE_CONDUIT_SHADOW=true|false` overrides only
 `shadow_enabled`; timeout and capsule limits remain explicit TOML settings.
+It cannot override a disabled `[sugar]` parent gate.
 When enabled, Packetcode starts one shadow run only for an active Sugar
 `sugar/conduit` turn, reports ordered coarse outcomes, and records Continue
 recommendations as local telemetry. Recommendations never switch the live
@@ -156,6 +189,16 @@ The specialist capsule is stored only in the local session JSON and capped by
 constraints, normalized relative paths and bounded patch/gate evidence for a
 future explicit local handoff. It never enters Conduit runtime event JSON and
 contains no full transcript, tool arguments, absolute paths, or environment.
+
+Feature gates do not delete existing configuration, credentials, computer
+registries, sessions, or other state. Re-enabling restores access. PacketCode
+has no runtime dependency on PacketADE or Syndicate; it operates independently
+with every optional integration disabled.
+
+Advanced custom-provider compatibility: explicitly disabling built-in Sugar
+also frees the `sugar` slug for a `[providers.sugar] type =
+"openai_compatible"` endpoint. That custom endpoint follows its own
+`api_key_required` setting and never enables Sugar cache or Conduit behavior.
 
 Background-agent settings affect both `/spawn` and the `spawn_agent` tool:
 

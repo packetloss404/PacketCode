@@ -433,10 +433,11 @@ func New(deps Deps) (*App, error) {
 }
 
 func sugarCacheAgentConfig(cfg *config.Config) agent.SugarCacheConfig {
-	if cfg == nil {
+	if cfg == nil || !cfg.SugarIsEnabled() {
 		return agent.SugarCacheConfig{}
 	}
 	return agent.SugarCacheConfig{
+		Enabled:   cfg.Sugar.CacheMode != "off",
 		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
 		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
 		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
@@ -444,11 +445,11 @@ func sugarCacheAgentConfig(cfg *config.Config) agent.SugarCacheConfig {
 }
 
 func conduitShadowAgentConfig(cfg *config.Config) agent.ConduitShadowConfig {
-	if cfg == nil {
+	if cfg == nil || !cfg.SugarIsEnabled() {
 		return agent.ConduitShadowConfig{}
 	}
 	return agent.ConduitShadowConfig{
-		Enabled:         cfg.Conduit.ShadowEnabled,
+		Enabled:         cfg.ConduitIsEnabled(),
 		Timeout:         time.Duration(cfg.Conduit.TimeoutMS) * time.Millisecond,
 		CapsuleMaxBytes: cfg.Conduit.CapsuleMaxBytes,
 	}

@@ -132,6 +132,23 @@ func TestProviderItems_CustomKeylessProvider(t *testing.T) {
 	}
 }
 
+func TestProviderItems_CustomKeylessSugarProvider(t *testing.T) {
+	cfg := config.Default()
+	disabled := false
+	keyRequired := false
+	cfg.Sugar.Enabled = &disabled
+	cfg.Providers["sugar"] = config.ProviderConfig{
+		Type: "openai_compatible", DefaultModel: "custom-model", APIKeyRequired: &keyRequired,
+	}
+
+	items := providerItems([]provider.Provider{
+		&fakeProvider{slug: "sugar", name: "Custom Sugar Slug"},
+	}, cfg, "")
+	if len(items) != 1 || !strings.Contains(items[0].Detail, "keyless") {
+		t.Fatalf("custom keyless Sugar detail = %#v", items)
+	}
+}
+
 func TestApp_CtrlP_IncludesUnregisteredCustomFactory(t *testing.T) {
 	r := newTestApp(t)
 	r.cfg.Providers["localai"] = config.ProviderConfig{Type: "openai_compatible", DefaultModel: "coder"}

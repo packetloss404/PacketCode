@@ -20,6 +20,7 @@ import (
 )
 
 type SugarCacheConfig struct {
+	Enabled   bool
 	Mode      provider.SugarCacheMode
 	Retention provider.SugarCacheRetention
 	Privacy   provider.SugarPrivacyMode

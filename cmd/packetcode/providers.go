@@ -24,10 +24,11 @@ import (
 )
 
 func packetcodeSugarCacheConfig(cfg *config.Config) agent.SugarCacheConfig {
-	if cfg == nil {
+	if cfg == nil || !cfg.SugarIsEnabled() {
 		return agent.SugarCacheConfig{}
 	}
 	return agent.SugarCacheConfig{
+		Enabled:   cfg.Sugar.CacheMode != "off",
 		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
 		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
 		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
@@ -35,11 +36,11 @@ func packetcodeSugarCacheConfig(cfg *config.Config) agent.SugarCacheConfig {
 }
 
 func packetcodeConduitShadowConfig(cfg *config.Config) agent.ConduitShadowConfig {
-	if cfg == nil {
+	if cfg == nil || !cfg.SugarIsEnabled() {
 		return agent.ConduitShadowConfig{}
 	}
 	return agent.ConduitShadowConfig{
-		Enabled:         cfg.Conduit.ShadowEnabled,
+		Enabled:         cfg.ConduitIsEnabled(),
 		Timeout:         time.Duration(cfg.Conduit.TimeoutMS) * time.Millisecond,
 		CapsuleMaxBytes: cfg.Conduit.CapsuleMaxBytes,
 	}
@@ -55,14 +56,7 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		"grok":       func(key string) provider.Provider { return grok.New(key) },
 		"mistral":    func(key string) provider.Provider { return mistral.New(key) },
 		"openrouter": func(key string) provider.Provider { return openrouter.New(key) },
-		"sugar": func(key string) provider.Provider {
-			p := sugar.NewWithBaseURL(sugarBaseURL(cfg), key)
-			if cfg != nil && cfg.Conduit.ShadowEnabled {
-				p.SetRuntimeHooks(sugar.NewRuntimeClient(sugarBaseURL(cfg), key, nil, true))
-			}
-			return p
-		},
-		"ollama": func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
+		"ollama":     func(_ string) provider.Provider { return ollama.NewWithOptions(ollamaHost(cfg), ollamaOptions(cfg)) },
 		"codex": func(_ string) provider.Provider {
 			p := codex.New(codexAuthPath(cfg))
 			if cfg != nil {
@@ -79,6 +73,15 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 			return p
 		},
 	}
+	if cfg != nil && cfg.SugarIsEnabled() {
+		factories["sugar"] = func(key string) provider.Provider {
+			p := sugar.NewWithBaseURL(sugarBaseURL(cfg), key)
+			if cfg.ConduitIsEnabled() {
+				p.SetRuntimeHooks(sugar.NewRuntimeClient(sugarBaseURL(cfg), key, nil, true))
+			}
+			return p
+		}
+	}
 	if cfg == nil {
 		return factories
 	}
@@ -88,7 +91,8 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 		}
 		slug := strings.TrimSpace(slug)
 		pc := pc
-		if slug == "" || isBuiltInProvider(slug) {
+		customSugar := slug == "sugar" && cfg.SugarUsesCustomProvider()
+		if slug == "" || (isBuiltInProvider(slug) && !customSugar) {
 			continue
 		}
 		factories[slug] = func(key string) provider.Provider {
@@ -97,7 +101,7 @@ func providerFactoriesFromConfig(cfg *config.Config) app.FactoryMap {
 				DisplayName:    pc.DisplayName,
 				BaseURL:        pc.BaseURL,
 				APIKey:         key,
-				APIKeyRequired: pc.RequiresAPIKey(slug),
+				APIKeyRequired: cfg.ProviderRequiresAPIKey(slug),
 				BrandColor:     pc.BrandColor,
 				Headers:        pc.Headers,
 				DefaultModel:   pc.DefaultModel,
@@ -145,13 +149,7 @@ func customModelConfigs(in []config.ProviderModelConfig) []custom.ModelConfig {
 }
 
 func providerRequiresAPIKey(cfg *config.Config, slug string) bool {
-	if cfg == nil {
-		return !config.IsKeylessProvider(slug)
-	}
-	if pc, ok := cfg.Providers[slug]; ok {
-		return pc.RequiresAPIKey(slug)
-	}
-	return !config.IsKeylessProvider(slug)
+	return cfg.ProviderRequiresAPIKey(slug)
 }
 
 func builtInProviderSlugs() []string {

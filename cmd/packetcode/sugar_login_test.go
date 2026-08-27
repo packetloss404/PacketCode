@@ -71,6 +71,8 @@ func TestSugarLoginDiscoversLiveModelsAndPersistsProvider(t *testing.T) {
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
+	require.NotNil(t, cfg.Sugar.Enabled)
+	assert.True(t, *cfg.Sugar.Enabled)
 	assert.Equal(t, "sugar", cfg.Default.Provider)
 	assert.Equal(t, "sugar/conduit", cfg.Default.Model)
 	assert.Equal(t, "sgr_live", cfg.Providers["sugar"].APIKey)
@@ -305,4 +307,23 @@ func TestSugarLoginExplainsInvalidClientWhilePolling(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr.String(), "Sugar rejected this client: Unknown client.")
 	assert.Contains(t, stderr.String(), "client registry")
+}
+
+func TestSugarLoginRespectsExplicitDisableWithoutNetwork(t *testing.T) {
+	t.Setenv("PACKETCODE_HOME", t.TempDir())
+	cfg := config.Default()
+	disabled := false
+	cfg.Sugar.Enabled = &disabled
+	require.NoError(t, cfg.Save())
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := runSugarLogin([]string{"--server", server.URL}, strings.NewReader(""), &stdout, &stderr, server.Client())
+
+	assert.Equal(t, 1, code)
+	assert.Zero(t, requests)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "Sugar integration is disabled")
 }

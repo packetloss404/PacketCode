@@ -124,8 +124,7 @@ func TestConduitShadowLifecycleIsContentFreeAndNeverChangesLiveModel(t *testing.
 	assert.Equal(t, 2, hooks.continues)
 	for _, request := range prov.requests {
 		assert.Equal(t, sugar.DefaultModel, request.Model, "shadow recommendation must not alter the live request")
-		assert.Equal(t, provider.SugarCacheOff, request.SugarCache.Mode)
-		assert.Equal(t, provider.SugarPrivacyZDRRequired, request.SugarCache.Privacy)
+		assert.Nil(t, request.SugarCache, "cache mode off must avoid metadata and fingerprint work")
 	}
 	_, activeModel := registry.Active()
 	assert.Equal(t, sugar.DefaultModel, activeModel)
@@ -172,6 +171,7 @@ func TestConduitShadowDisabledOrUnavailablePreservesNormalRun(t *testing.T) {
 			assert.Len(t, hooks.starts, test.wantStarts)
 			assert.Empty(t, hooks.events)
 			assert.Equal(t, sugar.DefaultModel, prov.requests[0].Model)
+			assert.Nil(t, prov.requests[0].SugarCache, "disabled cache must do no Sugar metadata work")
 		})
 	}
 }

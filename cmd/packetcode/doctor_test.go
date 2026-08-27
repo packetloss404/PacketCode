@@ -81,6 +81,147 @@ func TestDoctorReportsEffectiveHomeAndProviderSummary(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsDisabledOptionalIntegrationsWithoutProbing(t *testing.T) {
+	restore := isolateDoctorEnv(t)
+	defer restore()
+
+	disabled := false
+	cfg := config.Default()
+	cfg.PacketComputers.Enabled = &disabled
+	cfg.Sugar.Enabled = &disabled
+	cfg.ACP.Enabled = &disabled
+	// The parent Sugar gate must win even if stale configuration asks for the
+	// subordinate shadow runtime.
+	// Genuinely off, matching this test's name. Conduit no longer inherits
+	// Sugar's state, so leaving it true here would exercise an ENABLED gate
+	// and assert it was skipped -- see the independence test below.
+	cfg.Conduit.ShadowEnabled = false
+	requireSaveConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctorCommand([]string{"--json", "--check", "integrations"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doctor exit = %d, stderr=%q, stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("doctor json: %v\n%s", err, stdout.String())
+	}
+	packetComputers := assertDoctorCheck(t, report, "integrations.packet_computers", doctorSkip)
+	if !strings.Contains(packetComputers.Detail, "registry") || !strings.Contains(packetComputers.Detail, "SSH") {
+		t.Fatalf("Packet Computers disabled detail = %q", packetComputers.Detail)
+	}
+	sugar := assertDoctorCheck(t, report, "integrations.sugar", doctorSkip)
+	if !strings.Contains(sugar.Detail, "login") || !strings.Contains(sugar.Detail, "Conduit") {
+		t.Fatalf("Sugar disabled detail = %q", sugar.Detail)
+	}
+	acp := assertDoctorCheck(t, report, "integrations.acp", doctorSkip)
+	if !strings.Contains(acp.Detail, "before protocol") || !strings.Contains(acp.Detail, "MCP") {
+		t.Fatalf("ACP disabled detail = %q", acp.Detail)
+	}
+	shadow := assertDoctorCheck(t, report, "integrations.conduit_shadow", doctorSkip)
+	if !strings.Contains(shadow.Detail, "no Conduit shadow runtime calls") {
+		t.Fatalf("Conduit disabled detail = %q", shadow.Detail)
+	}
+}
+
+// Conduit shadow reports its own state. It used to be forced to "skip"
+// whenever Sugar was off, which described the configuration inaccurately: the
+// user had asked for shadow, and only the live provider decides whether it
+// acts.
+func TestDoctorReportsConduitShadowIndependentlyOfSugar(t *testing.T) {
+	restore := isolateDoctorEnv(t)
+	defer restore()
+
+	cfg := config.Default()
+	disabled := false
+	cfg.Sugar.Enabled = &disabled
+	cfg.Conduit.ShadowEnabled = true
+	requireSaveConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	if code := runDoctorCommand([]string{"--json", "--check", "integrations"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("doctor exit = %d, stderr=%q", code, stderr.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	assertDoctorCheck(t, report, "integrations.sugar", doctorSkip)
+	assertDoctorCheck(t, report, "integrations.conduit_shadow", doctorOK)
+}
+
+func TestDoctorReportsCompatibilityDefaultsAndConduitOptIn(t *testing.T) {
+	r := doctorReport{}
+	cfg := config.Default()
+	addIntegrationChecks(&r, cfg)
+	assertDoctorCheck(t, r, "integrations.packet_computers", doctorOK)
+	assertDoctorCheck(t, r, "integrations.sugar", doctorSkip)
+	assertDoctorCheck(t, r, "integrations.acp", doctorOK)
+	assertDoctorCheck(t, r, "integrations.conduit_shadow", doctorSkip)
+
+	r = doctorReport{}
+	enabled := true
+	cfg.Sugar.Enabled = &enabled
+	cfg.Conduit.ShadowEnabled = true
+	addIntegrationChecks(&r, cfg)
+	assertDoctorCheck(t, r, "integrations.conduit_shadow", doctorOK)
+}
+
+func TestDoctorRejectsDisabledBuiltInSugarDefault(t *testing.T) {
+	cfg := config.Default()
+	disabled := false
+	cfg.Sugar.Enabled = &disabled
+	cfg.Default.Provider = "sugar"
+	cfg.Default.Model = "sugar/conduit"
+	cfg.Providers["sugar"] = config.ProviderConfig{APIKey: "stale", DefaultModel: "sugar/conduit"}
+
+	report := doctorReport{}
+	addDefaultProviderChecks(&report, cfg)
+	check := assertDoctorCheck(t, report, "config.default_provider", doctorFail)
+	if !strings.Contains(check.Message, "disabled") {
+		t.Fatalf("disabled default diagnostic = %#v", check)
+	}
+}
+
+func TestDoctorAcceptsBuiltInSugarLoginBaseURLAndSkipsPreservedDisabledRecord(t *testing.T) {
+	base := config.Default()
+	base.Providers["sugar"] = config.ProviderConfig{
+		APIKey: "token", DefaultModel: "sugar/conduit", BaseURL: "https://sugar.example/api/v1",
+	}
+	base.Default.Provider = "sugar"
+	base.Default.Model = "sugar/conduit"
+
+	report := doctorReport{}
+	addProviderChecks(&report, base)
+	for _, check := range report.Checks {
+		if check.ID == "providers.sugar.custom_fields" {
+			t.Fatalf("normal built-in Sugar base_url was rejected: %#v", check)
+		}
+	}
+
+	disabled := false
+	base.Sugar.Enabled = &disabled
+	report = doctorReport{}
+	addProviderChecks(&report, base)
+	for _, check := range report.Checks {
+		if strings.HasPrefix(check.ID, "providers.sugar") {
+			t.Fatalf("preserved disabled built-in Sugar record should be inactive, got %#v", check)
+		}
+	}
+}
+
+func TestDoctorReportsExistingSugarAutoStateAsActive(t *testing.T) {
+	r := doctorReport{}
+	cfg := config.Default()
+	cfg.Providers["sugar"] = config.ProviderConfig{APIKey: "existing", DefaultModel: "sugar/conduit"}
+	addIntegrationChecks(&r, cfg)
+	check := assertDoctorCheck(t, r, "integrations.sugar", doctorOK)
+	if check.Message != "Sugar active" || !strings.Contains(check.Detail, "existing Sugar configuration") {
+		t.Fatalf("Sugar automatic state = %+v", check)
+	}
+}
+
 func TestDoctorPlainOutputDoesNotLeakSecrets(t *testing.T) {
 	restore := isolateDoctorEnv(t)
 	defer restore()
@@ -244,6 +385,43 @@ func TestDoctorCustomProviderAccepted(t *testing.T) {
 	check := assertDoctorCheck(t, report, "providers.localai", doctorOK)
 	if !strings.Contains(check.Detail, "keyless") || !strings.Contains(check.Detail, "http://localhost:8080/v1") {
 		t.Fatalf("custom provider detail not useful: %+v", check)
+	}
+}
+
+func TestDoctorAcceptsCustomSugarOnlyWhenBuiltinIsExplicitlyDisabled(t *testing.T) {
+	restore := isolateDoctorEnv(t)
+	defer restore()
+
+	disabled := false
+	keyless := false
+	cfg := config.Default()
+	cfg.Sugar.Enabled = &disabled
+	cfg.Default.Provider = "sugar"
+	cfg.Default.Model = "custom-model"
+	cfg.Providers["sugar"] = config.ProviderConfig{
+		Type: "openai_compatible", BaseURL: "http://localhost:8080/v1",
+		DefaultModel: "custom-model", APIKeyRequired: &keyless,
+	}
+	requireSaveConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctorCommand([]string{"--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doctor exit = %d, stderr=%q stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("doctor json: %v\n%s", err, stdout.String())
+	}
+	assertDoctorCheck(t, report, "config.default_provider", doctorOK)
+	check := assertDoctorCheck(t, report, "providers.sugar", doctorOK)
+	if !strings.Contains(check.Message, "custom provider") || !strings.Contains(check.Detail, "keyless") {
+		t.Fatalf("custom Sugar check = %+v", check)
+	}
+	for _, check := range report.Checks {
+		if check.ID == "providers.sugar.custom_fields" {
+			t.Fatalf("custom Sugar incorrectly treated as built-in: %+v", check)
+		}
 	}
 }
 

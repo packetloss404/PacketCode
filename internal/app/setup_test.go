@@ -63,6 +63,19 @@ func TestPromptProvider_UsesCanonicalDisplayOrder(t *testing.T) {
 	}
 }
 
+func TestSetupProviderRequiresKey_HonorsCustomSugarPolicy(t *testing.T) {
+	cfg := config.Default()
+	disabled := false
+	keyRequired := false
+	cfg.Sugar.Enabled = &disabled
+	cfg.Providers["sugar"] = config.ProviderConfig{
+		Type: "openai_compatible", APIKeyRequired: &keyRequired,
+	}
+	if setupProviderRequiresKey(cfg, "sugar") {
+		t.Fatal("custom keyless Sugar provider unexpectedly requires a key")
+	}
+}
+
 func TestPromptKey_EmptyRetries(t *testing.T) {
 	var out bytes.Buffer
 	cfg := config.Default()

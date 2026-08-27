@@ -66,6 +66,32 @@ The first run asks for a provider, API key when required, and model, then writes
 `PACKETCODE_HOME` to isolate all PacketCode configuration and state in another
 data directory.
 
+Optional integrations remain compatible by default and can be disabled
+independently in `config.toml`:
+
+```toml
+[packet_computers]
+enabled = false # no computer registry, SSH, or remote placement
+
+[acp]
+enabled = false # reject the optional local stdio ACP server
+
+[sugar]
+enabled = false # no built-in Sugar login/provider/cache/Conduit activity
+```
+
+The equivalent environment overrides are `PACKETCODE_ACP_ENABLED=false`,
+`PACKETCODE_PACKET_COMPUTERS_ENABLED=false` and
+`PACKETCODE_SUGAR_ENABLED=false`. Local PacketCode providers, sessions, tools,
+background jobs, and workflows continue to operate. `packetcode doctor` and
+`/help` report the resolved states.
+
+Sugar is auto-inactive on a fresh non-Sugar install when `enabled` is absent;
+existing Sugar configuration remains compatible. None of these gates deletes
+saved configuration, credentials, registries, or sessions. PacketCode has no
+runtime dependency on PacketADE or Syndicate and remains a standalone terminal
+agent when every optional integration is disabled.
+
 To connect the built-in Sugar provider and pull its live Conduit/direct-model catalog:
 
 ```text

@@ -20,6 +20,7 @@ import (
 	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/provider/sugar"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 )
@@ -32,6 +33,7 @@ import (
 // batch per ChatCompletion call. Lets us script multi-turn conversations
 // (LLM responds → tool runs → LLM responds again) without an HTTP server.
 type scriptedProvider struct {
+	slug         string
 	turns        [][]provider.StreamEvent
 	turnIdx      int32
 	chatCount    int32
@@ -82,8 +84,13 @@ func (g *gatedToolProvider) ChatCompletion(ctx context.Context, _ provider.ChatR
 	return ch, nil
 }
 
-func (s *scriptedProvider) Name() string                                           { return "scripted" }
-func (s *scriptedProvider) Slug() string                                           { return "scripted" }
+func (s *scriptedProvider) Name() string { return "scripted" }
+func (s *scriptedProvider) Slug() string {
+	if s.slug != "" {
+		return s.slug
+	}
+	return "scripted"
+}
 func (s *scriptedProvider) BrandColor() lipgloss.Color                             { return lipgloss.Color("#000000") }
 func (s *scriptedProvider) ValidateKey(_ context.Context, _ string) error          { return nil }
 func (s *scriptedProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
@@ -230,10 +237,27 @@ func TestAgent_TextOnlyTurn(t *testing.T) {
 	assert.Equal(t, 10, cur.TokenUsage.TotalInput)
 }
 
-func TestAgent_AttachesStableSessionCacheMetadata(t *testing.T) {
+func TestAgent_DoesNotAttachSugarCacheMetadataToOtherProviders(t *testing.T) {
 	prov := &scriptedProvider{turns: [][]provider.StreamEvent{{{Type: provider.EventDone}}}}
 	a, sm, _ := newAgentRig(t, prov, &recordingTool{name: "zeta"}, &recordingTool{name: "alpha"})
 	a.systemPrompt = "stable system"
+	collect(a.Run(context.Background(), "hi"))
+
+	assert.Nil(t, prov.lastRequest.SugarCache)
+	assert.NotNil(t, sm.Current())
+	require.Len(t, prov.lastRequest.Tools, 2)
+	assert.Equal(t, "alpha", prov.lastRequest.Tools[0].Name)
+	assert.Equal(t, "zeta", prov.lastRequest.Tools[1].Name)
+}
+
+func TestAgent_AttachesStableSessionCacheMetadataToEnabledSugar(t *testing.T) {
+	prov := &scriptedProvider{slug: sugar.Slug, turns: [][]provider.StreamEvent{{{Type: provider.EventDone}}}}
+	a, sm, _ := newAgentRig(t, prov, &recordingTool{name: "zeta"}, &recordingTool{name: "alpha"})
+	a.systemPrompt = "stable system"
+	a.sugarCache = SugarCacheConfig{
+		Enabled: true, Mode: provider.SugarCacheAuto,
+		Retention: provider.SugarCacheProviderDefault, Privacy: provider.SugarPrivacyStandard,
+	}
 	collect(a.Run(context.Background(), "hi"))
 
 	cache := prov.lastRequest.SugarCache
@@ -245,9 +269,6 @@ func TestAgent_AttachesStableSessionCacheMetadata(t *testing.T) {
 	assert.Equal(t, provider.SugarCacheProviderDefault, cache.Retention)
 	assert.Equal(t, provider.SugarPrivacyStandard, cache.Privacy)
 	assert.Equal(t, provider.CachePrefixFingerprint("stable system", prov.lastRequest.Tools), cache.PrefixFingerprint)
-	require.Len(t, prov.lastRequest.Tools, 2)
-	assert.Equal(t, "alpha", prov.lastRequest.Tools[0].Name)
-	assert.Equal(t, "zeta", prov.lastRequest.Tools[1].Name)
 }
 
 func TestAgent_ToolCallApprovedAndExecuted(t *testing.T) {

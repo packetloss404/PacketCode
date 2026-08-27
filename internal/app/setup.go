@@ -211,13 +211,7 @@ func readSetupSecret(r *bufio.Reader, out io.Writer, rawIn ...io.Reader) (string
 }
 
 func setupProviderRequiresKey(cfg *config.Config, slug string) bool {
-	if cfg == nil {
-		return !config.IsKeylessProvider(slug)
-	}
-	if pc, ok := cfg.Providers[slug]; ok {
-		return pc.RequiresAPIKey(slug)
-	}
-	return !config.IsKeylessProvider(slug)
+	return cfg.ProviderRequiresAPIKey(slug)
 }
 
 func promptModel(r *bufio.Reader, out io.Writer, models []provider.Model) (string, error) {

@@ -210,9 +210,50 @@ func buildDoctorReport() doctorReport {
 	addMCPChecks(&r, cfg, cwd)
 	addPermissionChecks(&r, cfg)
 	addAutomationChecks(&r, cfg)
+	addIntegrationChecks(&r, cfg)
 	r.Status = doctorOverallStatus(r.Checks)
 	r.ProviderSummary = summarizeDoctorProviders(r.Checks)
 	return r
+}
+
+func addIntegrationChecks(r *doctorReport, cfg *config.Config) {
+	if cfg == nil {
+		r.add("integrations.config", "integrations", doctorFail, "feature gate config unavailable", "", "Fix config.toml", "docs/configuration.md")
+		return
+	}
+	if cfg.PacketComputers.IsEnabled() {
+		r.add("integrations.packet_computers", "integrations", doctorOK, "Packet Computers enabled", "remote placement is available only when explicitly selected", "", "docs/feature-packet-computers.md")
+	} else {
+		r.add("integrations.packet_computers", "integrations", doctorSkip, "Packet Computers disabled", "computer registry, SSH, and remote placement stay inactive", "", "docs/feature-packet-computers.md")
+	}
+	if cfg.SugarIsEnabled() {
+		detail := "active from existing Sugar configuration or an explicit enable"
+		r.add("integrations.sugar", "integrations", doctorOK, "Sugar active", detail, "", "docs/sugar-provider.md")
+	} else {
+		message := "Sugar auto-inactive"
+		detail := "fresh non-Sugar installs do no login, provider, cache metadata, or Conduit work"
+		if cfg.SugarExplicitlyDisabled() {
+			message = "Sugar disabled"
+			detail = "explicitly disabled; login, provider registration, cache metadata, and Conduit runtime stay inactive"
+		}
+		r.add("integrations.sugar", "integrations", doctorSkip, message, detail, "", "docs/sugar-provider.md")
+	}
+	if cfg.ACP.IsEnabled() {
+		r.add("integrations.acp", "integrations", doctorOK, "ACP enabled", "the local stdio server starts only when packetcode acp is invoked", "", "docs/configuration.md")
+	} else {
+		r.add("integrations.acp", "integrations", doctorSkip, "ACP disabled", "packetcode acp exits before protocol, session, provider, or MCP initialization", "", "docs/configuration.md")
+	}
+	if cfg.ConduitIsEnabled() {
+		r.add("integrations.conduit_shadow", "integrations", doctorOK, "Conduit shadow enabled", "decision-only runtime calls apply to selected sugar/conduit turns", "", "docs/cache-affinity.md")
+	} else {
+		detail := "no Conduit shadow runtime calls are made"
+		if cfg.SugarExplicitlyDisabled() {
+			detail += "; Sugar is disabled"
+		} else if !cfg.SugarIsEnabled() {
+			detail += "; Sugar is auto-inactive"
+		}
+		r.add("integrations.conduit_shadow", "integrations", doctorSkip, "Conduit shadow disabled", detail, "", "docs/cache-affinity.md")
+	}
 }
 
 func (r *doctorReport) add(id, section, status, message, detail, fix, docs string) {
@@ -386,6 +427,9 @@ func addProviderChecks(r *doctorReport, cfg *config.Config) {
 
 	reported := map[string]bool{}
 	for _, slug := range builtInProviderSlugs() {
+		if slug == "sugar" && !cfg.SugarIsEnabled() {
+			continue
+		}
 		source, ok := providerCredentialSource(cfg, slug)
 		if !ok && slug != cfg.Default.Provider {
 			continue
@@ -402,8 +446,14 @@ func addProviderChecks(r *doctorReport, cfg *config.Config) {
 		r.add("providers."+slug, "providers", status, message, source, fix, "docs/providers.md")
 	}
 	for slug, pc := range cfg.Providers {
-		if isBuiltInProvider(slug) {
-			if invalid := builtInProviderCustomFields(pc); len(invalid) > 0 {
+		customSugar := slug == "sugar" && cfg.SugarUsesCustomProvider()
+		if slug == "sugar" && !cfg.SugarIsEnabled() && !customSugar {
+			// Preserve a disabled built-in record without presenting it as an
+			// active or malformed provider. Re-enabling restores it.
+			continue
+		}
+		if isBuiltInProvider(slug) && !customSugar {
+			if invalid := builtInProviderCustomFields(slug, pc); len(invalid) > 0 {
 				r.add("providers."+slug+".custom_fields", "providers", doctorFail, "built-in provider has custom-provider fields", strings.Join(invalid, ", "), "Remove custom-provider fields from [providers."+slug+"] or choose a new custom slug", "docs/providers.md")
 			}
 			continue
@@ -451,12 +501,13 @@ func customProviderTransportWarning(raw string) string {
 	return redactURLUserInfo(raw)
 }
 
-func builtInProviderCustomFields(pc config.ProviderConfig) []string {
+func builtInProviderCustomFields(slug string, pc config.ProviderConfig) []string {
 	var fields []string
 	if strings.TrimSpace(pc.Type) != "" {
 		fields = append(fields, "type")
 	}
-	if strings.TrimSpace(pc.BaseURL) != "" {
+	// Built-in Sugar persists its selected service URL during `sugar login`.
+	if slug != "sugar" && strings.TrimSpace(pc.BaseURL) != "" {
 		fields = append(fields, "base_url")
 	}
 	if strings.TrimSpace(pc.DisplayName) != "" {
@@ -485,7 +536,12 @@ func addDefaultProviderChecks(r *doctorReport, cfg *config.Config) {
 		return
 	}
 	pc, configured := cfg.Providers[active]
-	if !isBuiltInProvider(active) && (!configured || !pc.IsOpenAICompatible()) {
+	customSugar := active == "sugar" && cfg.SugarUsesCustomProvider()
+	if active == "sugar" && !cfg.SugarIsEnabled() && !customSugar {
+		r.add("config.default_provider", "config", doctorFail, "built-in Sugar default is disabled", active, "Enable [sugar].enabled or choose another default provider", "docs/sugar-provider.md")
+		return
+	}
+	if (!isBuiltInProvider(active) || customSugar) && (!configured || !pc.IsOpenAICompatible()) {
 		r.add("config.default_provider", "config", doctorFail, "default provider is unknown", active, "Set [default].provider to a configured provider slug", "docs/configuration.md")
 		return
 	}
@@ -534,7 +590,8 @@ func providerCredentialSource(cfg *config.Config, slug string) (string, bool) {
 		return "ChatGPT subscription login (" + path + ")", true
 	}
 	pc, configured := cfg.Providers[slug]
-	if configured && !pc.RequiresAPIKey(slug) {
+	requiresAPIKey := cfg.ProviderRequiresAPIKey(slug)
+	if configured && !requiresAPIKey {
 		return "keyless", true
 	}
 	envKey := cfg.ProviderAPIKeyEnvName(slug)

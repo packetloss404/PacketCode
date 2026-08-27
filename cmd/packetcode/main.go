@@ -229,17 +229,20 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return err
 	}
 	root := git.RepoRoot(cwd)
-	computersDir, err := config.ComputersDir()
-	if err != nil {
-		return err
-	}
-	computerRegistry, err := computers.Load(computersDir)
-	if err != nil {
-		return fmt.Errorf("load computers: %w", err)
-	}
 	var runtimeBackend computers.RuntimeBackend
 	var activeComputer *computers.Computer
+	if !cfg.PacketComputers.IsEnabled() && computerName != "" {
+		return fmt.Errorf("Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
+	}
 	if computerName != "" {
+		computersDir, dirErr := config.ComputersDir()
+		if dirErr != nil {
+			return dirErr
+		}
+		computerRegistry, loadErr := computers.Load(computersDir)
+		if loadErr != nil {
+			return fmt.Errorf("load computers: %w", loadErr)
+		}
 		computer, ok := computerRegistry.Get(computerName)
 		if !ok {
 			return fmt.Errorf("computer %q is not registered; use /computers ssh ... first", computerName)
@@ -308,6 +311,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		if modelOverride == "" && loaded.Model != "" {
 			activeModel = loaded.Model
 		}
+	}
+	if activeSlug == "sugar" && !cfg.SugarIsEnabled() && !cfg.SugarUsesCustomProvider() {
+		return fmt.Errorf("Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
 	}
 	if _, ok := reg.Get(activeSlug); !ok {
 		return fmt.Errorf("active provider %q is not configured; run packetcode without --provider to set one up", activeSlug)
@@ -412,53 +418,68 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 			Policy:       activeComputer.Policy,
 		}
 	}
-	lookupComputer := func(selector string) (computers.Computer, bool, error) {
-		// /computers may update the durable registry after startup. Resolve
-		// placement from a fresh snapshot so a newly registered target works
-		// immediately and a removed/re-keyed target fails closed.
-		currentRegistry, loadErr := computers.Load(computersDir)
-		if loadErr != nil {
-			return computers.Computer{}, false, loadErr
-		}
-		computer, ok := currentRegistry.Get(selector)
-		if !ok {
-			computer, ok = currentRegistry.GetByID(selector)
-		}
-		return computer, ok, nil
+	disabledComputersError := func() error {
+		return fmt.Errorf("Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
 	}
-	resolveWorkspace := func(selector string) (jobs.Workspace, error) {
-		computer, ok, lookupErr := lookupComputer(selector)
-		if lookupErr != nil {
-			return jobs.Workspace{}, fmt.Errorf("reload computer registry: %w", lookupErr)
-		}
-		if !ok {
-			return jobs.Workspace{}, fmt.Errorf("computer %q is not registered", selector)
-		}
-		if computer.Kind != computers.KindSSH || !computer.Reachable() {
-			return jobs.Workspace{}, fmt.Errorf("computer %q is not a reachable SSH computer", computer.Name)
-		}
-		return jobs.Workspace{
-			ComputerID:   computer.ID,
-			ComputerName: computer.Name,
-			WorkingDir:   computer.ProjectRoots[0],
-			Kind:         computer.Kind,
-			Identity:     computerWorkspaceIdentity(computer),
-			Policy:       computer.Policy,
-		}, nil
+	var resolveWorkspace jobs.WorkspaceResolver = func(string) (jobs.Workspace, error) {
+		return jobs.Workspace{}, disabledComputersError()
 	}
-	openBackend := func(ctx context.Context, ws jobs.Workspace) (computers.RuntimeBackend, error) {
-		computer, ok, lookupErr := lookupComputer(ws.ComputerID)
-		if lookupErr != nil {
-			return nil, fmt.Errorf("reload computer registry: %w", lookupErr)
+	var openBackend jobs.BackendOpener = func(context.Context, jobs.Workspace) (computers.RuntimeBackend, error) {
+		return nil, disabledComputersError()
+	}
+	if cfg.PacketComputers.IsEnabled() {
+		lookupComputer := func(selector string) (computers.Computer, bool, error) {
+			// /computers may update the durable registry after startup. Resolve
+			// placement from a fresh snapshot so a newly registered target works
+			// immediately and a removed/re-keyed target fails closed.
+			computersDir, dirErr := config.ComputersDir()
+			if dirErr != nil {
+				return computers.Computer{}, false, dirErr
+			}
+			currentRegistry, loadErr := computers.Load(computersDir)
+			if loadErr != nil {
+				return computers.Computer{}, false, loadErr
+			}
+			computer, ok := currentRegistry.Get(selector)
+			if !ok {
+				computer, ok = currentRegistry.GetByID(selector)
+			}
+			return computer, ok, nil
 		}
-		if !ok {
-			return nil, fmt.Errorf("computer id %q is no longer registered", ws.ComputerID)
+		resolveWorkspace = func(selector string) (jobs.Workspace, error) {
+			computer, ok, lookupErr := lookupComputer(selector)
+			if lookupErr != nil {
+				return jobs.Workspace{}, fmt.Errorf("reload computer registry: %w", lookupErr)
+			}
+			if !ok {
+				return jobs.Workspace{}, fmt.Errorf("computer %q is not registered", selector)
+			}
+			if computer.Kind != computers.KindSSH || !computer.Reachable() {
+				return jobs.Workspace{}, fmt.Errorf("computer %q is not a reachable SSH computer", computer.Name)
+			}
+			return jobs.Workspace{
+				ComputerID:   computer.ID,
+				ComputerName: computer.Name,
+				WorkingDir:   computer.ProjectRoots[0],
+				Kind:         computer.Kind,
+				Identity:     computerWorkspaceIdentity(computer),
+				Policy:       computer.Policy,
+			}, nil
 		}
-		if current := computerWorkspaceIdentity(computer); current != ws.Identity {
-			return nil, fmt.Errorf("computer %q endpoint or registered root changed after this job was bound", computer.Name)
+		openBackend = func(ctx context.Context, ws jobs.Workspace) (computers.RuntimeBackend, error) {
+			computer, ok, lookupErr := lookupComputer(ws.ComputerID)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("reload computer registry: %w", lookupErr)
+			}
+			if !ok {
+				return nil, fmt.Errorf("computer id %q is no longer registered", ws.ComputerID)
+			}
+			if current := computerWorkspaceIdentity(computer); current != ws.Identity {
+				return nil, fmt.Errorf("computer %q endpoint or registered root changed after this job was bound", computer.Name)
+			}
+			computer.ProjectRoots = []string{ws.WorkingDir}
+			return computers.NewSSHBackend(ctx, computer)
 		}
-		computer.ProjectRoots = []string{ws.WorkingDir}
-		return computers.NewSSHBackend(ctx, computer)
 	}
 	jobsMgr, recovered, err := jobs.NewManager(jobs.Config{
 		Registry:     reg,
