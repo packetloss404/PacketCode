@@ -649,6 +649,8 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 
 	toolReg := tools.NewRegistry()
 	root := filepath.Clean(cfg.CWD)
+	// Per ACP session, for the same reason as the foreground registry.
+	toolReg.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
 	toolReg.Register(tools.NewReadFileTool(root))
 	toolReg.Register(tools.NewSearchCodebaseTool(root))
 	toolReg.Register(tools.NewListDirectoryTool(root))

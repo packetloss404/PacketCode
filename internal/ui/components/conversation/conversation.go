@@ -528,7 +528,31 @@ func renderToolResultBody(msg Message, width int) string {
 			return rendered
 		}
 	}
+	if msg.ToolName == "todo_write" && tools.IsTodoResult(msg.ToolResult) {
+		return renderTodoResult(msg.ToolResult, width)
+	}
 	return msg.ToolResult
+}
+
+// renderTodoResult styles the todo block. The text is already legible without
+// this — the model receives the same string — so the renderer only adds
+// emphasis: the summary dim, the item in progress accented, completed items
+// dimmed so the eye lands on what is live.
+func renderTodoResult(content string, width int) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		switch {
+		case i == 0:
+			lines[i] = theme.StyleDim.Render(truncate(line, width))
+		case strings.HasPrefix(line, "[x]"):
+			lines[i] = theme.StyleDim.Render(truncate(line, width))
+		case strings.HasPrefix(line, "[>]"):
+			lines[i] = theme.StyleAccent.Render(truncate(line, width))
+		default:
+			lines[i] = truncate(line, width)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // tryRenderDiffResult looks for a unified-diff marker inside a tool

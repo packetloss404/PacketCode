@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,4 +190,32 @@ func TestRegistry_NilParentToolsStillReturnsExtras(t *testing.T) {
 	reg := mgr.buildJobToolRegistry(0, false, "id", bm, []tools.Tool{extra})
 	_, ok := reg.Get("only_me")
 	assert.True(t, ok)
+}
+
+// A background job gets todo_write, and gets its own list. The registry drops
+// unknown tools by default, so this needs an explicit case — and cloning the
+// parent's instance would let a background agent rewrite the plan the user is
+// watching in the foreground.
+func TestBuildJobToolRegistry_TodoWriteIsPresentAndIndependent(t *testing.T) {
+	parent := tools.NewRegistry()
+	parentStore := tools.NewTodoStore()
+	parent.Register(tools.NewTodoWriteTool(parentStore))
+	parentStore.Replace([]tools.TodoItem{{Content: "foreground work", Status: tools.TodoInProgress}})
+
+	m := &Manager{cfg: Config{Tools: parent, Root: t.TempDir()}}
+	jobReg := m.buildJobToolRegistryForBackend(0, false, "job1234", nil, nil, nil)
+
+	tool, ok := jobReg.Get("todo_write")
+	if !ok {
+		t.Fatal("a background job must be able to track its own plan")
+	}
+	if _, err := tool.Execute(context.Background(), json.RawMessage(
+		`{"todos":[{"content":"background work","status":"pending"}]}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	got := parentStore.List()
+	if len(got) != 1 || got[0].Content != "foreground work" {
+		t.Fatalf("the job overwrote the foreground list: %#v", got)
+	}
 }

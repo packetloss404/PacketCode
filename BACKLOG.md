@@ -51,13 +51,17 @@ copy its code or prompt text.
   nothing. Allow-list headers on write and test that the scrubber ran — a key
   committed inside a cassette is unrecoverable once pushed. Extend the existing
   `CODEX_LIVE=1` convention rather than inventing a second harness.
-- Fix two tests that fail for reasons unrelated to the code under test.
-  `TestDoctorPlainOutputDoesNotLeakSecrets` fails from environment
-  contamination — an ambient Ollama host overrides the test's configured value,
-  so the redaction assertion never sees the string it is checking, meaning a
-  redaction test currently guards nothing.
-  `TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
-  60s deadline. Both predate 2026-08-14.
+- ~~`TestDoctorPlainOutputDoesNotLeakSecrets` fails from environment
+  contamination.~~ **Fixed 2026-08-26.** An ambient `OLLAMA_HOST` outranked the
+  planted config, so the redaction assertion never saw the string it checks and
+  the test guarded nothing. `isolateDoctorEnv` now clears the vendor variables
+  too, not just the `PACKETCODE_` ones; `CODEX_HOME` had the same shape and was
+  breaking two further doctor tests on any machine using Codex.
+- `TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
+  60s deadline, and it is not alone: a batch of `internal/jobs` and
+  `internal/mcp` tests fail together under CPU load and pass in isolation. They
+  cannot distinguish a slow machine from a regression, which is the one thing a
+  test has to do. Predates 2026-08-14.
 
 ## Review findings 2026-08-25 — verified, not yet fixed
 
