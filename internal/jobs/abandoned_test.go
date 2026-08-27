@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // writeRawJobFile seeds a record as literal JSON. Round-tripping through
@@ -289,4 +291,93 @@ func TestInspectRecords_ReportsWithoutMutating(t *testing.T) {
 	require.NoError(t, lerr)
 	require.Len(t, recovered, 1)
 	assert.Equal(t, StateAbandoned, recovered[0].State)
+}
+
+// A job's plan must reach a snapshot while the job is still running: that is
+// the whole point of surfacing it in Agent View, where "what is it doing now"
+// is the question being asked.
+func TestSnapshot_CarriesTheJobsTodoList(t *testing.T) {
+	mgr, _ := newTestManager(t, &scriptedProvider{holdOpen: true})
+	snap, err := mgr.Spawn(SpawnRequest{Prompt: "hold"})
+	require.Nil(t, err)
+
+	mgr.mu.RLock()
+	job := mgr.jobs[snap.ID]
+	mgr.mu.RUnlock()
+	require.NotNil(t, job, "the manager should still own the job")
+
+	// Write through the store the worker's tool shares.
+	job.todos.Replace([]TodoItem{
+		{Content: "read the code", Status: TodoCompleted},
+		{Content: "make the change", Status: TodoInProgress},
+		{Content: "run the tests", Status: TodoPending},
+	})
+
+	got, ok := mgr.Get(snap.ID)
+	require.True(t, ok)
+	require.Len(t, got.Todos, 3)
+	assert.Equal(t, "make the change", got.Todos[1].Content)
+	assert.Equal(t, TodoInProgress, got.Todos[1].Status)
+}
+
+// The plan is evidence of what an interrupted job was part-way through, so it
+// has to survive the round-trip to disk like the rest of the record.
+func TestPersistence_TodoListRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	j := &Job{
+		ID: "td111111", SessionID: "main-job-td111111", Provider: "p", Model: "m",
+		State: StateAbandoned, AbandonCause: AbandonCauseAppExit,
+		CreatedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(),
+		todos: newTodoStoreForTest([]TodoItem{
+			{Content: "done bit", Status: TodoCompleted},
+			{Content: "the bit it was on", Status: TodoInProgress},
+		}),
+	}
+	require.NoError(t, saveSnapshot(dir, j))
+
+	loaded, _, unreadable, err := loadPersistedJobs(dir, "")
+	require.NoError(t, err)
+	assert.Empty(t, unreadable)
+	require.Len(t, loaded, 1)
+
+	got := loaded[0].Todos()
+	require.Len(t, got, 2, "an abandoned job should still show what it was part-way through")
+	assert.Equal(t, "the bit it was on", got[1].Content)
+	assert.Equal(t, TodoInProgress, got[1].Status)
+}
+
+// A malformed entry loses that line, not the record. The job's State says what
+// happened to the work; a bad todo says nothing, so it must not cost us the
+// evidence around it.
+func TestPersistence_MalformedTodoDropsTheLineNotTheJob(t *testing.T) {
+	dir := t.TempDir()
+	writeRawJobFile(t, dir, "td222222", `{
+		"format_version": 1,
+		"id": "td222222",
+		"session_id": "main-job-td222222",
+		"provider": "p",
+		"model": "m",
+		"state": "completed",
+		"created_at": "2026-08-01T00:00:00Z",
+		"todos": [
+			{"content": "good", "status": "completed"},
+			{"content": "bad status", "status": "teleported"},
+			{"content": "", "status": "pending"}
+		]
+	}`)
+
+	loaded, _, unreadable, err := loadPersistedJobs(dir, "")
+	require.NoError(t, err)
+	assert.Empty(t, unreadable, "a bad todo must not make the whole job unreadable")
+	require.Len(t, loaded, 1)
+
+	got := loaded[0].Todos()
+	require.Len(t, got, 1)
+	assert.Equal(t, "good", got[0].Content)
+}
+
+func newTodoStoreForTest(items []TodoItem) *tools.TodoStore {
+	store := tools.NewTodoStore()
+	store.Replace(items)
+	return store
 }

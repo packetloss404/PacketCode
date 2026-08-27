@@ -15,6 +15,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // State enumerates the lifecycle of a Job. Terminal states (Completed,
@@ -229,7 +230,35 @@ type Job struct {
 	Recovered     bool   // reconciled from a previous app exit
 	ResubmitOf    string // id of the recovered job this job was resubmitted from
 	ResubmittedAs string // id of the new job created from this recovered job
+
+	// todos is the job's own todo_write list. Allocated once at spawn (or
+	// seeded from disk on reload) and never reassigned, so the worker
+	// goroutine writing through the tool and the manager reading it under
+	// m.mu are both safe: TodoStore guards its own contents and List returns
+	// a copy. It is a pointer rather than a slice so the tool and the Job
+	// observe the same list without the manager having to be told about
+	// every write.
+	todos *tools.TodoStore
 }
+
+// Todos returns the job's current todo list, or nil when it has none.
+func (j *Job) Todos() []TodoItem {
+	if j == nil {
+		return nil
+	}
+	return j.todos.List()
+}
+
+// TodoItem and the todo statuses are re-exported so UI code can render a
+// job's plan without importing internal/tools, which owns the tool rather than
+// the job record.
+type TodoItem = tools.TodoItem
+
+const (
+	TodoPending    = tools.TodoPending
+	TodoInProgress = tools.TodoInProgress
+	TodoCompleted  = tools.TodoCompleted
+)
 
 // Snapshot is a safe-to-copy projection of Job for UI consumption. It
 // shares no mutable state with the underlying Job — Manager produces a
@@ -240,6 +269,7 @@ type Snapshot struct {
 	WorkspaceIdentity                                        string
 	LastActivity, LastMessage                                string
 	State                                                    State
+	Todos                                                    []TodoItem
 	AbandonCause                                             AbandonCause
 	ResultStatus                                             ResultStatus
 	CreatedAt, StartedAt, FinishedAt, UpdatedAt              time.Time
@@ -266,6 +296,7 @@ func snapshotOf(j *Job) Snapshot {
 		Summary:           j.Summary,
 		Error:             j.Error,
 		State:             j.State,
+		Todos:             j.Todos(),
 		AbandonCause:      snapshotAbandonCause(j),
 		ResultStatus:      normalizeResultStatus(j.ResultStatus),
 		CreatedAt:         j.CreatedAt,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/computers"
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // jobFormatVersion is bumped when the on-disk job shape changes
@@ -68,6 +69,7 @@ type persistedJob struct {
 	WorktreeBranch    string            `json:"worktree_branch,omitempty"`
 	WorktreeBase      string            `json:"worktree_base,omitempty"`
 	WorktreeNote      string            `json:"worktree_note,omitempty"`
+	Todos             []TodoItem        `json:"todos,omitempty"`
 	Recovered         bool              `json:"recovered,omitempty"`
 	ResubmitOf        string            `json:"resubmit_of,omitempty"`
 	ResubmittedAs     string            `json:"resubmitted_as,omitempty"`
@@ -114,6 +116,7 @@ func toPersisted(j *Job) persistedJob {
 		WorktreeBranch:    j.WorktreeBranch,
 		WorktreeBase:      j.WorktreeBase,
 		WorktreeNote:      j.WorktreeNote,
+		Todos:             j.Todos(),
 		Recovered:         j.Recovered,
 		ResubmitOf:        j.ResubmitOf,
 		ResubmittedAs:     j.ResubmittedAs,
@@ -209,7 +212,34 @@ func fromPersisted(p persistedJob) *Job {
 		Recovered:         p.Recovered,
 		ResubmitOf:        p.ResubmitOf,
 		ResubmittedAs:     p.ResubmittedAs,
+		// Seeded rather than left nil: a recovered job's plan is evidence of
+		// what it was part-way through, which is exactly what the reader of an
+		// abandoned job wants to see.
+		todos: todoStoreFrom(p.Todos),
 	}
+}
+
+// todoStoreFrom rebuilds a store from persisted items. Invalid entries are
+// dropped rather than rejected: unlike the job's State, a malformed todo says
+// nothing about what happened to the work, so losing the whole record over one
+// bad line would trade real evidence for a cosmetic detail.
+func todoStoreFrom(items []TodoItem) *tools.TodoStore {
+	store := tools.NewTodoStore()
+	if len(items) == 0 {
+		return store
+	}
+	kept := make([]TodoItem, 0, len(items))
+	for _, item := range items {
+		if item.Content == "" {
+			continue
+		}
+		switch item.Status {
+		case tools.TodoPending, tools.TodoInProgress, tools.TodoCompleted:
+			kept = append(kept, item)
+		}
+	}
+	store.Replace(kept)
+	return store
 }
 
 // persistedAbandonCause writes a cause only for abandoned jobs. Stamping one

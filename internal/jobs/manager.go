@@ -1025,6 +1025,9 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 		WorkspaceIdentity: workspace.Identity,
 		OwnerRoot:         m.cfg.Root,
 		ComputerPolicy:    workspace.Policy,
+		// Allocated here, while the Job is still private to this critical
+		// section, so the field is never reassigned once the worker starts.
+		todos: tools.NewTodoStore(),
 	}
 	m.stampSnapshotLocked(job, now, "queued", req.Prompt, false, false)
 	// Allocate the per-job ctx and cancel func eagerly so /cancel works

@@ -168,6 +168,10 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 			extraTools = append(extraTools, t)
 		}
 	}
+	// Wired here rather than cloned in the registry so the tool and the Job
+	// share one store: that is what lets Agent View show a background agent's
+	// plan while it works, instead of only after it finishes.
+	extraTools = append(extraTools, tools.NewTodoWriteTool(j.todos))
 	toolReg := m.buildJobToolRegistryForBackend(j.Depth, j.AllowWrite, j.ID, backups, extraTools, runtimeBackend, jobRoot)
 
 	systemPrompt := req.SystemPrompt

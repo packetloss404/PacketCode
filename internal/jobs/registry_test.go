@@ -192,30 +192,35 @@ func TestRegistry_NilParentToolsStillReturnsExtras(t *testing.T) {
 	assert.True(t, ok)
 }
 
-// A background job gets todo_write, and gets its own list. The registry drops
-// unknown tools by default, so this needs an explicit case — and cloning the
-// parent's instance would let a background agent rewrite the plan the user is
-// watching in the foreground.
-func TestBuildJobToolRegistry_TodoWriteIsPresentAndIndependent(t *testing.T) {
+// todo_write is deliberately NOT cloned here. The registry has no access to
+// the Job, so a clone would hand the job a list nothing else could read —
+// defeating the point, which is that Agent View can show a background agent's
+// plan. The worker wires it instead, from the Job's own store; that path is
+// covered by TestSnapshot_CarriesTheJobsTodoList.
+func TestBuildJobToolRegistry_OmitsTodoWriteSoTheWorkerCanOwnTheStore(t *testing.T) {
 	parent := tools.NewRegistry()
-	parentStore := tools.NewTodoStore()
-	parent.Register(tools.NewTodoWriteTool(parentStore))
-	parentStore.Replace([]tools.TodoItem{{Content: "foreground work", Status: tools.TodoInProgress}})
+	parent.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
 
 	m := &Manager{cfg: Config{Tools: parent, Root: t.TempDir()}}
 	jobReg := m.buildJobToolRegistryForBackend(0, false, "job1234", nil, nil, nil)
 
-	tool, ok := jobReg.Get("todo_write")
-	if !ok {
-		t.Fatal("a background job must be able to track its own plan")
-	}
-	if _, err := tool.Execute(context.Background(), json.RawMessage(
-		`{"todos":[{"content":"background work","status":"pending"}]}`)); err != nil {
-		t.Fatalf("execute: %v", err)
+	if _, ok := jobReg.Get("todo_write"); ok {
+		t.Fatal("the registry must leave todo_write to the worker, which holds the Job's store")
 	}
 
-	got := parentStore.List()
-	if len(got) != 1 || got[0].Content != "foreground work" {
-		t.Fatalf("the job overwrote the foreground list: %#v", got)
+	// And the worker's path does supply it, with the store it was handed.
+	store := tools.NewTodoStore()
+	withExtra := m.buildJobToolRegistryForBackend(0, false, "job1234", nil,
+		[]tools.Tool{tools.NewTodoWriteTool(store)}, nil)
+	tool, ok := withExtra.Get("todo_write")
+	if !ok {
+		t.Fatal("extraTools must be able to supply todo_write")
+	}
+	if _, err := tool.Execute(context.Background(), json.RawMessage(
+		`{"todos":[{"content":"job work","status":"pending"}]}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := store.List(); len(got) != 1 || got[0].Content != "job work" {
+		t.Fatalf("the tool must write through the store it was given: %#v", got)
 	}
 }

@@ -109,10 +109,12 @@ func (m *Manager) buildJobToolRegistryForBackend(
 				out.Register(cloned)
 			}
 		case name == "todo_write":
-			// Rebuilt rather than cloned, so the job gets its own empty list.
-			// Sharing the parent's store would let a background agent rewrite
-			// the plan the user is watching in the foreground.
-			out.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
+			// Wired only through extraTools, where the worker holds the Job
+			// and can hand the tool the Job's own store. Cloning here would
+			// give the job a list nothing else can see, and sharing the
+			// parent's instance would let a background agent rewrite the plan
+			// the user is watching in the foreground.
+			continue
 		case name == "spawn_agent":
 			// spawn_agent is wired only through extraTools, where the
 			// worker has already applied depth and parent-write gates.
