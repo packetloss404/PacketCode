@@ -2,15 +2,15 @@
  0 awaiting input · 1 working · 1 completed
 
  Needs input
-  Agents with a question or permission decision wait h…
+  Agents with a question or permission decision wait here
  Working
   Agents actively working in the background
- ▶ ✻ a1b2c3d4
-     codex/gpt-5.6-sol · testing · api 0/0 · $0.0000
+ ▶ ✻ a1b2c3d4  running focused tests                              2m00s
+     local · codex/gpt-5.6-sol · testing · api 0/0 · $0.0000
  Completed
   Finished agents wait here for review or injection
-   ✓ e5f6a7b8
-     codex/gpt-5.6-sol · completed · api 0/0 · $0.0000
+   ✓ e5f6a7b8  PTY comparison complete                            4m00s
+     local · codex/gpt-5.6-sol · completed · api 0/0 · $0.0000
 
 
 
@@ -25,19 +25,23 @@
 1:2-21 fg=00d9ff,bold
 2:2-43 fg=8888a0
 4:2-12 fg=e1e1e8,bold
-5:3-55 fg=494960
+5:3-57 fg=494960
 6:2-8 fg=e1e1e8,bold
 7:3-43 fg=494960
 8:2-3 bg=232340
 8:4 fg=00d9ff,bg=232340,bold
 8:6-13 fg=00d9ff,bold
-8:16-51 bg=232340
-9:2-52 fg=494960,bg=232340
+8:16-36 fg=e1e1e8
+8:67-71 fg=494960
+9:2-60 fg=494960,bg=232340
+9:61-71 bg=232340
 10:2-10 fg=e1e1e8,bold
 11:3-51 fg=494960
 12:4 fg=49de80
 12:6-13 fg=00d9ff,bold
-13:2-54 fg=494960
+12:16-38 fg=e1e1e8
+12:67-71 fg=494960
+13:2-62 fg=494960
 19:2-68 fg=494960
 20:1-72 fg=2a2a3c
 21:1-2 fg=white

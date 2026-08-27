@@ -1,10 +1,10 @@
  ⚡ packetcode workflows
  1 runs · fan-out agents and ordered phases
 
- ▶ run00001  review
+ ▶ run00001  review  @default               running
    phase analysis ─────────────────────────────────────────────────────
      step fan-out review [parallel · unverified]
-         a1b2c3d4 running
+         a1b2c3d4 running    codex/gpt-5.6-sol    api 0/0     $0.0000 …
 
 
 
@@ -25,6 +25,7 @@
 2:2-43 fg=8888a0
 4:2-3 bg=232340
 4:4-43 fg=00d9ff,bg=232340,bold
+4:45-54 fg=60a5fa
 5:2-18 fg=8888a0,bold
 5:19-71 fg=494960
 6:2-48 fg=8888a0

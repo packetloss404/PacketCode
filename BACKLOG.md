@@ -64,18 +64,21 @@ copy its code or prompt text.
 From a package-by-package review pass. Each was confirmed against the code;
 they were left unfixed for the reason given, not for lack of a diagnosis.
 
-- **Agent View and workflow rows are truncated mid-ANSI-escape.**
-  `agentview.go:622` and `workflowview.go:485/512/538` size their columns with
-  `lipgloss.Width` (display-aware) and then clip with a **rune-counting**
-  helper. Each styled segment carries ~15-20 runes of invisible SGR escape, so
-  a row whose visible width is ~40 counts as ~150 and is cut early. The
-  committed goldens prove it is live, not theoretical: in
-  `testdata/tui/golden/packetcode/agents/100x30.txt` the row reads
-  `▶ ✻ a1b2c3d4  running focused te…` — stopping at ~35 of 100 columns, with
-  the age column never rendering at all. Fix is `ansi.Truncate` from
-  `charmbracelet/x/ansi`, already a dependency and already used in
-  `topbar.go:515`. Blocked only on regenerating the goldens, which the capture
-  harness refuses to do off POSIX (`scripts/tui_capture.py:207`).
+- ~~Agent View and workflow rows truncated mid-ANSI-escape.~~ **Fixed
+  2026-08-27.** Both views sized columns with `lipgloss.Width` and then clipped
+  with a rune counter, so ~15-20 runes of invisible SGR escape per styled
+  segment cut rows far short — visibly, at ~35 of 100 columns, with the age
+  column never rendering. Both `truncate` helpers now measure display width via
+  `ansi.Truncate`, which also fixes wide-rune under-measurement. Guarded by a
+  unit test using literal escapes, because lipgloss emits none without a TTY.
+- **The TUI goldens were stale for 25 days.** Last regenerated 2026-08-01;
+  `targetLabel` entered the Agent View detail line on 2026-08-02, so
+  `make tui-golden-check` — and CI's `tui-golden` job — had been failing on
+  `main` since then, unrelated to any later change. Regenerated 2026-08-27 and
+  now passing. The harness refuses to run off POSIX
+  (`scripts/tui_capture.py:207`); a Linux binary cross-compiled from Windows
+  plus a throwaway `python:3.13-slim` container with `pyte` is enough to
+  regenerate them without installing anything on the host.
 - **A self-paced `/loop` started during a streaming turn never advances.** In
   `slashcmd_loop.go`, `runLoopBody`'s `if a.streaming { queueInput; return }`
   guard sits before `a.activeLoopID = ls.id`, so `agentDoneMsg` never re-runs

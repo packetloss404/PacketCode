@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -319,5 +320,44 @@ func TestStatusBadge_AbandonedKeepsFinalResultHandling(t *testing.T) {
 				t.Fatalf("statusBadge = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Rows are sized with lipgloss.Width but were clipped by counting runes. Every
+// styled segment carries ~15-20 runes of invisible SGR escape, so a row well
+// inside the terminal width counted as far over it and was cut short —
+// visibly, in the committed goldens, at ~35 of 100 columns with the age column
+// lost entirely. This guards the fix without depending on golden regeneration.
+func TestTruncate_MeasuresDisplayWidthNotRunes(t *testing.T) {
+	// Literal escapes rather than theme styles: lipgloss suppresses colour
+	// when there is no TTY, so styled output in a test would carry no escapes
+	// at all and the regression could not be expressed. The goldens hit this
+	// path because they are captured through a real PTY.
+	styled := "[38;5;33ma1b2c3d4[0m  [38;5;250mrunning focused tests[0m"
+	width := ansi.StringWidth(styled)
+	if width >= len([]rune(styled)) {
+		t.Fatalf("precondition: styled string should carry invisible escapes, width=%d runes=%d", width, len([]rune(styled)))
+	}
+
+	// Comfortably inside the budget: must come back untouched, escapes and all.
+	if got := truncate(styled, width+20); got != styled {
+		t.Fatalf("a row inside the width budget was altered:\n got %q\nwant %q", got, styled)
+	}
+
+	// Over budget: clipped to display columns, never to rune count.
+	got := truncate(styled, 12)
+	if w := ansi.StringWidth(got); w > 12 {
+		t.Fatalf("truncate exceeded its column budget: width=%d, %q", w, got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Fatalf("an over-budget row should show an ellipsis, got %q", got)
+	}
+}
+
+func TestTruncate_NonPositiveWidthIsEmpty(t *testing.T) {
+	for _, w := range []int{0, -1, -50} {
+		if got := truncate("anything", w); got != "" {
+			t.Fatalf("truncate(_, %d) = %q, want empty", w, got)
+		}
 	}
 }

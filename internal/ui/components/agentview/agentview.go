@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	jobspkg "github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/ui/theme"
@@ -822,13 +823,22 @@ func shortDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", m, s)
 }
 
+// truncate clips s to w display columns, preserving any ANSI styling it
+// carries.
+//
+// Counting runes is wrong for these rows. Every styled segment carries ~15-20
+// runes of invisible SGR escape, so a row only ~40 columns wide counts as ~150
+// runes; clipping at w runes cut it far short of the terminal width and landed
+// mid-escape. The callers already size their columns with lipgloss.Width, so
+// measuring the final string any other way contradicts the layout that
+// produced it. Display width is also the right measure for wide runes, which
+// rune counting silently under-measures.
 func truncate(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
+	if w <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= w {
 		return s
 	}
-	if w <= 1 {
-		return string(r[:w])
-	}
-	return string(r[:w-1]) + "…"
+	return ansi.Truncate(s, w, "…")
 }
