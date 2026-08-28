@@ -21,6 +21,7 @@ import (
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/skills"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -571,6 +572,20 @@ func rankProjectFiles(paths []string, query string, limit int) []string {
 	return out
 }
 
+// acpSystemPrompt appends the skills index for an ACP session. Discovery
+// errors go to stderr, matching the foreground path: a skill that failed to
+// load is a file the user wrote and expects to work.
+func acpSystemPrompt(reg *skills.Registry) string {
+	prompt := systemPrompt
+	if block := reg.IndexBlock(); block != "" {
+		prompt += "\n\n" + block
+	}
+	for _, skillErr := range reg.Errors() {
+		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillErr)
+	}
+	return prompt
+}
+
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
 	// Resolve the per-session policy first so an invalid permissionMode fails
 	// before any session state is created.
@@ -651,6 +666,12 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	root := filepath.Clean(cfg.CWD)
 	// Per ACP session, for the same reason as the foreground registry.
 	toolReg.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
+	// Held in a local so the index can reach the prompt below. Registering the
+	// tool without the index left ACP clients told to "load a skill" with no
+	// way to learn a single name.
+	skillRegistry := skills.Load(root)
+	toolReg.Register(tools.NewSkillTool(skillRegistry))
+	toolReg.Register(tools.NewFetchTool())
 	toolReg.Register(tools.NewReadFileTool(root))
 	toolReg.Register(tools.NewSearchCodebaseTool(root))
 	toolReg.Register(tools.NewListDirectoryTool(root))
@@ -679,8 +700,12 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 
 	hookRunner := hooks.New(f.cfg.Hooks, root)
 	runner := agent.New(agent.Config{
+		LoopDetection: agent.LoopDetectionSettings(
+			f.cfg.Behavior.LoopDetectionDisabled,
+			f.cfg.Behavior.LoopDetectionWindow,
+			f.cfg.Behavior.LoopDetectionThreshold),
 		Registry: reg, Tools: toolReg, Session: sessions,
-		Approver: approver, Policy: policy, SystemPrompt: systemPrompt,
+		Approver: approver, Policy: policy, SystemPrompt: acpSystemPrompt(skillRegistry),
 		Hooks:         hookRunner,
 		SugarCache:    packetcodeSugarCacheConfig(f.cfg),
 		ConduitShadow: packetcodeConduitShadowConfig(f.cfg),

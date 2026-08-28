@@ -547,3 +547,101 @@ func TestValidateWorkspaceRefusesCrossComputerResume(t *testing.T) {
 	legacyRemote := &Session{ID: "legacy", ComputerID: "pc_production", WorkingDir: "/srv/app"}
 	require.NoError(t, ValidateWorkspace(legacyRemote, "pc_production", "/srv/app", "pcws_sha256:new"))
 }
+
+// TestManager_UpdateUsageCacheFieldsAreSubsets pins the invariant the whole
+// cache-plumbing change rests on: provider.Usage reports InputTokens
+// inclusive of cached input, so the cache counters accumulate alongside
+// TotalInput and are never added into it. If they were, cost would be
+// overstated by the cached amount on every turn.
+func TestManager_UpdateUsageCacheFieldsAreSubsets(t *testing.T) {
+	m := NewManager(t.TempDir())
+	_, err := m.New("anthropic", "claude-sonnet-4")
+	require.NoError(t, err)
+
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens:              1000,
+		OutputTokens:             100,
+		CacheCreationInputTokens: 200,
+		CacheReadInputTokens:     700,
+	}, 1, 1))
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens:              1500,
+		OutputTokens:             150,
+		CacheCreationInputTokens: 0,
+		CacheReadInputTokens:     1400,
+	}, 1, 1))
+
+	got := m.Current().TokenUsage
+	assert.Equal(t, 2500, got.TotalInput, "cache counts must not inflate the input total")
+	assert.Equal(t, 250, got.TotalOutput)
+	assert.Equal(t, 200, got.TotalCacheCreation, "cumulative cache writes")
+	assert.Equal(t, 2100, got.TotalCacheRead, "cumulative cache reads")
+	assert.LessOrEqual(t, got.TotalCacheCreation+got.TotalCacheRead, got.TotalInput)
+
+	// Cost prices TotalInput alone; adding the subsets would have made this
+	// 2500+2300 = 4800 input tokens.
+	assert.InDelta(t, (2500.0+250.0)/1_000_000, m.Current().Cost.TotalUSD, 1e-12)
+
+	// The context-scoped split describes the last request only, so it tracks
+	// ContextTokens rather than accumulating.
+	assert.Equal(t, 1650, got.ContextTokens)
+	assert.Equal(t, 0, got.ContextCacheCreation)
+	assert.Equal(t, 1400, got.ContextCacheRead)
+	assert.LessOrEqual(t, got.ContextCacheCreation+got.ContextCacheRead, got.ContextTokens)
+}
+
+// TestManager_SetContextTokensClearsCacheSplit covers the /compact path:
+// SetContextTokens installs a locally estimated occupancy for a prompt no
+// provider has priced, so a stale cache split left behind would describe a
+// prompt that no longer exists — and could exceed the new total.
+func TestManager_SetContextTokensClearsCacheSplit(t *testing.T) {
+	m := NewManager(t.TempDir())
+	_, err := m.New("anthropic", "claude-sonnet-4")
+	require.NoError(t, err)
+
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens:          9000,
+		OutputTokens:         100,
+		CacheReadInputTokens: 8000,
+	}, 1, 1))
+	require.NoError(t, m.SetContextTokens(1200))
+
+	got := m.Current().TokenUsage
+	assert.Equal(t, 1200, got.ContextTokens)
+	assert.Zero(t, got.ContextCacheRead, "stale split must not survive a compaction estimate")
+	assert.Zero(t, got.ContextCacheCreation)
+	// Cumulative billing history is untouched.
+	assert.Equal(t, 8000, got.TotalCacheRead)
+}
+
+// TestManager_LoadSessionWithoutCacheFields confirms sessions written before
+// cache plumbing still load: the absent JSON fields decode as zero rather
+// than failing the unmarshal or poisoning the totals.
+func TestManager_LoadSessionWithoutCacheFields(t *testing.T) {
+	dir := t.TempDir()
+	legacy := `{
+	  "id": "legacy-session",
+	  "name": "old",
+	  "provider": "openai",
+	  "model": "gpt-4.1",
+	  "token_usage": {"total_input": 5000, "total_output": 700, "context_tokens": 1200},
+	  "cost": {"total_usd": 0.25}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "legacy-session.json"), []byte(legacy), 0o600))
+
+	m := NewManager(dir)
+	s, err := m.Load("legacy-session")
+	require.NoError(t, err)
+	assert.Equal(t, 5000, s.TokenUsage.TotalInput)
+	assert.Equal(t, 1200, s.TokenUsage.ContextTokens)
+	assert.Zero(t, s.TokenUsage.TotalCacheCreation)
+	assert.Zero(t, s.TokenUsage.TotalCacheRead)
+	assert.Zero(t, s.TokenUsage.ContextCacheCreation)
+	assert.Zero(t, s.TokenUsage.ContextCacheRead)
+
+	// A later usage report starts the cache counters from zero, not from junk.
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens: 100, OutputTokens: 10, CacheReadInputTokens: 60,
+	}, 1, 1))
+	assert.Equal(t, 60, m.Current().TokenUsage.TotalCacheRead)
+}

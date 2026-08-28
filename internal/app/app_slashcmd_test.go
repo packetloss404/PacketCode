@@ -1711,3 +1711,45 @@ func TestApp_SubmitUnknownSlashCommandShowsEscapeHatch(t *testing.T) {
 	convContains(t, r.app, "unknown slash command /frobnicate")
 	convContains(t, r.app, "//frobnicate")
 }
+
+// TestApp_StatusLineSnapshotCarriesCacheSplit walks the whole cached-input
+// path end to end: a provider usage report lands in the session, the
+// snapshot picks up the context-scoped split, and the emitted JSON reports
+// real numbers instead of the hard-coded zeros that used to sit there.
+func TestApp_StatusLineSnapshotCarriesCacheSplit(t *testing.T) {
+	r := newTestApp(t)
+	if err := r.app.deps.Sessions.UpdateUsage(provider.Usage{
+		InputTokens:              10_000,
+		OutputTokens:             1_000,
+		CacheCreationInputTokens: 2_000,
+		CacheReadInputTokens:     6_000,
+	}, 0, 0); err != nil {
+		t.Fatalf("UpdateUsage: %v", err)
+	}
+
+	snap := r.app.statusLineSnapshot()
+	if snap.ContextWindow.Used != 11_000 {
+		t.Fatalf("Used = %d, want 11000", snap.ContextWindow.Used)
+	}
+	if snap.ContextWindow.CacheCreation != 2_000 || snap.ContextWindow.CacheRead != 6_000 {
+		t.Fatalf("cache split = %d/%d, want 2000/6000",
+			snap.ContextWindow.CacheCreation, snap.ContextWindow.CacheRead)
+	}
+
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	usage := got["context_window"].(map[string]any)["current_usage"].(map[string]any)
+	// Disjoint fields that sum back to Used: Used already contains the cache
+	// figures, so input_tokens is the uncached remainder.
+	if usage["cache_creation_input_tokens"] != float64(2_000) ||
+		usage["cache_read_input_tokens"] != float64(6_000) ||
+		usage["input_tokens"] != float64(3_000) {
+		t.Fatalf("current_usage = %v, want 3000/2000/6000", usage)
+	}
+}

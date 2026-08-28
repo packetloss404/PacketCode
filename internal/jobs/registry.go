@@ -15,6 +15,22 @@ import (
 // job, regardless of allowWrite. spawn_agent is added separately and
 // gated by depth — see buildJobToolRegistry.
 var readOnlyToolNames = map[string]bool{
+	// A background sub-agent is handed the same system prompt, which lists
+	// skill and tells it to load one. Leaving it unregistered advertised a
+	// tool that was not there. It is safe here on every axis this registry
+	// cares about: approval-free and read-only per policy, stateless, and
+	// independent of the worktree root, so cloneReadOnlyTool's fallthrough to
+	// the source instance is correct.
+	//
+	// fetch is deliberately absent, and not merely unclassified. It requires
+	// approval, so policy routes it to jobApprover, which auto-denies every
+	// call in a read-only job -- the exact shape of job that would want to
+	// read a doc page. A write-enabled job would instead ask the user to
+	// eyeball a URL chosen by an agent they are not watching, minutes later
+	// and out of context, which is the reflexive-approval failure fetch's own
+	// approval comment argues against. It stays out until there is a network
+	// policy axis to decide it properly.
+	"skill":           true,
 	"read_file":       true,
 	"search_codebase": true,
 	"list_directory":  true,

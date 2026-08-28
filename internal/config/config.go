@@ -273,6 +273,15 @@ type BehaviorConfig struct {
 	BackgroundDefaultModel    string `toml:"background_default_model"`
 	BackgroundTokenBudget     int    `toml:"background_token_budget"`
 	WorkflowTokenBudget       int    `toml:"workflow_token_budget"`
+
+	// Loop detection aborts a run that keeps making the same tool call with
+	// the same result. These exist because the detector infers "no progress"
+	// from identical output, and a legitimate poll returning a constant value
+	// looks identical -- so an operator must be able to loosen or disable it
+	// without a rebuild. Zero means use the built-in defaults.
+	LoopDetectionDisabled  bool `toml:"loop_detection_disabled"`
+	LoopDetectionWindow    int  `toml:"loop_detection_window"`
+	LoopDetectionThreshold int  `toml:"loop_detection_threshold"`
 }
 
 // PermissionConfig controls the approval policy applied to tool calls.

@@ -49,6 +49,52 @@ func TestSnapshotClaudeCodeCompat(t *testing.T) {
 	assert.EqualValues(t, 0, usage["cache_read_input_tokens"])
 }
 
+// TestContextInfoCacheSplitIsASubset pins the invariant that makes the
+// Claude Code alias honest: current_usage's three fields are disjoint and
+// must sum back to `used`, because packetcode's Used already contains the
+// cache figures. A regression that emitted Used as input_tokens *and* the
+// cache counts alongside it would inflate every summing script by the
+// cached amount.
+func TestContextInfoCacheSplitIsASubset(t *testing.T) {
+	raw, err := json.Marshal(ContextInfo{
+		Used:          12000,
+		Max:           272000,
+		CacheCreation: 1000,
+		CacheRead:     9000,
+	})
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+
+	// Native fields report the subsets as reported.
+	assert.EqualValues(t, 12000, got["used"])
+	assert.EqualValues(t, 1000, got["cache_creation"])
+	assert.EqualValues(t, 9000, got["cache_read"])
+
+	usage := got["current_usage"].(map[string]any)
+	assert.EqualValues(t, 2000, usage["input_tokens"], "input_tokens must be the uncached remainder")
+	assert.EqualValues(t, 1000, usage["cache_creation_input_tokens"])
+	assert.EqualValues(t, 9000, usage["cache_read_input_tokens"])
+
+	sum := usage["input_tokens"].(float64) +
+		usage["cache_creation_input_tokens"].(float64) +
+		usage["cache_read_input_tokens"].(float64)
+	assert.EqualValues(t, 12000, sum, "current_usage fields must sum to used")
+}
+
+// TestContextInfoCacheSplitNeverNegative guards the clamp: a provider that
+// reports cache counts larger than its own prompt total must not make
+// input_tokens go negative, which would break any script doing arithmetic.
+func TestContextInfoCacheSplitNeverNegative(t *testing.T) {
+	raw, err := json.Marshal(ContextInfo{Used: 100, CacheRead: 900})
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+	usage := got["current_usage"].(map[string]any)
+	assert.EqualValues(t, 0, usage["input_tokens"])
+	assert.EqualValues(t, 900, usage["cache_read_input_tokens"])
+}
+
 // TestModelDisplayNameHonoured confirms an explicit display name wins over the id.
 func TestModelDisplayNameHonoured(t *testing.T) {
 	raw, err := json.Marshal(ModelInfo{ID: "gpt-5.6-sol", DisplayName: "GPT-5.6-Sol"})

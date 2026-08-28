@@ -99,6 +99,11 @@ type Config struct {
 	// ResolveWorkspace maps explicit computer selectors and persisted stable
 	// ids without performing network I/O.
 	ResolveWorkspace WorkspaceResolver
+	// LoopDetection is passed to every background agent. A sub-agent is the
+	// case that most needs it -- nobody is watching a background job burn
+	// iterations on a call that keeps returning the same thing.
+	LoopDetection agent.LoopDetectionConfig
+
 	// OpenBackend returns a fresh independently-owned backend for one remote
 	// worker. Local jobs do not call it.
 	OpenBackend BackendOpener

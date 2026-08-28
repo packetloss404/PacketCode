@@ -56,6 +56,12 @@ type ContextInfo struct {
 	Used           int `json:"used"`
 	Max            int `json:"max"`
 	UsedPercentage int `json:"used_percentage"`
+
+	// CacheCreation and CacheRead are the cached-input subsets of Used for
+	// the most recent request. They are subsets, not additions: Used already
+	// counts them, so the uncached remainder is Used minus the two.
+	CacheCreation int `json:"cache_creation,omitempty"`
+	CacheRead     int `json:"cache_read,omitempty"`
 }
 
 // The three MarshalJSON methods below emit packetcode's native fields plus a
@@ -89,15 +95,23 @@ func (m ModelInfo) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON adds the Claude Code `context_window_size` and `current_usage`
-// aliases. packetcode tracks a single "used" total rather than the
-// input/cache-creation/cache-read split Anthropic reports, so the whole used
-// count is reported as input_tokens (caches zero); a script summing the three
-// still arrives at packetcode's used total.
+// aliases. Claude Code's three current_usage fields are disjoint and sum to
+// the context total, whereas packetcode's Used already contains the cache
+// figures — so input_tokens is emitted as the uncached remainder to keep a
+// summing script arriving at Used. Clamped at zero because a provider that
+// reports cache counts exceeding its own prompt total must not produce a
+// negative token count in the JSON.
 func (c ContextInfo) MarshalJSON() ([]byte, error) {
+	uncached := c.Used - c.CacheCreation - c.CacheRead
+	if uncached < 0 {
+		uncached = 0
+	}
 	return json.Marshal(struct {
 		Used              int `json:"used"`
 		Max               int `json:"max"`
 		UsedPercentage    int `json:"used_percentage"`
+		CacheCreation     int `json:"cache_creation,omitempty"`
+		CacheRead         int `json:"cache_read,omitempty"`
 		ContextWindowSize int `json:"context_window_size"`
 		CurrentUsage      struct {
 			InputTokens              int `json:"input_tokens"`
@@ -108,12 +122,18 @@ func (c ContextInfo) MarshalJSON() ([]byte, error) {
 		Used:              c.Used,
 		Max:               c.Max,
 		UsedPercentage:    c.UsedPercentage,
+		CacheCreation:     c.CacheCreation,
+		CacheRead:         c.CacheRead,
 		ContextWindowSize: c.Max,
 		CurrentUsage: struct {
 			InputTokens              int `json:"input_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-		}{InputTokens: c.Used},
+		}{
+			InputTokens:              uncached,
+			CacheCreationInputTokens: c.CacheCreation,
+			CacheReadInputTokens:     c.CacheRead,
+		},
 	})
 }
 

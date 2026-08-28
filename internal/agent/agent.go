@@ -29,6 +29,10 @@ import (
 // user message. Without a cap a misbehaving model could loop forever
 // (e.g. retrying read_file on a path that keeps not existing). 25 is high
 // enough for legitimate multi-step tasks and low enough to fail fast.
+//
+// It stays the backstop for churn that varies just enough to look like
+// progress; the degenerate repeat it names is caught far sooner, and with a
+// reason the user can act on, by loopDetector (loopdetect.go).
 const maxToolIterations = 25
 
 // EventType discriminates AgentEvent payloads.
@@ -86,6 +90,7 @@ type Agent struct {
 	tokenBudget   int
 	sugarCache    SugarCacheConfig
 	conduitShadow ConduitShadowConfig
+	loopDetection LoopDetectionConfig
 }
 
 // Config bundles the agent's required dependencies.
@@ -101,6 +106,7 @@ type Config struct {
 	TokenBudget   int // input+output tokens; zero disables the boundary check
 	SugarCache    SugarCacheConfig
 	ConduitShadow ConduitShadowConfig
+	LoopDetection LoopDetectionConfig // zero value enables detection with the defaults
 }
 
 // New constructs an Agent. Approver defaults to AutoReject if omitted —
@@ -133,6 +139,7 @@ func New(cfg Config) *Agent {
 		tokenBudget:   cfg.TokenBudget,
 		sugarCache:    cfg.SugarCache,
 		conduitShadow: cfg.ConduitShadow,
+		loopDetection: cfg.LoopDetection,
 	}
 }
 
@@ -222,8 +229,12 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 		shadow = newConduitShadowState(a.conduitShadow, a.session, userMessage)
 	}
 
+	// The window belongs to this run: it must see one user message's turns and
+	// nothing from the message before it.
+	loop := newLoopDetector(a.loopDetection)
+
 	for iter := 0; iter < maxToolIterations; iter++ {
-		more, err := a.oneTurn(ctx, events, shadow)
+		more, err := a.oneTurn(ctx, events, shadow, loop)
 		if err != nil {
 			events <- AgentEvent{Type: EventError, Error: err}
 			return
@@ -250,7 +261,7 @@ func (a *Agent) run(ctx context.Context, userMessage string, events chan<- Agent
 // Returns (true, nil) if more turns are needed (i.e. tool calls were
 // executed and the LLM should respond to their results), (false, nil) if
 // the LLM emitted no tool calls (turn complete), or (_, err) on failure.
-func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *conduitShadowState) (bool, error) {
+func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *conduitShadowState, loop *loopDetector) (bool, error) {
 	prov, modelID := a.registry.Active()
 	if prov == nil {
 		return false, errors.New("no active provider")
@@ -365,8 +376,13 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *c
 		if a.costTracker != nil {
 			cur := a.session.Current()
 			if cur != nil {
-				_ = a.costTracker.RecordUsage(cur.ID, prov.Slug(), modelID,
-					cur.TokenUsage.TotalInput, cur.TokenUsage.TotalOutput)
+				// Cache counts come from the session's running totals, which
+				// UpdateUsage has already accumulated from this turn's usage
+				// report. Passing them explicitly is what closes the last cut
+				// in the chain: the tally used to receive input/output only.
+				_ = a.costTracker.RecordUsageWithCache(cur.ID, prov.Slug(), modelID,
+					cur.TokenUsage.TotalInput, cur.TokenUsage.TotalOutput,
+					cur.TokenUsage.TotalCacheCreation, cur.TokenUsage.TotalCacheRead)
 			}
 		}
 		events <- AgentEvent{Type: EventUsageUpdate, Usage: *lastUsage}
@@ -376,10 +392,18 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *c
 		return false, nil
 	}
 
+	observed := make([]toolObservation, 0, len(calls))
 	for _, call := range calls {
-		if err := a.handleToolCall(ctx, call, events, shadow); err != nil {
+		obs, err := a.handleToolCall(ctx, call, events, shadow)
+		if err != nil {
 			return false, err
 		}
+		observed = append(observed, obs)
+	}
+	// Judged only once every call in the turn has settled, so parallel calls
+	// are weighed as the single unit of work the model actually requested.
+	if err := loop.observe(observed); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -391,23 +415,31 @@ func unsupportedToolsMessage(providerName, modelID string) string {
 // handleToolCall runs the approval flow and either executes the tool or
 // records a rejection message. Either way a tool-role message is appended
 // to the session so the LLM has full visibility into what happened.
-func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, events chan<- AgentEvent, shadow *conduitShadowState) error {
+//
+// The returned toolObservation is what the loop detector signs: the call as it
+// actually ran and the content the model was actually shown. Rejections and
+// unknown tools are observed too — a model that keeps re-proposing a call the
+// policy keeps refusing is looping just as surely as one re-reading a missing
+// file.
+func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, events chan<- AgentEvent, shadow *conduitShadowState) (toolObservation, error) {
 	events <- AgentEvent{Type: EventToolCallProposed, ToolCall: call}
 
 	tool, ok := a.toolRegistry.Get(call.Name)
 	if !ok {
 		// Unknown tool — feed the error back to the LLM and continue.
+		unknown := fmt.Sprintf("unknown tool: %s", call.Name)
 		events <- AgentEvent{Type: EventToolCallExecuted, ToolCall: call, ToolResult: tools.ToolResult{
-			Content: fmt.Sprintf("unknown tool: %s", call.Name),
+			Content: unknown,
 			IsError: true,
 		}}
 		shadow.toolResult(ctx, call, tools.ToolResult{Content: "unknown tool", IsError: true})
-		return a.session.AddMessage(provider.Message{
-			Role:       provider.RoleTool,
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Content:    fmt.Sprintf("unknown tool: %s", call.Name),
-		})
+		return toolObservation{name: call.Name, arguments: call.Arguments, content: unknown},
+			a.session.AddMessage(provider.Message{
+				Role:       provider.RoleTool,
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Content:    unknown,
+			})
 	}
 
 	params := json.RawMessage(call.Arguments)
@@ -420,12 +452,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		rejection := "permission denied: " + policyResult.Reason
 		events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
 		shadow.blocked(ctx, call, rejection)
-		return a.session.AddMessage(provider.Message{
-			Role:       provider.RoleTool,
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Content:    rejection,
-		})
+		return a.rejected(call, params, rejection)
 	}
 	if a.hooks != nil {
 		preOut, preErr := a.hooks.RunPreToolUse(ctx, hooks.ToolPayload{
@@ -441,12 +468,7 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			}
 			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
 			shadow.blocked(ctx, call, rejection)
-			return a.session.AddMessage(provider.Message{
-				Role:       provider.RoleTool,
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Content:    rejection,
-			})
+			return a.rejected(call, params, rejection)
 		}
 	}
 	if policyResult.Decision == permissions.DecisionAsk {
@@ -462,15 +484,10 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			}
 			events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
 			shadow.blocked(ctx, call, rejection)
-			return a.session.AddMessage(provider.Message{
-				Role:       provider.RoleTool,
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Content:    rejection,
-			})
+			return a.rejected(call, params, rejection)
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return toolObservation{}, err
 		}
 		events <- AgentEvent{Type: EventToolCallApproved, ToolCall: call}
 		if len(decision.EditedParams) > 0 {
@@ -484,25 +501,20 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 				rejection := "permission denied after approval edit: " + editedPolicyResult.Reason
 				events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
 				shadow.blocked(ctx, call, rejection)
-				return a.session.AddMessage(provider.Message{
-					Role:       provider.RoleTool,
-					ToolCallID: call.ID,
-					Name:       call.Name,
-					Content:    rejection,
-				})
+				return a.rejected(call, params, rejection)
 			}
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		return err
+		return toolObservation{}, err
 	}
 	executedCall := call
 	executedCall.Arguments = string(params)
 	res, err := a.executeTool(ctx, tool, call.ID, params, events)
 	if err != nil {
 		if isContextCancellation(err) {
-			return err
+			return toolObservation{}, err
 		}
 		// Distinguish "tool returned an error result" (res.IsError) from
 		// "tool itself failed to run" (err != nil). The latter still
@@ -527,12 +539,26 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 	}
 	events <- AgentEvent{Type: EventToolCallExecuted, ToolCall: executedCall, ToolResult: res}
 	shadow.toolResult(ctx, executedCall, res)
-	return a.session.AddMessage(provider.Message{
-		Role:       provider.RoleTool,
-		ToolCallID: call.ID,
-		Name:       call.Name,
-		Content:    res.Content,
-	})
+	return toolObservation{name: call.Name, arguments: executedCall.Arguments, content: res.Content},
+		a.session.AddMessage(provider.Message{
+			Role:       provider.RoleTool,
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Content:    res.Content,
+		})
+}
+
+// rejected records a refusal as the tool-role message the LLM sees and reports
+// that same text as the turn's observation, so a re-proposed and re-refused
+// call still registers as the non-progress it is.
+func (a *Agent) rejected(call provider.ToolCall, params json.RawMessage, reason string) (toolObservation, error) {
+	return toolObservation{name: call.Name, arguments: string(params), content: reason},
+		a.session.AddMessage(provider.Message{
+			Role:       provider.RoleTool,
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Content:    reason,
+		})
 }
 
 // executeTool runs a tool, preferring its streaming path so live output can be

@@ -229,3 +229,75 @@ func TestChatCompletionParentCancelPropagates(t *testing.T) {
 		}
 	}
 }
+
+// usageFromStream runs one SSE frame carrying a usage object through the
+// client and returns the Usage attached to EventDone.
+func usageFromStream(t *testing.T, usageJSON string) *provider.Usage {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":" + usageJSON + "}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, APIKey: "test"}
+	ev, err := client.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gpt-4",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+	var got *provider.Usage
+	for e := range ev {
+		if e.Type == provider.EventError {
+			t.Fatalf("unexpected stream error: %v", e.Error)
+		}
+		if e.Type == provider.EventDone && e.Usage != nil {
+			got = e.Usage
+		}
+	}
+	if got == nil {
+		t.Fatal("no usage reported on EventDone")
+	}
+	return got
+}
+
+// TestUsageCachedTokensAreASubsetOfPrompt pins the contract that makes every
+// downstream cost figure correct: OpenAI-compatible prompt_tokens already
+// counts cached input, so cached_tokens is surfaced as a subset and must
+// never be added to InputTokens. This one struct feeds eight providers, so a
+// regression here double-counts cached prompts across all of them.
+func TestUsageCachedTokensAreASubsetOfPrompt(t *testing.T) {
+	got := usageFromStream(t, `{"prompt_tokens":1000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":800}}`)
+	if got.InputTokens != 1000 {
+		t.Fatalf("InputTokens = %d, want 1000 (cached tokens must not be added)", got.InputTokens)
+	}
+	if got.OutputTokens != 50 {
+		t.Fatalf("OutputTokens = %d, want 50", got.OutputTokens)
+	}
+	if got.CacheReadInputTokens != 800 {
+		t.Fatalf("CacheReadInputTokens = %d, want 800", got.CacheReadInputTokens)
+	}
+	if got.CacheReadInputTokens > got.InputTokens {
+		t.Fatal("cached tokens must be a subset of the prompt total")
+	}
+	// No provider on this path reports a cache-write count; leaving it zero
+	// keeps it from being mistaken for one.
+	if got.CacheCreationInputTokens != 0 {
+		t.Fatalf("CacheCreationInputTokens = %d, want 0", got.CacheCreationInputTokens)
+	}
+}
+
+// TestUsageWithoutCachedTokensDetail covers the backends that omit
+// prompt_tokens_details entirely: the cache fields stay zero and the input
+// total is untouched.
+func TestUsageWithoutCachedTokensDetail(t *testing.T) {
+	got := usageFromStream(t, `{"prompt_tokens":1000,"completion_tokens":50}`)
+	if got.InputTokens != 1000 || got.OutputTokens != 50 {
+		t.Fatalf("usage = %+v, want input 1000 / output 50", *got)
+	}
+	if got.CacheReadInputTokens != 0 || got.CacheCreationInputTokens != 0 {
+		t.Fatalf("cache fields = %d/%d, want 0/0", got.CacheCreationInputTokens, got.CacheReadInputTokens)
+	}
+}

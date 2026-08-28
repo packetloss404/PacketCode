@@ -264,3 +264,61 @@ func TestProvider_ChatCompletion_ErrorStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "400")
 	assert.Contains(t, err.Error(), "bad model")
 }
+
+// Anthropic's wire input_tokens uniquely EXCLUDES cached input, so the parser
+// sums it back in to satisfy provider.Usage's contract. A message_delta that
+// carries usage used to overwrite that sum with the raw value, silently
+// breaking the subset invariant every downstream consumer assumes — cost
+// under-reported, and the statusline's three context fields no longer summing
+// to the total. The existing streaming test used a delta carrying only
+// output_tokens, which is not the shape the live API sends when caching.
+func TestProvider_MessageDeltaKeepsCacheInsideInputTokens(t *testing.T) {
+	const (
+		freshInput = 25
+		creation   = 100
+		read       = 900
+	)
+	body := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1,` +
+		`"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","usage":{"input_tokens":25,"output_tokens":4,` +
+		`"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}` + "\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	p := New("test-key")
+	p.baseURL = srv.URL
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "claude-test",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+
+	var got *provider.Usage
+	for ev := range ch {
+		if ev.Type == provider.EventDone && ev.Usage != nil {
+			got = ev.Usage
+		}
+	}
+	if got == nil {
+		t.Fatal("no usage reported")
+	}
+	if want := freshInput + creation + read; got.InputTokens != want {
+		t.Fatalf("InputTokens = %d, want %d — cached input must be inside the total",
+			got.InputTokens, want)
+	}
+	if got.CacheCreationInputTokens+got.CacheReadInputTokens > got.InputTokens {
+		t.Fatalf("cache (%d+%d) exceeds InputTokens (%d): cached figures are a subset, never an addend",
+			got.CacheCreationInputTokens, got.CacheReadInputTokens, got.InputTokens)
+	}
+	if got.OutputTokens != 4 {
+		t.Fatalf("OutputTokens = %d, want 4 (the delta's value)", got.OutputTokens)
+	}
+}

@@ -37,10 +37,18 @@ type Tally struct {
 // they came from. We keep provider+model on the cost record so totals can
 // be re-priced later without re-reading every session.json.
 type SessionCost struct {
-	Input    int    `json:"input"`
-	Output   int    `json:"output"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Input  int `json:"input"`
+	Output int `json:"output"`
+	// CacheCreation and CacheRead are the cached-input subsets of Input, not
+	// additions to it — every provider that reports them counts them inside
+	// its prompt total. priced() therefore ignores them; they exist so /cost
+	// and the statusline can show cache effectiveness. Omitted when zero so
+	// tallies written before cache plumbing keep their original shape, and
+	// so absent fields decode to zero rather than to a wrong number.
+	CacheCreation int    `json:"cache_creation,omitempty"`
+	CacheRead     int    `json:"cache_read,omitempty"`
+	Provider      string `json:"provider"`
+	Model         string `json:"model"`
 }
 
 // Empty returns a fresh tally rooted at the current time.
@@ -124,11 +132,26 @@ func NewTracker(path string, pricing PricingFunc) (*Tracker, error) {
 	return &Tracker{path: path, pricing: pricing, tally: t}, nil
 }
 
-// RecordUsage applies the high-water-mark rule for the given session:
-// input and output counts are *replaced* by the max of the existing value
-// and the new value. This matches the Claude Code status line behaviour
-// where a stream completion's running totals are the source of truth.
+// RecordUsage records a session's totals without cache detail. It is the
+// pre-cache-plumbing form, kept so callers that have no cache figures to
+// offer are not forced to pass two zeros; those zeros would be
+// indistinguishable from a provider genuinely reporting no cache hits, so
+// it leaves any previously recorded cache counts alone.
 func (t *Tracker) RecordUsage(sessionID, providerSlug, modelID string, input, output int) error {
+	cur := t.session(sessionID)
+	return t.RecordUsageWithCache(sessionID, providerSlug, modelID, input, output,
+		cur.CacheCreation, cur.CacheRead)
+}
+
+// RecordUsageWithCache applies the high-water-mark rule for the given
+// session: each count is *replaced* by the max of the existing value and the
+// new value. This matches the Claude Code status line behaviour where a
+// stream completion's running totals are the source of truth.
+//
+// cacheCreation and cacheRead are subsets of input, never addends — the
+// caller passes the same cumulative figures the session tracks, and pricing
+// still derives from input alone.
+func (t *Tracker) RecordUsageWithCache(sessionID, providerSlug, modelID string, input, output, cacheCreation, cacheRead int) error {
 	t.mu.Lock()
 	cur := t.tally.Sessions[sessionID]
 	if input > cur.Input {
@@ -137,11 +160,24 @@ func (t *Tracker) RecordUsage(sessionID, providerSlug, modelID string, input, ou
 	if output > cur.Output {
 		cur.Output = output
 	}
+	if cacheCreation > cur.CacheCreation {
+		cur.CacheCreation = cacheCreation
+	}
+	if cacheRead > cur.CacheRead {
+		cur.CacheRead = cacheRead
+	}
 	cur.Provider = providerSlug
 	cur.Model = modelID
 	t.tally.Sessions[sessionID] = cur
 	defer t.mu.Unlock()
 	return t.tally.Save(t.path)
+}
+
+// session returns a copy of one session's record under the lock.
+func (t *Tracker) session(sessionID string) SessionCost {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.tally.Sessions[sessionID]
 }
 
 // SessionCost returns the cumulative USD cost for the named session.
@@ -212,25 +248,31 @@ func (t *Tracker) Breakdown() []Entry {
 	out := make([]Entry, 0, len(t.tally.Sessions))
 	for id, sc := range t.tally.Sessions {
 		out = append(out, Entry{
-			SessionID: id,
-			Input:     sc.Input,
-			Output:    sc.Output,
-			Provider:  sc.Provider,
-			Model:     sc.Model,
-			USD:       t.priced(sc),
+			SessionID:     id,
+			Input:         sc.Input,
+			Output:        sc.Output,
+			CacheCreation: sc.CacheCreation,
+			CacheRead:     sc.CacheRead,
+			Provider:      sc.Provider,
+			Model:         sc.Model,
+			USD:           t.priced(sc),
 		})
 	}
 	return out
 }
 
-// Entry is a per-session row in the breakdown.
+// Entry is a per-session row in the breakdown. CacheCreation and CacheRead
+// are subsets of Input; a row where they sum close to Input is one the
+// provider served almost entirely from cache.
 type Entry struct {
-	SessionID string
-	Input     int
-	Output    int
-	Provider  string
-	Model     string
-	USD       float64
+	SessionID     string
+	Input         int
+	Output        int
+	CacheCreation int
+	CacheRead     int
+	Provider      string
+	Model         string
+	USD           float64
 }
 
 func (t *Tracker) priced(sc SessionCost) float64 {
