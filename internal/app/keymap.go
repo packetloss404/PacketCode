@@ -72,6 +72,8 @@ var (
 		{"/model [id]", "List models or switch active"},
 		{"/models", "Alias for /model — open the model picker"},
 		{"/effort [level]", "Show or set model reasoning effort"},
+		{"/resume", "Pick a previous session to resume"},
+		{"/resume <id>", "Resume a session by full ID or 8-char prefix"},
 		{"/sessions", "List sessions"},
 		{"/sessions resume <id>", "Resume a session by full ID or 8-char prefix"},
 		{"/sessions rename <name>", "Rename the current session"},

@@ -11,9 +11,56 @@ import (
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/conversation"
+	"github.com/packetcode/packetcode/internal/ui/components/picker"
 )
 
 const resumeTranscriptLimit = 20
+
+// resumeSessionByID loads a saved session and makes it current. Both
+// `/sessions resume <id>` and the `/resume` picker go through it.
+//
+// It is deliberately one function rather than two call paths that each do the
+// work. The sequence carries a workspace-identity check that stops a
+// remote-bound transcript resuming against the local filesystem, and restores
+// the previous session on every failure so a refused resume leaves nothing
+// half-swapped. A second copy is precisely how one of those steps goes
+// missing. label names the command in messages so the user is told which
+// thing failed.
+func (a *App) resumeSessionByID(fullID, label string) (tea.Model, tea.Cmd) {
+	if a.streaming {
+		a.conversation.AppendSystem(label + ": turn already running; press Ctrl+C to cancel before resuming")
+		return a, nil
+	}
+	prev := a.deps.Sessions.Current()
+	s, loadErr := a.deps.Sessions.Load(fullID)
+	if loadErr != nil {
+		a.conversation.AppendSystem(label + ": " + loadErr.Error())
+		return a, nil
+	}
+	if workspaceErr := session.ValidateWorkspace(s, a.deps.ComputerID, a.deps.WorkingDir, a.deps.WorkspaceIdentity); workspaceErr != nil {
+		a.restorePreviousSession(prev)
+		a.conversation.AppendSystem(label + ": " + workspaceErr.Error())
+		return a, nil
+	}
+	if s.Provider == "" || s.Model == "" {
+		a.restorePreviousSession(prev)
+		a.conversation.AppendSystem(label + ": resumed session has no provider/model metadata")
+		return a, nil
+	}
+	if err := a.deps.Registry.SetActive(s.Provider, s.Model); err != nil {
+		a.restorePreviousSession(prev)
+		a.conversation.AppendSystem(label + ": " + err.Error())
+		return a, nil
+	}
+	if err := a.rebindSessionScopedTools(s.ID); err != nil {
+		a.restorePreviousSession(prev)
+		a.conversation.AppendSystem(label + ": " + err.Error())
+		return a, nil
+	}
+	a.refreshTopBar()
+	a.showResumedSession(s)
+	return a, a.renderStatusLine(false)
+}
 
 // handleSessionsCommand lists, resumes, or deletes sessions. The bare
 // form shows the top 20 newest-first; resume/delete accept either a
@@ -62,39 +109,7 @@ func (a *App) handleSessionsCommand(args []string) (tea.Model, tea.Cmd) {
 
 	switch sub {
 	case "resume":
-		if a.streaming {
-			a.conversation.AppendSystem("sessions: turn already running; press Ctrl+C to cancel before resuming")
-			return a, nil
-		}
-		prev := a.deps.Sessions.Current()
-		s, loadErr := a.deps.Sessions.Load(fullID)
-		if loadErr != nil {
-			a.conversation.AppendSystem("sessions: " + loadErr.Error())
-			return a, nil
-		}
-		if workspaceErr := session.ValidateWorkspace(s, a.deps.ComputerID, a.deps.WorkingDir, a.deps.WorkspaceIdentity); workspaceErr != nil {
-			a.restorePreviousSession(prev)
-			a.conversation.AppendSystem("sessions: " + workspaceErr.Error())
-			return a, nil
-		}
-		if s.Provider == "" || s.Model == "" {
-			a.restorePreviousSession(prev)
-			a.conversation.AppendSystem("sessions: resumed session has no provider/model metadata")
-			return a, nil
-		}
-		if err := a.deps.Registry.SetActive(s.Provider, s.Model); err != nil {
-			a.restorePreviousSession(prev)
-			a.conversation.AppendSystem("sessions: " + err.Error())
-			return a, nil
-		}
-		if err := a.rebindSessionScopedTools(s.ID); err != nil {
-			a.restorePreviousSession(prev)
-			a.conversation.AppendSystem("sessions: " + err.Error())
-			return a, nil
-		}
-		a.refreshTopBar()
-		a.showResumedSession(s)
-		return a, a.renderStatusLine(false)
+		return a.resumeSessionByID(fullID, "sessions")
 
 	case "delete":
 		if !yes {
@@ -391,4 +406,75 @@ func roundedAge(t, now time.Time) string {
 	default:
 		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
 	}
+}
+
+// handleResumeCommand is the front door for /resume. Bare, it opens a picker;
+// with an argument it behaves exactly like /sessions resume, so muscle memory
+// from either form works.
+func (a *App) handleResumeCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		fullID, err := a.resolveSessionID(strings.TrimSpace(args[0]))
+		if err != nil {
+			a.conversation.AppendSystem("resume: " + err.Error())
+			return a, nil
+		}
+		return a.resumeSessionByID(fullID, "resume")
+	}
+	return a, a.openSessionPicker()
+}
+
+// openSessionPicker lists saved sessions newest-first for selection.
+//
+// The list is loaded eagerly rather than through the picker's async Loader:
+// sessions come off local disk, so a spinner would only add a frame of
+// latency, and an empty list is better reported as a message than as an empty
+// overlay the user has to dismiss.
+func (a *App) openSessionPicker() tea.Cmd {
+	a.autocomplete.Close()
+	summaries, err := a.deps.Sessions.List()
+	if err != nil {
+		a.conversation.AppendSystem("resume: list failed: " + err.Error())
+		return nil
+	}
+	if len(summaries) == 0 {
+		a.conversation.AppendSystem("resume: no saved sessions yet")
+		return nil
+	}
+	currentID := ""
+	if cur := a.deps.Sessions.Current(); cur != nil {
+		currentID = cur.ID
+	}
+	a.picker = picker.New("session", "Resume session")
+	a.picker.Resize(a.width, a.height)
+	a.picker.SetItems(sessionItems(summaries, currentID, time.Now()))
+	a.picker.SetActive(currentID)
+	return a.picker.Open(nil)
+}
+
+// sessionItems projects summaries for the picker. The detail line answers the
+// question someone scanning this list is actually asking — when did I last
+// touch it, and how big is it — rather than repeating the id already shown.
+func sessionItems(summaries []session.Summary, currentID string, now time.Time) []picker.Item {
+	items := make([]picker.Item, 0, len(summaries))
+	for _, s := range summaries {
+		label := strings.TrimSpace(s.Name)
+		if label == "" {
+			// An unnamed session is identified by the same short id the
+			// sessions table shows, so the two surfaces agree.
+			label = shortID(s.ID)
+		}
+		detail := fmt.Sprintf("%s ago · %d msg", roundedAge(s.UpdatedAt, now), s.MessageCount)
+		if s.Provider != "" && s.Model != "" {
+			detail += " · " + s.Provider + "/" + s.Model
+		}
+		item := picker.Item{ID: s.ID, Label: label, Detail: detail}
+		if s.ID == currentID {
+			// Marked rather than hidden: seeing "this is the one you are in"
+			// is more useful than silently omitting it and leaving the user
+			// wondering where it went.
+			item.Marker = "●"
+		}
+		items = append(items, item)
+	}
+	return items
 }

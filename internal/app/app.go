@@ -653,6 +653,15 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := a.applyModelSwitch(msg.Item.ID); err != nil {
 				a.conversation.AppendSystem("model: " + err.Error())
 			}
+		case "session":
+			// Selecting the session already loaded would tear down and rebuild
+			// the one the user is sitting in, losing nothing but achieving
+			// nothing either. Say so instead.
+			if cur := a.deps.Sessions.Current(); cur != nil && cur.ID == msg.Item.ID {
+				a.conversation.AppendSystem("resume: already in this session")
+				return a, nil
+			}
+			return a.resumeSessionByID(msg.Item.ID, "resume")
 		}
 		return a, nil
 
@@ -1997,6 +2006,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleEffortCommand(args)
 	case "sessions":
 		return a.handleSessionsCommand(args)
+	case "resume":
+		return a.handleResumeCommand(args)
 	case "queue":
 		return a.handleQueueCommand(args)
 	case "undo":
