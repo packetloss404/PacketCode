@@ -189,6 +189,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	policy := policyForWorkspace(permissionPolicy, workspaceOfJob(j, m.cfg.Root))
 
 	a := agent.New(agent.Config{
+		LoopDetection: m.cfg.LoopDetection,
 		Registry:      subRegistry,
 		Tools:         toolReg,
 		Session:       subSession,

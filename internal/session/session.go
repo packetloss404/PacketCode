@@ -68,6 +68,22 @@ type TokenUsage struct {
 	// accumulate across turns, so the gauge reflects the live conversation
 	// size and drops after a /compact. Zero until the first usage report.
 	ContextTokens int `json:"context_tokens"`
+
+	// TotalCacheCreation and TotalCacheRead are the cumulative cached-input
+	// subsets of TotalInput, not additions to it: providers that bill cache
+	// writes and reads at different rates need the split, but summing the
+	// three would double-count every cached prompt. Both stay zero for
+	// providers that never report cache figures.
+	TotalCacheCreation int `json:"total_cache_creation,omitempty"`
+	TotalCacheRead     int `json:"total_cache_read,omitempty"`
+
+	// ContextCacheCreation and ContextCacheRead are the cache subsets of the
+	// most recent request's prompt, tracking ContextTokens rather than the
+	// cumulative totals. The statusline reports live context occupancy, so it
+	// needs the split for *this* prompt; cumulative figures would exceed the
+	// window. Like ContextTokens they are overwritten, not accumulated.
+	ContextCacheCreation int `json:"context_cache_creation,omitempty"`
+	ContextCacheRead     int `json:"context_cache_read,omitempty"`
 }
 
 type CostInfo struct {
@@ -266,6 +282,11 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 	}
 	m.current.TokenUsage.TotalInput += usage.InputTokens
 	m.current.TokenUsage.TotalOutput += usage.OutputTokens
+	// Cache counts accumulate alongside the totals but are a subset of
+	// TotalInput, which provider.Usage already reports inclusive of cached
+	// input — adding them here would bill every cached prompt twice.
+	m.current.TokenUsage.TotalCacheCreation += usage.CacheCreationInputTokens
+	m.current.TokenUsage.TotalCacheRead += usage.CacheReadInputTokens
 	// Current context occupancy = this request's prompt + completion. Each
 	// request reports its full prompt size (not a delta), so overwriting —
 	// rather than accumulating — tracks the live conversation size. Only
@@ -273,6 +294,11 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 	// report that omits them doesn't zero the gauge mid-session.
 	if usage.InputTokens > 0 {
 		m.current.TokenUsage.ContextTokens = usage.InputTokens + usage.OutputTokens
+		// The cache split belongs to the same request as ContextTokens, so it
+		// is overwritten in the same branch: carrying a stale split forward
+		// would describe a prompt that is no longer in the window.
+		m.current.TokenUsage.ContextCacheCreation = usage.CacheCreationInputTokens
+		m.current.TokenUsage.ContextCacheRead = usage.CacheReadInputTokens
 	}
 	m.current.Cost.TotalUSD = float64(m.current.TokenUsage.TotalInput)*inputPer1M/1_000_000 +
 		float64(m.current.TokenUsage.TotalOutput)*outputPer1M/1_000_000
@@ -289,6 +315,12 @@ func (m *Manager) SetContextTokens(tokens int) error {
 		return fmt.Errorf("set context tokens: no current session")
 	}
 	m.current.TokenUsage.ContextTokens = tokens
+	// The caller is supplying a locally estimated occupancy for a prompt no
+	// provider has priced yet, so the cache split from the previous request
+	// no longer describes it — and left in place it could exceed the new
+	// total. The next usage report refills it.
+	m.current.TokenUsage.ContextCacheCreation = 0
+	m.current.TokenUsage.ContextCacheRead = 0
 	m.mu.Unlock()
 	return m.Save()
 }

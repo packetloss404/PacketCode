@@ -434,6 +434,16 @@ type chatUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// PromptTokensDetails carries the cached-input subset. OpenAI-compatible
+	// prompt_tokens already counts cached input, so cached_tokens is reported
+	// for billing and diagnostics only — never added to PromptTokens. The
+	// pointer stays nil for backends that omit the object, which keeps
+	// "not reported" distinguishable from a genuine zero at the parse site.
+	PromptTokensDetails *chatPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type chatPromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // parseSSE reads OpenAI-style SSE frames and translates them into
@@ -585,13 +595,14 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 
 		if chunk.Usage != nil {
 			flushFilter()
-			ch <- provider.StreamEvent{
-				Type: provider.EventDone,
-				Usage: &provider.Usage{
-					InputTokens:  chunk.Usage.PromptTokens,
-					OutputTokens: chunk.Usage.CompletionTokens,
-				},
+			usage := provider.Usage{
+				InputTokens:  chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
 			}
+			if d := chunk.Usage.PromptTokensDetails; d != nil {
+				usage.CacheReadInputTokens = d.CachedTokens
+			}
+			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &usage}
 			return
 		}
 	}

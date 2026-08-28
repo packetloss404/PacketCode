@@ -465,7 +465,12 @@ func profileDecision(profile Profile, req Request) (Decision, string) {
 
 func readOnlyTool(name string) bool {
 	switch name {
-	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics", "collect_agent_results":
+	// "skill" belongs here because loading a body is retrieval, not action.
+	// The steps a body suggests stay individually gated, which is the right
+	// boundary: gating the read would train the user to approve reflexively
+	// for something that cannot touch anything. "fetch" is deliberately NOT
+	// here — it reaches the network.
+	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics", "collect_agent_results", "skill":
 		return true
 	default:
 		return false

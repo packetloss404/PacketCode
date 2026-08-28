@@ -489,3 +489,78 @@ func TestRedactAPIKey_PreservesErrorChain(t *testing.T) {
 	assert.Same(t, plain, redactAPIKey(plain, secret))
 	assert.Same(t, plain, redactAPIKey(plain, ""))
 }
+
+// TestProvider_ChatCompletion_CachedContentIsASubsetOfPrompt pins Gemini's
+// half of the cached-input contract: promptTokenCount already includes
+// cachedContentTokenCount, so the cached figure is reported as a subset and
+// never added to InputTokens. Adding it would double-count every cached
+// prompt in the session totals and in /cost.
+func TestProvider_ChatCompletion_CachedContentIsASubsetOfPrompt(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1000,"candidatesTokenCount":20,"cachedContentTokenCount":800}}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	var usage *provider.Usage
+	for ev := range ch {
+		if ev.Type == provider.EventError {
+			t.Fatalf("error: %v", ev.Error)
+		}
+		if ev.Type == provider.EventDone {
+			usage = ev.Usage
+		}
+	}
+	require.NotNil(t, usage)
+	assert.Equal(t, 1000, usage.InputTokens, "cached content must not be added to the prompt total")
+	assert.Equal(t, 20, usage.OutputTokens)
+	assert.Equal(t, 800, usage.CacheReadInputTokens)
+	assert.LessOrEqual(t, usage.CacheReadInputTokens, usage.InputTokens)
+	// Gemini reports no separate cache-write count on the streaming path.
+	assert.Equal(t, 0, usage.CacheCreationInputTokens)
+}
+
+// TestProvider_ChatCompletion_NoCachedContentStaysZero covers responses from
+// models with no cache in play: the field is absent and decodes to zero
+// without disturbing the input total.
+func TestProvider_ChatCompletion_NoCachedContentStaysZero(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2}}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	var usage *provider.Usage
+	for ev := range ch {
+		if ev.Type == provider.EventDone {
+			usage = ev.Usage
+		}
+	}
+	require.NotNil(t, usage)
+	assert.Equal(t, 7, usage.InputTokens)
+	assert.Equal(t, 0, usage.CacheReadInputTokens)
+}

@@ -325,6 +325,7 @@ func New(deps Deps) (*App, error) {
 	approver.SetPermissionPolicy(policy)
 
 	a := agent.New(agent.Config{
+		LoopDetection: agentLoopDetection(deps.Config),
 		Registry:      deps.Registry,
 		Tools:         deps.Tools,
 		Session:       deps.Sessions,
@@ -1335,12 +1336,16 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 	project := filepath.Base(root)
 	branch := a.gitBranch
 	var sessionID string
-	var used int
+	var used, cacheCreation, cacheRead int
 	if cur := a.deps.Sessions.Current(); cur != nil {
 		sessionID = cur.ID
 		// Current context occupancy (see refreshTopBar) — matches the top
 		// bar so the two gauges never disagree.
 		used = cur.TokenUsage.ContextTokens
+		// The context-scoped cache split, not the cumulative one: these
+		// describe the same request as ContextTokens and so stay within it.
+		cacheCreation = cur.TokenUsage.ContextCacheCreation
+		cacheRead = cur.TokenUsage.ContextCacheRead
 	}
 	var provSlug, provName, modelID, reasoningEffort string
 	var max int
@@ -1373,15 +1378,21 @@ func (a *App) statusLineSnapshot() statusline.Snapshot {
 		opElapsed = int(time.Since(a.operationStarted).Seconds())
 	}
 	return statusline.Snapshot{
-		SessionID:     sessionID,
-		WorkingDir:    root,
-		Project:       project,
-		GitBranch:     branch,
-		Provider:      statusline.ProviderInfo{Slug: provSlug, DisplayName: provName},
-		Model:         statusline.ModelInfo{ID: modelID, ReasoningEffort: reasoningEffort},
-		ContextWindow: statusline.ContextInfo{Used: used, Max: max, UsedPercentage: pct},
-		Cost:          statusline.CostInfo{TotalCostUSD: totalCost},
-		Jobs:          statusline.JobsInfo{Active: activeJobs},
+		SessionID:  sessionID,
+		WorkingDir: root,
+		Project:    project,
+		GitBranch:  branch,
+		Provider:   statusline.ProviderInfo{Slug: provSlug, DisplayName: provName},
+		Model:      statusline.ModelInfo{ID: modelID, ReasoningEffort: reasoningEffort},
+		ContextWindow: statusline.ContextInfo{
+			Used:           used,
+			Max:            max,
+			UsedPercentage: pct,
+			CacheCreation:  cacheCreation,
+			CacheRead:      cacheRead,
+		},
+		Cost: statusline.CostInfo{TotalCostUSD: totalCost},
+		Jobs: statusline.JobsInfo{Active: activeJobs},
 		Operation: statusline.OperationInfo{
 			Active:         a.streaming,
 			Label:          a.operationLabel,
@@ -2568,4 +2579,18 @@ func pollApproverFallback() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
 		return approvalPendingMsg{}
 	})
+}
+
+// agentLoopDetection translates the behaviour config into the agent's loop
+// settings. A nil config keeps the defaults, which is the same thing an
+// unconfigured install gets.
+func agentLoopDetection(cfg *config.Config) agent.LoopDetectionConfig {
+	if cfg == nil {
+		return agent.LoopDetectionConfig{}
+	}
+	return agent.LoopDetectionSettings(
+		cfg.Behavior.LoopDetectionDisabled,
+		cfg.Behavior.LoopDetectionWindow,
+		cfg.Behavior.LoopDetectionThreshold,
+	)
 }

@@ -434,7 +434,12 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
 	tools := map[int]activeToolBlock{}
-	var usage *provider.Usage
+	// Accumulated in Anthropic's own shape and converted once, at the end.
+	// Merging into a provider.Usage instead meant every message_delta
+	// overwrote the cache-inclusive InputTokens with the raw wire value,
+	// because Anthropic's input_tokens uniquely EXCLUDES cached input --
+	// silently breaking the subset invariant the rest of the chain assumes.
+	var rawUsage *anthropicUsage
 	var dataLines []string
 
 	flush := func() bool {
@@ -456,22 +461,10 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			return false
 		}
 		if ev.Message != nil && ev.Message.Usage != nil {
-			usage = toProviderUsage(ev.Message.Usage)
+			rawUsage = mergeAnthropicUsage(rawUsage, ev.Message.Usage)
 		}
 		if ev.Usage != nil {
-			if usage == nil {
-				usage = &provider.Usage{}
-			}
-			usage.OutputTokens = ev.Usage.OutputTokens
-			if ev.Usage.InputTokens != 0 {
-				usage.InputTokens = ev.Usage.InputTokens
-			}
-			if ev.Usage.CacheCreationInputTokens != 0 {
-				usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
-			}
-			if ev.Usage.CacheReadInputTokens != 0 {
-				usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
-			}
+			rawUsage = mergeAnthropicUsage(rawUsage, ev.Usage)
 		}
 		switch ev.Type {
 		case "content_block_start":
@@ -521,7 +514,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 				delete(tools, ev.Index)
 			}
 		case "message_stop":
-			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: usage}
+			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}
 			return false
 		}
 		return true
@@ -557,7 +550,30 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			return
 		}
 	}
-	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: usage}
+	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}
+}
+
+// mergeAnthropicUsage folds one event's usage into the running raw totals.
+// Zero fields are treated as "not reported in this event" rather than as a
+// reset, which is how message_delta carries a partial update.
+func mergeAnthropicUsage(dst, src *anthropicUsage) *anthropicUsage {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		dst = &anthropicUsage{}
+	}
+	dst.OutputTokens = src.OutputTokens
+	if src.InputTokens != 0 {
+		dst.InputTokens = src.InputTokens
+	}
+	if src.CacheCreationInputTokens != 0 {
+		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+	}
+	if src.CacheReadInputTokens != 0 {
+		dst.CacheReadInputTokens = src.CacheReadInputTokens
+	}
+	return dst
 }
 
 func toProviderUsage(u *anthropicUsage) *provider.Usage {

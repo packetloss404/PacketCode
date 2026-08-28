@@ -367,6 +367,10 @@ type streamChunk struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
 		TotalTokenCount      int `json:"totalTokenCount"`
+		// CachedContentTokenCount is the part of promptTokenCount served from
+		// cached content. Gemini already counts it in promptTokenCount, so it
+		// is reported as a subset and never added to the input total.
+		CachedContentTokenCount int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata,omitempty"`
 }
 
@@ -513,8 +517,9 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 
 		if chunk.UsageMetadata != nil {
 			lastUsage = &provider.Usage{
-				InputTokens:  chunk.UsageMetadata.PromptTokenCount,
-				OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
+				InputTokens:          chunk.UsageMetadata.PromptTokenCount,
+				OutputTokens:         chunk.UsageMetadata.CandidatesTokenCount,
+				CacheReadInputTokens: chunk.UsageMetadata.CachedContentTokenCount,
 			}
 		}
 	}

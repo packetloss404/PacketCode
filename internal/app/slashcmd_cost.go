@@ -58,7 +58,7 @@ func renderCostTable(tracker *cost.Tracker) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Total: $%.4f (since %s)\n\n", total, start)
-	b.WriteString("SESSION   PROV/MODEL              TOK(IN/OUT)   USD\n")
+	b.WriteString("SESSION   PROV/MODEL              TOK(IN/OUT)   CACHE(R/W)    USD\n")
 
 	top := entries
 	if len(top) > 5 {
@@ -77,10 +77,15 @@ func renderCostTable(tracker *cost.Tracker) string {
 			provModel = "(none)"
 		}
 		tok := fmt.Sprintf("%s/%s", fmtTokensShort(e.Input), fmtTokensShort(e.Output))
-		fmt.Fprintf(&b, "%s  %s  %s  $%.4f\n",
+		// Read/write, not in/out: cached tokens are already inside e.Input, so
+		// the column reports how much of that input was served from cache
+		// (read) versus written into it (creation), never a further total.
+		cache := fmt.Sprintf("%s/%s", fmtTokensShort(e.CacheRead), fmtTokensShort(e.CacheCreation))
+		fmt.Fprintf(&b, "%s  %s  %s  %s  $%.4f\n",
 			padRight(shortID(e.SessionID), 8),
 			padRight(trunc(provModel, 22), 22),
 			padRight(tok, 12),
+			padRight(cache, 12),
 			e.USD,
 		)
 	}
