@@ -108,6 +108,13 @@ func (m *Manager) buildJobToolRegistryForBackend(
 			if cloned := cloneDestructiveTool(name, root, backups, backend, m, t); cloned != nil {
 				out.Register(cloned)
 			}
+		case name == "todo_write":
+			// Wired only through extraTools, where the worker holds the Job
+			// and can hand the tool the Job's own store. Cloning here would
+			// give the job a list nothing else can see, and sharing the
+			// parent's instance would let a background agent rewrite the plan
+			// the user is watching in the foreground.
+			continue
 		case name == "spawn_agent":
 			// spawn_agent is wired only through extraTools, where the
 			// worker has already applied depth and parent-write gates.

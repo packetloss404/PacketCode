@@ -361,3 +361,88 @@ func TestTruncate_NonPositiveWidthIsEmpty(t *testing.T) {
 		}
 	}
 }
+
+// The row has one line to spare, so it answers "what is it doing now" rather
+// than listing the plan. In-progress wins; a plan not yet started falls back to
+// its first pending item.
+func TestTodoLine_ReportsProgressAndTheLiveItem(t *testing.T) {
+	cases := []struct {
+		name  string
+		job   Job
+		want  string
+		empty bool
+	}{
+		{
+			name:  "no plan renders nothing",
+			job:   Job{},
+			empty: true,
+		},
+		{
+			name: "in-progress item is the live one",
+			job:  Job{TodosTotal: 3, TodosDone: 1, TodoCurrent: "make the change"},
+			want: "todos 1/3 · make the change",
+		},
+		{
+			name: "a finished plan still reports its counts",
+			job:  Job{TodosTotal: 3, TodosDone: 3},
+			want: "todos 3/3",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.TrimSpace(todoLine(tc.job))
+			if tc.empty {
+				if got != "" {
+					t.Fatalf("want no line, got %q", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("todoLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// currentTodo prefers in_progress, then the first pending. todo_write permits
+// only one in_progress, so preferring it is unambiguous.
+func TestCurrentTodo_PrefersInProgressThenPending(t *testing.T) {
+	items := []jobspkg.TodoItem{
+		{Content: "done", Status: jobspkg.TodoCompleted},
+		{Content: "next up", Status: jobspkg.TodoPending},
+		{Content: "on it", Status: jobspkg.TodoInProgress},
+	}
+	if got := currentTodo(items); got != "on it" {
+		t.Fatalf("currentTodo = %q, want the in-progress item", got)
+	}
+	if got := currentTodo(items[:2]); got != "next up" {
+		t.Fatalf("with nothing in progress, currentTodo = %q, want the first pending", got)
+	}
+	if got := currentTodo([]jobspkg.TodoItem{{Content: "done", Status: jobspkg.TodoCompleted}}); got != "" {
+		t.Fatalf("a fully completed plan has no live item, got %q", got)
+	}
+	if got := countTodosDone(items); got != 1 {
+		t.Fatalf("countTodosDone = %d, want 1", got)
+	}
+}
+
+// A background agent's plan has to reach the rendered view, not just the model.
+func TestRender_ShowsABackgroundAgentsPlan(t *testing.T) {
+	m := New()
+	m.Resize(100, 30)
+	m.Show([]jobspkg.Snapshot{{
+		ID:    "bg123456",
+		State: jobspkg.StateRunning,
+		Todos: []jobspkg.TodoItem{
+			{Content: "read the code", Status: jobspkg.TodoCompleted},
+			{Content: "make the change", Status: jobspkg.TodoInProgress},
+		},
+	}})
+	out := m.View()
+	if !strings.Contains(out, "todos 1/2") {
+		t.Fatalf("Agent View should show plan progress:\n%s", out)
+	}
+	if !strings.Contains(out, "make the change") {
+		t.Fatalf("Agent View should name the live item:\n%s", out)
+	}
+}

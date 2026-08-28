@@ -36,12 +36,18 @@ type Job struct {
 	State                                    string
 	AbandonCause                             string
 	ResultStatus                             string
-	Summary, Error                           string
-	LastActivity, LastMessage                string
-	WorktreePath, WorktreeBranch             string
-	WorktreeBase, WorktreeNote               string
-	Artifacts                                []jobspkg.Artifact
-	CreatedAt, UpdatedAt, FinishedAt         time.Time
+	// Todos is the agent's own plan, when it kept one. Carried as plain
+	// counts plus the live item rather than the whole list: a job row has one
+	// line to spare, and "what is it doing now" is the question the list is
+	// being read to answer.
+	TodosTotal, TodosDone            int
+	TodoCurrent                      string
+	Summary, Error                   string
+	LastActivity, LastMessage        string
+	WorktreePath, WorktreeBranch     string
+	WorktreeBase, WorktreeNote       string
+	Artifacts                        []jobspkg.Artifact
+	CreatedAt, UpdatedAt, FinishedAt time.Time
 	// Tokens are cumulative API usage across all turns of this background
 	// job. They are billing totals, not foreground context-window occupancy.
 	Tokens                    struct{ Input, Output int }
@@ -182,6 +188,9 @@ func fromSnapshot(s jobspkg.Snapshot) Job {
 		WorkingDir:     s.WorkingDir,
 		State:          s.State.String(),
 		AbandonCause:   string(s.AbandonCause),
+		TodosTotal:     len(s.Todos),
+		TodosDone:      countTodosDone(s.Todos),
+		TodoCurrent:    currentTodo(s.Todos),
 		ResultStatus:   s.ResultStatus.String(),
 		Summary:        s.Summary,
 		Error:          s.Error,
@@ -623,6 +632,12 @@ func (m Model) renderJobRow(j Job, selected bool, w int) string {
 	line := truncate(lead+strings.Repeat(" ", space)+theme.StyleDim.Render(age), w)
 	details := fmt.Sprintf("    %s · %s · %s · api %d/%d · $%.4f", targetLabel(j), providerLabel(j), statusBadge(j), j.Tokens.Input, j.Tokens.Output, j.CostUSD)
 	line += "\n" + theme.StyleDim.Render(truncate(details, w))
+	// The agent's own plan, when it kept one. This is the only place a
+	// background job can say what it is part-way through, so it belongs
+	// with the row rather than behind the transcript.
+	if todos := todoLine(j); todos != "" {
+		line += "\n" + theme.StyleDim.Render(truncate(todos, w))
+	}
 	if selected {
 		line = lipgloss.NewStyle().Background(theme.BaseSurfaceBright).Render(line)
 	}
@@ -841,4 +856,48 @@ func truncate(s string, w int) string {
 		return s
 	}
 	return ansi.Truncate(s, w, "…")
+}
+
+// countTodosDone counts completed entries.
+func countTodosDone(items []jobspkg.TodoItem) int {
+	n := 0
+	for _, item := range items {
+		if item.Status == jobspkg.TodoCompleted {
+			n++
+		}
+	}
+	return n
+}
+
+// currentTodo names the item the agent says it is on. It prefers the
+// in_progress entry — todo_write allows only one — and falls back to the first
+// pending one, because a list with nothing in progress is usually a plan the
+// agent has written but not yet started.
+func currentTodo(items []jobspkg.TodoItem) string {
+	for _, item := range items {
+		if item.Status == jobspkg.TodoInProgress {
+			return item.Content
+		}
+	}
+	for _, item := range items {
+		if item.Status == jobspkg.TodoPending {
+			return item.Content
+		}
+	}
+	return ""
+}
+
+// todoLine renders the one-line plan summary, or "" when there is no plan to
+// show. A finished list still reports its counts: "3/3 done" is the useful
+// closing statement, and suppressing it would make a completed plan look like
+// no plan at all.
+func todoLine(j Job) string {
+	if j.TodosTotal == 0 {
+		return ""
+	}
+	line := fmt.Sprintf("    todos %d/%d", j.TodosDone, j.TodosTotal)
+	if j.TodoCurrent != "" {
+		line += " · " + j.TodoCurrent
+	}
+	return line
 }
