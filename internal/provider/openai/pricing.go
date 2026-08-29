@@ -31,18 +31,19 @@ var pricingTable = map[string]pricingEntry{
 	"o4-mini":       {Input: 1.10, Output: 4.40, ContextWindow: 200_000, SupportsTools: true},
 }
 
-// nonChatIndicators are substrings that identify a model as NOT a chat
-// completion model (embeddings, audio, image generation, moderation,
-// legacy completion-only models, and the Responses-API-only "-pro"
-// family). Anything whose ID does not contain one of these passes
-// through the filter, so new chat families (GPT-5, GPT-6, o5, etc.)
-// surface automatically without a code change here.
+// nonChatIndicators are substrings that identify a model as NOT a
+// conversational model at all (embeddings, audio, image generation,
+// moderation, legacy completion-only models). Anything whose ID does not
+// contain one of these passes through the filter, so new chat families
+// (GPT-5, GPT-6, o5, etc.) surface automatically without a code change here.
 //
-// Note on "-pro": OpenAI ships o1-pro, o3-pro, gpt-5.5-pro and similar
-// variants that only work via /v1/responses, not /v1/chat/completions
-// (the endpoint packetcode speaks). The /v1/models catalog doesn't
-// distinguish, so we exclude them by suffix. The plain (non-pro) model
-// and its dated snapshots still work on chat completions.
+// "-pro" used to be on this list. OpenAI ships o1-pro, o3-pro, gpt-5.5-pro and
+// similar variants that only work via /v1/responses, and when
+// /v1/chat/completions was the only endpoint packetcode spoke, hiding them was
+// the only way to stop a user picking a model that would fail every turn. The
+// provider now routes those models to /v1/responses (see responses.go), so
+// they are offered rather than hidden -- excluding a model packetcode can
+// actually drive would be leaving capability on the floor.
 var nonChatIndicators = []string{
 	"embedding",
 	"tts",
@@ -55,5 +56,4 @@ var nonChatIndicators = []string{
 	"davinci-002",
 	"babbage-002",
 	"image",
-	"-pro", // Responses-API-only; see note above.
 }

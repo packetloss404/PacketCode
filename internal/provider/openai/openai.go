@@ -1,9 +1,11 @@
-// Package openai implements the provider.Provider interface for OpenAI's
-// chat-completions API (GPT-5.5, GPT-4.1, o3, o4-mini).
+// Package openai implements the provider.Provider interface for OpenAI.
 //
-// All wire-protocol logic lives in internal/provider/openaicompat — this
-// package contributes only OpenAI-specific identity, base URL, model
-// filtering, and the pricing table.
+// Two endpoints, chosen per model. Most models go to /v1/chat/completions via
+// internal/provider/openaicompat. The gpt-5.6 family and the -pro variants
+// refuse function tools there and go to /v1/responses via
+// internal/provider/responses instead -- see responses.go for why. This
+// package contributes only OpenAI-specific identity, base URLs, model
+// filtering, routing, and the pricing table; no wire format lives here.
 package openai
 
 import (
@@ -13,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/openaicompat"
+	"github.com/packetcode/packetcode/internal/provider/responses"
 )
 
 const (
@@ -27,22 +30,26 @@ const (
 var brandColor = lipgloss.Color("#10A37F")
 
 // Provider implements provider.Provider for OpenAI.
+//
+// Both clients are built up front and share the base URL. Which one a turn
+// uses is decided per model by requiresResponsesAPI, so switching models with
+// /model does not need the provider rebuilt.
 type Provider struct {
-	client *openaicompat.Client
+	client    *openaicompat.Client
+	responses *responses.Client
 }
 
 // New constructs an OpenAI provider with the given API key. An empty key
 // is allowed at construction — ValidateKey will reject it later.
 func New(apiKey string) *Provider {
-	return &Provider{
-		client: openaicompat.NewClient(defaultBaseURL, apiKey),
-	}
+	return NewWithBaseURL(defaultBaseURL, apiKey)
 }
 
 // NewWithBaseURL is exposed for testing against an httptest server.
 func NewWithBaseURL(baseURL, apiKey string) *Provider {
 	return &Provider{
-		client: openaicompat.NewClient(baseURL, apiKey),
+		client:    openaicompat.NewClient(baseURL, apiKey),
+		responses: responses.NewAPIKeyClient(baseURL, apiKey),
 	}
 }
 
@@ -92,7 +99,19 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
 	return prioritizeDefaultModel(out), nil
 }
 
+// UsesResponsesAPI reports which endpoint a model will be sent to. Exported so
+// /model and doctor can tell a user why one model behaves differently.
+func (p *Provider) UsesResponsesAPI(modelID string) bool {
+	return requiresResponsesAPI(modelID)
+}
+
 func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	// Routed per request, not per provider: /model switches models mid-session
+	// and the endpoint has to follow the model rather than whatever was
+	// configured at startup.
+	if requiresResponsesAPI(req.Model) {
+		return p.responses.ChatCompletion(ctx, req)
+	}
 	return p.client.ChatCompletion(ctx, req)
 }
 
