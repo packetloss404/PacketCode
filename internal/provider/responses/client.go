@@ -62,10 +62,70 @@ type Client struct {
 	// ("auto", "detailed", …) or "" to omit it. Omitting matters for models
 	// that reject the parameter (a 400). Defaults to "auto" when unset.
 	SummaryFor func(model string) string
+
+	// Backend selects which dialect of the Responses API this client speaks.
+	//
+	// The protocol is the same either way; the headers are not. The ChatGPT
+	// backend wants the Codex CLI's originator, a per-request session id and
+	// an account id, none of which api.openai.com asks for -- and one of
+	// which, `originator: codex_cli_rs`, is an outright false claim about who
+	// is calling when the call is going to the public API with an API key.
+	// Zero value is the ChatGPT backend, so the codex provider that had this
+	// package to itself keeps its exact wire behaviour.
+	Backend Backend
+}
+
+// Backend is which service a Client is pointed at.
+type Backend int
+
+const (
+	// BackendChatGPT is the ChatGPT backend used by Codex subscriptions.
+	BackendChatGPT Backend = iota
+	// BackendOpenAIAPI is api.openai.com, authenticated with an API key.
+	BackendOpenAIAPI
+)
+
+// name is used in error text, so a failure names the service the user
+// configured rather than always saying "codex".
+func (b Backend) name() string {
+	if b == BackendOpenAIAPI {
+		return "openai"
+	}
+	return "codex"
 }
 
 // NewClient returns a Client with a streaming-friendly HTTP client (no overall
 // timeout; cancellation is driven by context and the stall guard).
+// NewAPIKeyClient returns a Client for api.openai.com authenticated with a
+// plain API key.
+//
+// This exists because several OpenAI models refuse function tools on
+// /v1/chat/completions and are only usable through /v1/responses -- the
+// gpt-5.6 family and the -pro variants. The wire protocol is the one this
+// package already speaks; only the credentials and the headers differ.
+func NewAPIKeyClient(baseURL, apiKey string) *Client {
+	c := NewClient(baseURL, staticKeyAuth(apiKey))
+	c.Backend = BackendOpenAIAPI
+	// No effort unless a caller asks for one. The subscription backend has a
+	// house default; the public API applies the model's own, and guessing
+	// "medium" here would silently override what the model would have chosen.
+	c.ReasoningEffort = ""
+	return c
+}
+
+// staticKeyAuth is an API key presented through the Auth interface. There is
+// nothing to refresh: a key that is rejected will be rejected again, so
+// Refresh returns the same key and lets the 401 surface.
+type staticKeyAuth string
+
+func (k staticKeyAuth) Token(context.Context) (string, string, error) {
+	return string(k), "", nil
+}
+
+func (k staticKeyAuth) Refresh(context.Context) (string, string, error) {
+	return string(k), "", nil
+}
+
 func NewClient(baseURL string, auth Auth) *Client {
 	return &Client{
 		BaseURL:         strings.TrimRight(baseURL, "/"),
@@ -272,16 +332,19 @@ func (c *Client) send(ctx context.Context, body []byte) (*http.Response, error) 
 	for authAttempt := 0; authAttempt < 2; authAttempt++ {
 		access, account, err := c.Auth.Token(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("codex auth: %w", err)
+			return nil, fmt.Errorf("%s auth: %w", c.Backend.name(), err)
 		}
 
-		sessionID := newSessionID()
+		sessionID := ""
+		if c.Backend == BackendChatGPT {
+			sessionID = newSessionID()
+		}
 		newReq := func() (*http.Request, error) {
 			r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/responses", bytes.NewReader(body))
 			if err != nil {
 				return nil, err
 			}
-			applyHeaders(r, access, account, sessionID)
+			applyHeaders(r, access, account, sessionID, c.Backend)
 			return r, nil
 		}
 
@@ -292,25 +355,31 @@ func (c *Client) send(ctx context.Context, body []byte) (*http.Response, error) 
 		if resp.StatusCode == http.StatusUnauthorized && authAttempt == 0 {
 			_ = resp.Body.Close()
 			if _, _, rerr := c.Auth.Refresh(ctx); rerr != nil {
-				return nil, fmt.Errorf("codex token refresh: %w", rerr)
+				return nil, fmt.Errorf("%s token refresh: %w", c.Backend.name(), rerr)
 			}
 			continue
 		}
 		return resp, nil
 	}
 	// Unreachable: the loop either returns a response or an error each pass.
-	return nil, fmt.Errorf("codex request failed after token refresh")
+	return nil, fmt.Errorf("%s request failed after token refresh", c.Backend.name())
 }
 
-func applyHeaders(req *http.Request, accessToken, accountID, sessionID string) {
+func applyHeaders(req *http.Request, accessToken, accountID, sessionID string, backend Backend) {
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("originator", "codex_cli_rs")
 	req.Header.Set("User-Agent", userAgent)
-	if sessionID != "" {
-		req.Header.Set("session_id", sessionID)
+	if backend == BackendChatGPT {
+		// ChatGPT-backend only. `originator` identifies the Codex CLI, which
+		// that backend expects; sending it to the public API would be a false
+		// claim about the caller. The beta opt-in and session id are likewise
+		// that backend's conventions, not the public API's.
+		req.Header.Set("OpenAI-Beta", "responses=experimental")
+		req.Header.Set("originator", "codex_cli_rs")
+		if sessionID != "" {
+			req.Header.Set("session_id", sessionID)
+		}
 	}
 	if accountID != "" {
 		req.Header.Set("chatgpt-account-id", accountID)

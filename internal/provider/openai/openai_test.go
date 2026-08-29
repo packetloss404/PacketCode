@@ -111,7 +111,7 @@ func TestProvider_ListModels_FiltersUnsupported(t *testing.T) {
 // that hides Responses-API-only models (o1-pro, o3-pro, gpt-5.5-pro).
 // Plain (non-pro) variants and their dated snapshots still pass. The
 // pricing table enriches returned models but does not seed extra entries.
-func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
+func TestProvider_ListModels_OffersProFamilyNowThatItIsRoutable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"data": [
@@ -138,10 +138,35 @@ func TestProvider_ListModels_ExcludesProFamily(t *testing.T) {
 	assert.Contains(t, ids, "gpt-5.5")
 	assert.Contains(t, ids, "gpt-5.5-2026-04-23")
 	assert.Contains(t, ids, "o4-mini")
-	assert.NotContains(t, ids, "gpt-5.5-pro")
-	assert.NotContains(t, ids, "gpt-5.5-pro-2026-04-23")
-	assert.NotContains(t, ids, "o3-pro")
+	// The -pro family is offered now. It was excluded while
+	// /v1/chat/completions was the only endpoint this provider spoke, because
+	// picking one meant every turn failed; the provider routes them to
+	// /v1/responses instead, so hiding a model it can drive would be leaving
+	// capability on the floor.
+	assert.Contains(t, ids, "gpt-5.5-pro")
+	assert.Contains(t, ids, "gpt-5.5-pro-2026-04-23")
+	assert.Contains(t, ids, "o3-pro")
 	assert.Equal(t, DefaultModel, models[0].ID)
+
+	// Offered and routable are one decision, not two. Listing a model the
+	// provider then sends to an endpoint that refuses it is the exact bug
+	// this replaced: gpt-5.6-sol was listed, claimed tool support, and 400d
+	// on every request.
+	p2 := NewWithBaseURL(server.URL, "sk-test")
+	for _, id := range ids {
+		if !p2.SupportsTools(id) {
+			continue
+		}
+		if requiresResponsesAPI(id) {
+			continue
+		}
+		// Left on chat-completions. Nothing in the responses-only families
+		// may reach here.
+		assert.False(t, strings.HasSuffix(id, "-pro"),
+			"%s is a -pro variant left on chat completions", id)
+		assert.False(t, strings.HasPrefix(id, "gpt-5.6-"),
+			"%s is a gpt-5.6 model left on chat completions", id)
+	}
 }
 
 func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
