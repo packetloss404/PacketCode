@@ -346,6 +346,159 @@ To reduce repeated context:
 - Anthropic requests mark stable system/tool prefixes for ephemeral prompt caching.
 - Background jobs and workflows can use token budgets.
 
+## Skills
+
+A skill is reference material loaded by name. The model loads one mid-turn when
+it decides the task calls for it, and you can load one yourself by typing
+`/<name>`. Only each skill's name and description sit in the system prompt; the
+body enters context only when it is asked for. An unused skill therefore costs
+one index line rather than its full text.
+
+packetcode ships skills about its own configuration and reads more from six
+directories — its own layout plus the two the wider ecosystem uses, so skills
+you already installed for another agent are found where they are:
+
+| Scope | Directories |
+| --- | --- |
+| Yours | `~/.packetcode/skills/`, `~/.claude/skills/`, `~/.agents/skills/` |
+| This repository | `.packetcode/skills/`, `.claude/skills/`, `.agents/skills/` |
+
+Each is a directory holding a `SKILL.md` with a frontmatter `description`. Where
+one name appears in two layouts in the same scope, `.packetcode/` wins — that
+file was written by someone who knew packetcode would read it.
+
+### Repository skills under another agent's layout are not loaded until you say so
+
+`~/.claude/skills/` is your own directory, so those load on sight. A
+**repository's** `.claude/skills/` or `.agents/skills/` does not. It is
+discovered, listed by `/skills`, and does nothing else: not offered to the
+model, no `/name` command, and the `skill` tool refuses it.
+
+The reason is that this is the one directory you acquire by cloning. A skill is
+instructions for the model, its description goes into the system prompt, and its
+name would become a command you can type — all from a directory that arrived
+with a checkout rather than from anything you installed. So packetcode asks:
+
+```bash
+packetcode skills list
+```
+
+shows anything pending, and in a session `/skills <name>` shows you where it
+came from before you decide. Enable one with `/skills allow <name>`, undo it
+with `/skills revoke <name>`.
+
+Approval is per skill, per repository, and bound to the body you approved — if
+the repository rewrites that skill afterwards, packetcode asks again rather than
+letting the first harmless version buy permanent trust. Approving means "load
+this", not "trust this": the body still reaches the model labelled as repository
+content.
+
+One asymmetry worth knowing: a repository's own `.packetcode/skills/` still
+loads without approval, as it always has. The gate exists to avoid opening a
+*new* automatic-loading surface across every repo that already ships
+`.claude/skills/`, not to fence off a directory existing projects depend on.
+
+When the same name exists in more than one scope, **your home directory wins
+over the repository**, and both win over a built-in. That direction is
+deliberate: a project skill is repository content, so if the repo won, opening
+a hostile one would silently replace the `deploy` skill you wrote for yourself
+with one you have never read — invoked by the same name and the same habit. The
+worst case in this direction is that a repository's own skill does not take
+effect, which is reported at startup and in `/skills` rather than left to be
+inferred. Claude Code orders its scopes the same way.
+
+### Who can invoke a skill
+
+Two optional frontmatter keys decide that, and they are independent. Both
+default to permissive, so a skill that sets neither is reachable both ways.
+
+```yaml
+---
+name: deploy
+description: Ship a build to an environment
+disable-model-invocation: true
+user-invocable: true
+---
+```
+
+(`name` must match the directory and is required by the Agent Skills spec.
+packetcode takes the name from the directory and ignores the field, but a skill
+without it fails `skills-ref validate` and will not upload to claude.ai.)
+
+- `disable-model-invocation: true` keeps the skill out of the system-prompt
+  index and refuses it at the `skill` tool. The model cannot choose it; you
+  still can, with `/<name>`. This is what makes a skill with real-world
+  consequences safe to keep beside the others.
+- `user-invocable: false` keeps the skill from registering as a typed command.
+  It stays background knowledge the model may consult; nobody types it.
+
+`/skills` lists what resolved, with a leading slash on the ones you can type,
+and `/skills <name>` says who can reach a particular skill and what resource
+files sit beside it. `packetcode skills list` reports the same from the shell.
+
+Typing `/<name>` puts the skill body into the turn as your message, and anything
+after the name is appended to it. A `commands/<name>.md` file uses `$ARGUMENTS`
+if it has that placeholder; a skill body does not, because for a project skill
+that body is repository content and placing the placeholder would let it pull
+your words inside its own block.
+
+Built-in commands always win a name collision. **A `commands/<name>.md` file
+also wins over a skill of the same name, which is the opposite of Claude Code**
+— upstream gives the name to the skill. packetcode prefers the command file on
+the grounds that it is one prompt you wrote for this project while a skill may
+have arrived with a dependency; if you are porting a project that has both, the
+`/name` you get here is not the one you got there. Every displacement is
+reported at startup and in `/skills`, so the loser is never silently absent.
+
+(Note that markdown commands themselves still resolve project-over-user, unlike
+skills. The two differ because a command file is only ever reached by typing
+its name, while a skill is also loaded by the model mid-turn on a description
+it matched — so a skill is the one a repository could substitute without you
+choosing it.)
+
+A skill may carry resource files beside its body -- `references/`, `categories/`,
+`templates/` -- which is how larger published skills keep a method the body only
+dispatches to. Loading a skill lists those files; the model reads one by calling
+`skill` again with its path. They are served from the resolved skill directory
+and confined to it, so this works for user-scope skills that sit outside the
+project root without widening what the file tools can reach.
+
+This is the layout used by the wider Agent Skills ecosystem, so skills
+published for other agents load here — with real gaps. `${CLAUDE_SKILL_DIR}`
+and `${CLAUDE_PLUGIN_ROOT}` are not substituted, so a skill that points at its
+own bundled scripts through them does not resolve; `allowed-tools` is ignored,
+which costs you approval prompts rather than safety; `` !`command` `` context
+injection is not run, so a body using it is sent literally; and only
+`$ARGUMENTS` is supported, not the indexed `$0`/`$1` forms. packetcode also
+refuses a skill with no `description`, which upstream loads. Published skills
+install and load; not all of them work unmodified.
+
+`packetcode skills install` is still the way to add a published skill you do
+not already have locally:
+
+```bash
+packetcode skills install naieum/snitchmarketplace
+```
+
+```bash
+packetcode skills list
+```
+
+`install` takes an `owner/repo` shorthand, a full git URL, or a local path. Add
+`--skill NAME` to install a subset, `--project` to write to
+`./.packetcode/skills` instead of the user scope, `--force` to overwrite, and
+`--ref` to pick a branch or tag. A skill that fails to load is refused with a
+reason before anything is copied. Remove one with `packetcode skills remove
+NAME`.
+
+Installing a skill does not run it, and nothing in a skill body is an
+instruction from you. A project-scope body is labelled as repository content
+when it reaches the model, and every action it suggests still passes through
+that tool's own approval.
+
+Check the licence of anything you install. Skills are third-party content and
+are not all under the same terms as packetcode.
+
 ## MCP, Hooks, Themes, and Statusline
 
 - MCP servers are external stdio processes configured under `[mcp.<name>]`; discovered tools use `<server>__<tool>` names and remain policy-gated.

@@ -55,8 +55,11 @@ func TestPacketCommandCatalogReportsOnlyMarkdownCommands(t *testing.T) {
 	audit := commands[byName["audit"]]
 	assert.Equal(t, "user", audit.Source)
 	assert.Equal(t, "Security-review the working tree", audit.Description)
-	// No $ARGUMENTS placeholder means no argument hint.
-	assert.Equal(t, "", audit.ArgumentHint)
+	// Every custom command takes arguments: the placeholder places them, and
+	// without one they are appended. A hint of "" would tell a client this
+	// command accepts none, which stopped being true when Expand stopped
+	// dropping them.
+	assert.Equal(t, "[arguments]", audit.ArgumentHint)
 	assert.Contains(t, audit.Body, "Audit every changed file.")
 
 	deploy := commands[byName["deploy"]]

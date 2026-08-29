@@ -30,7 +30,7 @@ func (a *App) handleQueueCommand(args []string) (tea.Model, tea.Cmd) {
 		copy(a.queuedInputs[index-1:], a.queuedInputs[index:])
 		a.queuedInputs = a.queuedInputs[:len(a.queuedInputs)-1]
 		a.refreshTopBar()
-		a.conversation.AppendSystem(fmt.Sprintf("dropped queued prompt %d: %s", index, truncOneLine(dropped.Text, 80)))
+		a.conversation.AppendSystem(fmt.Sprintf("dropped queued prompt %d: %s", index, truncOneLine(dropped.Label(), 80)))
 	}
 	return a, nil
 }
@@ -48,7 +48,7 @@ func (a *App) renderQueue() string {
 	}
 	for i := 0; i < limit; i++ {
 		q := a.queuedInputs[i]
-		fmt.Fprintf(&b, "%2d  %s  %s\n", i+1, padRight(roundedAge(q.At, now), 6), truncOneLine(q.Text, 100))
+		fmt.Fprintf(&b, "%2d  %s  %s\n", i+1, padRight(roundedAge(q.At, now), 6), truncOneLine(q.Label(), 100))
 	}
 	if len(a.queuedInputs) > limit {
 		fmt.Fprintf(&b, "... %d more\n", len(a.queuedInputs)-limit)

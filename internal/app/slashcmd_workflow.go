@@ -294,9 +294,15 @@ func workflowShape(wf workflow.Workflow) string {
 	return strings.Join(parts, " → ")
 }
 
+// firstLine keeps multi-line text out of a single-row table.
+//
+// Splits on CR as well as LF: a skill or command file authored on Windows
+// carries CRLF, and stopping only at the LF leaves a stray CR that the
+// terminal renders as a carriage return -- the rest of the row overwrites
+// itself from column zero.
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return strings.TrimSpace(s[:i])
 	}
-	return s
+	return strings.TrimSpace(s)
 }

@@ -19,16 +19,44 @@ func writeSkill(t *testing.T, dir, name, contents string) {
 	}
 }
 
-// isolate points the user scope at a scratch home so the developer's real
-// ~/.packetcode/skills cannot make these tests pass or fail.
+// isolate points every user-scope directory at a scratch home so nothing on
+// the developer's machine can make these tests pass or fail.
+//
+// PACKETCODE_HOME alone is not enough. Since foreign discovery, the user scope
+// also includes ~/.claude/skills and ~/.agents/skills, which live under the
+// operating system's home and are not relocated by PACKETCODE_HOME -- so a
+// developer with Claude Code installed was silently running these tests
+// against their own installed skills.
 func isolate(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("PACKETCODE_HOME", home)
+	osHome := t.TempDir()
+	t.Setenv("HOME", osHome)
+	t.Setenv("USERPROFILE", osHome)
 	return home
 }
 
-func TestLoad_ProjectOverridesUserOverridesBuiltin(t *testing.T) {
+// osHomeSkillsDir is <os home>/<base>/skills, the foreign user-scope layout.
+func osHomeSkillsDir(t *testing.T, base string) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	return filepath.Join(home, base, "skills")
+}
+
+// A skill in the user's home directory beats a repository's skill of the same
+// name, and both beat a builtin.
+//
+// The direction is the point. A project scope is repository content and a user
+// scope is not, so only one direction of this choice has a victim: if the repo
+// won, cloning a hostile repository would silently replace the `deploy` skill
+// you wrote for yourself with one you have never read, invoked by the same
+// name and the same muscle memory. Claude Code orders its scopes this way for
+// the same reason, so published skills are written expecting it.
+func TestLoad_UserOverridesProjectOverridesBuiltin(t *testing.T) {
 	home := isolate(t)
 	project := t.TempDir()
 
@@ -36,8 +64,9 @@ func TestLoad_ProjectOverridesUserOverridesBuiltin(t *testing.T) {
 		"---\ndescription: user version\n---\nuser body\n")
 	writeSkill(t, ProjectSkillsDir(project), "deploy",
 		"---\ndescription: project version\n---\nproject body\n")
-	// A builtin name is overridable too: the repo is the better authority on
-	// its own conventions.
+	// A builtin name is still overridable by the repo, which is the better
+	// authority on its own conventions -- the inversion is between user and
+	// project, not a decision that the repo may never override anything.
 	writeSkill(t, ProjectSkillsDir(project), "packetcode-hooks",
 		"---\ndescription: repo-specific hook rules\n---\nlocal hook guidance\n")
 
@@ -50,8 +79,17 @@ func TestLoad_ProjectOverridesUserOverridesBuiltin(t *testing.T) {
 	if !ok {
 		t.Fatal("deploy skill not found")
 	}
-	if got.Source != SourceProject || got.Body != "project body" {
-		t.Fatalf("project did not win over user: %+v", got)
+	if got.Source != SourceUser || got.Body != "user body" {
+		t.Fatalf("the repository won a name in the user's home directory: %+v", got)
+	}
+	// The displaced one is recorded and reported. Whichever way this ordering
+	// goes, somebody's file quietly does not take effect, and that must be
+	// visible rather than inferred from a skill behaving oddly.
+	if len(got.Shadows) == 0 {
+		t.Fatalf("the displaced project skill was not recorded: %+v", got)
+	}
+	if !hasWarningMentioning(reg.Warnings(), "shadows the project skill") {
+		t.Fatalf("the displacement was not reported: %v", reg.Warnings())
 	}
 
 	overridden, ok := reg.Lookup("packetcode-hooks")
@@ -62,13 +100,23 @@ func TestLoad_ProjectOverridesUserOverridesBuiltin(t *testing.T) {
 		t.Fatalf("project did not win over builtin: %+v", overridden)
 	}
 
-	// The user scope alone still resolves when no project copy exists.
-	writeSkill(t, filepath.Join(home, dirName), "audit",
-		"---\ndescription: user only\n---\naudit body\n")
+	// The project scope alone still resolves when no user copy exists --
+	// otherwise this ordering would read as "project skills do not work".
+	writeSkill(t, ProjectSkillsDir(project), "audit",
+		"---\ndescription: project only\n---\naudit body\n")
 	reg = Load(project)
-	if s, ok := reg.Lookup("audit"); !ok || s.Source != SourceUser {
-		t.Fatalf("user-scope skill did not resolve: %+v", s)
+	if s, ok := reg.Lookup("audit"); !ok || s.Source != SourceProject {
+		t.Fatalf("project-scope skill did not resolve: %+v", s)
 	}
+}
+
+func hasWarningMentioning(warnings []string, substr string) bool {
+	for _, w := range warnings {
+		if strings.Contains(w, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 // Malformed skills are reported rather than dropped: a file the user wrote and

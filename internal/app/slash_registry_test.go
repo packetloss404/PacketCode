@@ -49,7 +49,7 @@ func TestSlashRegistry_ProjectOverridesUserButNotBuiltin(t *testing.T) {
 		t.Fatalf("write shadow command: %v", err)
 	}
 
-	reg := LoadSlashRegistry(work)
+	reg := LoadSlashRegistry(work, nil)
 	cmd, ok := reg.Lookup("audit")
 	if !ok {
 		t.Fatalf("custom command missing")
@@ -94,12 +94,45 @@ func TestSlashRegistry_RecordsInvalidMarkdownCommands(t *testing.T) {
 		t.Fatalf("write command: %v", err)
 	}
 
-	reg := LoadSlashRegistry(work)
+	reg := LoadSlashRegistry(work, nil)
 	errs := reg.Errors()
 	if len(errs) != 1 {
 		t.Fatalf("Errors len = %d, want 1: %#v", len(errs), errs)
 	}
 	if !strings.Contains(errs[0], "empty.md") || !strings.Contains(errs[0], "empty slash command") {
 		t.Fatalf("unexpected diagnostic: %q", errs[0])
+	}
+}
+
+// Refusing to let a file redefine a builtin verb is correct; doing it in
+// silence is not. The author wrote a file that now does nothing, and until
+// this warning existed nothing anywhere said so — a trap sprung by adding any
+// new builtin verb, which is exactly what /skills does.
+func TestSlashRegistry_ShadowedBuiltinIsReportedNotSilentlyDropped(t *testing.T) {
+	dir := t.TempDir()
+	cmdDir := filepath.Join(dir, ".packetcode", "commands")
+	if err := os.MkdirAll(cmdDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// "help" is a builtin verb; a file of that name can never win.
+	if err := os.WriteFile(filepath.Join(cmdDir, "help.md"),
+		[]byte("---\ndescription: mine\n---\nbody\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	reg := LoadSlashRegistry(dir, nil)
+
+	cmd, ok := reg.Lookup("help")
+	if !ok || !cmd.Builtin {
+		t.Fatalf("the builtin must still win: %+v", cmd)
+	}
+	var found bool
+	for _, e := range reg.Errors() {
+		if strings.Contains(e, "help") && strings.Contains(e, "built-in") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the ignored file must be reported, got %v", reg.Errors())
 	}
 }
