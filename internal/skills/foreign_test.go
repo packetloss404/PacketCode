@@ -292,3 +292,83 @@ func mustUserSkillsDir(t *testing.T) string {
 	}
 	return dir
 }
+
+// Running packetcode from your home directory makes <cwd>/.agents/skills and
+// ~/.agents/skills the same directory. Scanning it once per scope reported
+// every malformed skill twice, made every skill in it "shadow" itself with a
+// warning naming a project skill that was the same file, and labelled the
+// user's own skills untrusted repository content on the project pass.
+func TestLoad_HomeAsWorkingDirScansEachDirectoryOnce(t *testing.T) {
+	isolate(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	writeSkill(t, osHomeSkillsDir(t, ".agents"), "autopilot",
+		"---\ndescription: mine\n---\nbody\n")
+	// A deliberately malformed one, so double-reporting would be visible.
+	broken := filepath.Join(osHomeSkillsDir(t, ".agents"), "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, FileName), []byte("no frontmatter\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The working directory IS the home directory.
+	reg := Load(home)
+
+	s, ok := reg.Lookup("autopilot")
+	if !ok {
+		t.Fatal("autopilot did not resolve")
+	}
+	// The user's own files, not a repository's.
+	if s.Source != SourceUser {
+		t.Fatalf("Source = %q, want %q — the user's own skills were labelled repository content", s.Source, SourceUser)
+	}
+	if !s.Trusted() || !s.Enabled() {
+		t.Fatalf("the user's own skill needs approval or is untrusted: %+v", s)
+	}
+	// Nothing shadows itself.
+	if len(s.Shadows) != 0 {
+		t.Fatalf("a skill shadowed itself: %v", s.Shadows)
+	}
+	for _, w := range reg.Warnings() {
+		if strings.Contains(w, "shadows") {
+			t.Fatalf("self-shadowing warning: %s", w)
+		}
+	}
+	// And the one broken skill is reported exactly once.
+	n := 0
+	for _, e := range reg.Errors() {
+		if strings.Contains(e, "broken") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the same malformed skill was reported %d times: %v", n, reg.Errors())
+	}
+}
+
+func TestDedupeScopes_KeepsTheStrongestClaimAndOrder(t *testing.T) {
+	in := []skillScope{
+		{path: "/a/.claude/skills", source: SourceProject, origin: OriginClaude, foreignProject: true},
+		{path: "/b/.packetcode/skills", source: SourceProject, origin: OriginNative},
+		// Same directory as the first, claimed later by the user scope.
+		{path: "/a/.claude/skills", source: SourceUser, origin: OriginClaude},
+	}
+	out := dedupeScopes(in)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 scopes, got %d: %+v", len(out), out)
+	}
+	// The later, stronger claim wins the slot, and the slot keeps its place.
+	if out[0].path != "/a/.claude/skills" || out[0].source != SourceUser {
+		t.Fatalf("the user scope did not win the shared directory: %+v", out[0])
+	}
+	if out[0].foreignProject {
+		t.Fatal("a directory won by the user scope must not still need approval")
+	}
+	if out[1].path != "/b/.packetcode/skills" {
+		t.Fatalf("order was not preserved: %+v", out)
+	}
+}
