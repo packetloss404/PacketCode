@@ -136,7 +136,10 @@ func runSkillsList(args []string, stdout, stderr io.Writer) int {
 		// choose and a name the reader can type. A column of bare names says
 		// nothing about which is which.
 		name := e.Name
-		if e.UserInvocable {
+		// Loaded as well as UserInvocable: a pending skill is not typeable,
+		// and printing "/deploy" beside "NOT LOADED" promises a command the
+		// program will not run.
+		if e.UserInvocable && e.Loaded {
 			name = "/" + e.Name
 		}
 		// Clipped, not just padded: %-28s pads a short name but does nothing
