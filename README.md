@@ -66,6 +66,13 @@ The first run asks for a provider, API key when required, and model, then writes
 `PACKETCODE_HOME` to isolate all PacketCode configuration and state in another
 data directory.
 
+Three ways to give packetcode a provider key, strongest first: an environment
+variable (`PACKETCODE_OPENAI_API_KEY` and friends), a `.env` file at
+`~/.packetcode/.env` or `<project>/.env`, or `Ctrl+A` on a row in the provider
+picker, which writes to `config.toml`. `/provider` shows which one is in force.
+`.env` values are never exported to the shell commands packetcode runs. See
+[docs/providers.md](docs/providers.md#env-files).
+
 Optional integrations remain compatible by default and can be disabled
 independently in `config.toml`:
 
