@@ -19,8 +19,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/packetcode/packetcode/internal/config"
 )
 
 const (
@@ -30,17 +28,46 @@ const (
 	FileName = "SKILL.md"
 
 	// MaxDescriptionBytes bounds one index entry. Every skill pays this cost on
-	// every turn whether or not it is ever loaded, so the bound is the feature:
-	// an over-long description turns the index back into the thing it replaced.
-	MaxDescriptionBytes = 240
+	// every turn whether or not it is ever loaded, so the bound is still the
+	// feature; the number is a concession to the wider Agent Skills ecosystem.
+	// A description there is not a summary but a router: it enumerates the
+	// phrasings that should select the skill and names the siblings that
+	// should win a near miss. Published skills land between 450 and 1350
+	// bytes, so the old 240 rejected every one of them and the index they
+	// could not enter was worth nothing.
+	MaxDescriptionBytes = 1536
 
 	// MaxBodyBytes bounds one loaded body. The cap is enforced at discovery
 	// rather than at read time so an oversized skill is reported once, at load,
 	// instead of surprising a turn that is already half spent.
-	MaxBodyBytes = 16 * 1024
+	//
+	// A body is paid for only when the model asks for it, which is what buys
+	// the headroom the index cannot afford. Ecosystem skills that dispatch to
+	// resource files (see Registry.ReadResource) run to 50KB.
+	MaxBodyBytes = 64 * 1024
 	// MaxSkillsPerScope bounds how many skills one scope contributes. The
 	// per-skill caps bound a single index line; this bounds the block.
 	MaxSkillsPerScope = 128
+
+	// MaxIndexBytes bounds the whole rendered index.
+	//
+	// MaxDescriptionBytes bounds one line, which was sufficient when a line
+	// could not exceed 240 bytes; at 1536 it is not. Seventeen ecosystem
+	// skills at their published lengths come to roughly 14KB in front of
+	// every request, and nothing stopped that from being 128. The block is
+	// trimmed from the alphabetical tail rather than by usage, deliberately:
+	// sortSkills exists to keep the prompt prefix stable across runs, and an
+	// index that reorders with history would defeat provider-side caching on
+	// every turn -- paying far more than the bytes it saved.
+	//
+	// Keep this above the size of a single maximal entry: the header plus
+	// MaxDescriptionBytes plus a name, source and punctuation, so roughly
+	// 1900 bytes today. IndexBlock returns "" when nothing was listed, which
+	// is right when every skill is model-disabled but would be wrong if the
+	// first entry simply did not fit -- the block and the "N omitted" notice
+	// would both vanish with nothing said. That is unreachable at 16KB and
+	// becomes reachable the moment someone lowers this.
+	MaxIndexBytes = 16 * 1024
 
 	// maxFileBytes bounds what discovery will read off disk at all, leaving the
 	// body cap room for frontmatter above it.
@@ -68,7 +95,60 @@ type Skill struct {
 	// Path is the file the body came from. Empty for embedded builtins, which
 	// have no on-disk location to report.
 	Path string
+	// Dir is the directory holding SKILL.md and any resource files beside it.
+	// For an on-disk skill this is an absolute filesystem path; for a builtin
+	// it is a path within the embedded filesystem, which is why Source has to
+	// be consulted before Dir is handed to anything that opens files.
+	Dir string
+	// Origin is the directory layout this was filed under: OriginNative,
+	// OriginClaude or OriginAgents. Source says who wrote it; Origin says
+	// which convention it was found by, which is what someone needs when a
+	// skill they installed for another agent does not behave here.
+	Origin string
+	// NeedsApproval marks a foreign project-scope skill nobody has agreed to
+	// yet: repository content, filed under another agent's convention, found
+	// by opening the directory rather than by anyone installing it.
+	//
+	// Such a skill is discovered and listed and does nothing else. It is not
+	// in the index, so the model is never told it exists; it registers no
+	// slash verb; and the skill tool refuses it. The gate has to sit at
+	// discovery rather than at invocation because two of the three exposures
+	// -- a description in the system prompt, a name in /help -- have already
+	// happened by the time anything is invoked.
+	NeedsApproval bool
+	// Invocation carries the two flags from the header. Stored as the parsed
+	// frontmatter rather than as two bools so the permissive zero value is
+	// the one thing a caller can rely on without reading the parser.
+	Invocation Frontmatter
+	// Shadows names the scopes this skill displaced, weakest first.
+	//
+	// The registry keeps only the winner, so without this the fact that one
+	// scope's `deploy` replaced another's is not recoverable by anything
+	// downstream. Since the precedence inversion the displaced one is the
+	// repository's, which is a surprise rather than an attack -- but it is
+	// still someone's file quietly not taking effect, and the record is what
+	// lets /skills say so. Recorded at resolution, where both halves are
+	// still in hand.
+	Shadows []string
 }
+
+// Enabled reports whether this skill does anything at all.
+//
+// False only for a foreign project skill awaiting approval. Every consumer
+// that would put a skill in front of the model or the keyboard asks this
+// first, so a skill that has not been agreed to cannot reach either by a path
+// someone forgot to guard.
+func (s Skill) Enabled() bool { return !s.NeedsApproval }
+
+// ModelInvocable reports whether the model may select this skill. False when
+// the header says `disable-model-invocation: true`; such a skill is also kept
+// out of the index, so the model is never told about something it cannot use.
+func (s Skill) ModelInvocable() bool { return !s.Invocation.DisableModelInvocation }
+
+// UserInvocable reports whether a person may trigger this skill directly.
+// False when the header says `user-invocable: false` -- background knowledge
+// the model may consult but nobody types.
+func (s Skill) UserInvocable() bool { return !s.Invocation.DisableUserInvocation }
 
 // Trusted reports whether the body is under the operator's control rather than
 // the repository's.
@@ -86,50 +166,123 @@ type Registry struct {
 	ordered []Skill
 	byName  map[string]int
 	errors  []string
+	// warnings are resolved-but-surprising outcomes: a shadowed skill, a
+	// header value that did not parse. See Warnings.
+	warnings []string
+	// approvals and workspace are kept so a caller can approve a pending
+	// skill without re-deriving where the registry came from. canonicalWS is
+	// the approval-key form of workspace, resolved once at load rather than
+	// per skill.
+	approvals   *Approvals
+	workspace   string
+	canonicalWS string
+}
+
+// Workspace is the working directory this registry was resolved for.
+func (r *Registry) Workspace() string {
+	if r == nil {
+		return ""
+	}
+	return r.workspace
+}
+
+// Approve records agreement to load one pending skill and returns a registry
+// reflecting it. The caller replaces its registry with the result.
+//
+// Reloading rather than mutating in place is deliberate: approval changes
+// which skills win names and which are in the index, and recomputing that from
+// discovery is the only way to be sure the answer matches what a fresh start
+// would produce.
+func (r *Registry) Approve(name string) (*Registry, error) {
+	if r == nil {
+		return nil, fmt.Errorf("no registry")
+	}
+	s, ok := r.Lookup(name)
+	if !ok {
+		return r, fmt.Errorf("no skill named %q", name)
+	}
+	if !s.NeedsApproval {
+		return r, fmt.Errorf("skill %q does not need approval", name)
+	}
+	if err := r.approvals.Approve(r.workspace, s.Name, s.Origin, s.Body); err != nil {
+		return r, err
+	}
+	return Load(r.workspace), nil
+}
+
+// Revoke withdraws a previously granted approval and returns a registry
+// reflecting it.
+func (r *Registry) Revoke(name string) (*Registry, error) {
+	if r == nil {
+		return nil, fmt.Errorf("no registry")
+	}
+	if err := r.approvals.Revoke(r.workspace, strings.TrimSpace(name)); err != nil {
+		return r, err
+	}
+	return Load(r.workspace), nil
 }
 
 // Load discovers skills for workingDir.
 //
-// Precedence is project > user > builtin, matching workflows rather than slash
-// commands: a project may replace a builtin skill outright, because a skill is
-// reference material about this repo's conventions and the repo is the better
-// authority on those. Discovery never fails: an unreadable scope contributes to
-// Errors and the other scopes still resolve.
+// Precedence is user > project > builtin: a skill in your home directory wins
+// the name against a skill in the repository you happen to have open.
+//
+// That ordering is not a matter of taste. A project scope is repository
+// content and a user scope is not, so only one direction of this choice has a
+// victim: if the repo wins, cloning a hostile repository silently replaces the
+// `deploy` skill you wrote for yourself with one you have never read, and you
+// invoke it by the same name and the same muscle memory as before. If the home
+// directory wins, the worst case is that a repository's own skill does not
+// take effect, which is visible, recoverable, and reported through Warnings.
+//
+// It also matches Claude Code, which orders its scopes the same way and for
+// the same reason. Skills published for that ecosystem are written expecting
+// it, so disagreeing would be a compatibility bug on top of a security one.
+//
+// This inverts what packetcode did until 2026-08-28, when the ordering was
+// project > user by analogy with workflows -- the analogy was wrong, because a
+// workflow is something you run deliberately after reading it and a skill is
+// something loaded by name mid-turn.
+//
+// Discovery never fails: an unreadable scope contributes to Errors and the
+// other scopes still resolve.
 func Load(workingDir string) *Registry {
-	r := &Registry{byName: make(map[string]int)}
+	approvals, err := LoadApprovals()
+	// A store that failed to load is empty, and the error is reported below.
+	// An unreadable approval file must read as "nothing is approved" rather
+	// than as "everything is".
+	r := &Registry{byName: make(map[string]int), approvals: approvals, workspace: workingDir}
+	if strings.TrimSpace(workingDir) != "" {
+		if ws, cerr := CanonicalWorkspace(workingDir); cerr == nil {
+			r.canonicalWS = ws
+		} else {
+			// Without a canonical workspace no approval can match, so every
+			// foreign project skill stays pending. That is the safe direction,
+			// but it is not one to take silently.
+			r.errors = append(r.errors, fmt.Sprintf(
+				"skills: cannot resolve the working directory, so no project skill approvals apply: %s", cerr))
+		}
+	}
+	if err != nil {
+		r.errors = append(r.errors, fmt.Sprintf("skills: %s", err))
+	}
+	// Weakest first: upsert lets a later scope displace an earlier one.
 	r.loadBuiltins()
 
-	userDir, err := UserSkillsDir()
+	for _, d := range projectScopeDirs(workingDir) {
+		r.loadScopeDir(d)
+	}
+	userDirs, err := userScopeDirs()
 	if err != nil {
 		r.errors = append(r.errors, fmt.Sprintf("user skills: %s", err))
-	} else {
-		r.loadDir(userDir, SourceUser)
 	}
-	if strings.TrimSpace(workingDir) != "" {
-		r.loadDir(ProjectSkillsDir(workingDir), SourceProject)
+	for _, d := range userDirs {
+		r.loadScopeDir(d)
 	}
 	// Sorted once, here, now that upsert no longer does it per insert. A
 	// stable prompt prefix is what makes provider-side prompt caching work.
 	sortSkills(r)
 	return r
-}
-
-// UserSkillsDir returns ~/.packetcode/skills/. It is not created: an absent
-// user skills directory is the normal case, not a state to be materialised.
-func UserSkillsDir() (string, error) {
-	home, err := config.ResolveHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, dirName), nil
-}
-
-// ProjectSkillsDir returns <working-dir>/.packetcode/skills/.
-func ProjectSkillsDir(workingDir string) string {
-	if strings.TrimSpace(workingDir) == "" {
-		workingDir = "."
-	}
-	return filepath.Join(workingDir, ".packetcode", dirName)
 }
 
 // Lookup returns the resolved skill for name.
@@ -177,6 +330,21 @@ func (r *Registry) Errors() []string {
 	return append([]string(nil), r.errors...)
 }
 
+// Warnings returns things that resolved but not as their author wrote them:
+// a skill displaced by a narrower scope, a header value that did not parse.
+//
+// Kept apart from Errors because the two mean different things to a caller.
+// An error is a skill that is not there; a warning is a skill that is there
+// and is not quite what was asked for. `packetcode skills list` exits non-zero
+// on the first and not the second, and shadowing is an ordinary, documented
+// outcome that must not start failing anyone's build.
+func (r *Registry) Warnings() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.warnings...)
+}
+
 // IndexBlock renders the <available_skills> section for the system prompt.
 //
 // It carries names and descriptions only. Returns "" when no skills resolved,
@@ -186,25 +354,64 @@ func (r *Registry) IndexBlock() string {
 		return ""
 	}
 	var b strings.Builder
+	listed := 0
 	b.WriteString("<available_skills>\n")
 	b.WriteString("Reference material you can load during a turn. Each line is a name and what it covers; the instructions themselves are not in context. When one matches the task, call the skill tool with that name before acting.\n")
+	omitted := 0
 	for _, s := range r.ordered {
+		if !s.Enabled() {
+			// Never named to the model. Its description is repository text
+			// found by opening a directory, and the system prompt is the
+			// highest-authority position in the conversation -- putting it
+			// there is most of the exposure the approval gate exists to stop.
+			continue
+		}
+		if !s.ModelInvocable() {
+			// Not counted as omitted: `omitted` reports skills the budget cut,
+			// and the model can act on that ("ask for the rest"). This one is
+			// not truncation, it is a decision by the skill's author, and
+			// advertising it would spend tokens describing something the model
+			// is then refused -- and invite it to keep trying.
+			continue
+		}
 		// The source is named on every line. A project skill's description is
 		// repository content, and an unlabelled line in the system prompt
 		// reads with the same authority as the sentence above it.
-		b.WriteString("- ")
-		b.WriteString(s.Name)
-		b.WriteString(" (")
-		b.WriteString(s.Source)
-		b.WriteString("): ")
+		var line strings.Builder
+		line.WriteString("- ")
+		line.WriteString(s.Name)
+		line.WriteString(" (")
+		line.WriteString(s.Source)
+		line.WriteString("): ")
 		// Escaped, not rejected. A description is copied into the system
 		// prompt -- the highest-authority position in the conversation -- and
 		// a project skill's is attacker-controllable in a hostile repo, so it
 		// must not be able to close <available_skills> and continue as if it
 		// were operator text. Refusing angle brackets outright would also
 		// refuse legitimate <name> placeholders, which several builtins use.
-		b.WriteString(escapeIndexText(s.Description))
-		b.WriteString("\n")
+		line.WriteString(escapeIndexText(s.Description))
+		line.WriteString("\n")
+		// Whole entries are dropped, never truncated mid-description. A
+		// half-description is worse than an absent one: it still costs its
+		// bytes and still claims the skill is available, while having lost
+		// the part that says when to choose it.
+		if b.Len()+line.Len() > MaxIndexBytes {
+			omitted++
+			continue
+		}
+		b.WriteString(line.String())
+		listed++
+	}
+	if listed == 0 {
+		// Every skill was model-disabled. A header and a sentence promising
+		// reference material, followed by nothing, is worse than no block:
+		// it asserts a capability and then names none of it.
+		return ""
+	}
+	if omitted > 0 {
+		// Named, not silent. A model that cannot see a skill and is not told
+		// so will confidently report that packetcode cannot do the thing.
+		fmt.Fprintf(&b, "(%d further skills were omitted to bound this list; run `packetcode skills list` to see them.)\n", omitted)
 	}
 	b.WriteString("</available_skills>")
 	return b.String()
@@ -216,9 +423,36 @@ func escapeIndexText(s string) string {
 	return strings.ReplaceAll(s, ">", "&gt;")
 }
 
+// noteSkillWarnings surfaces header values the parser could not understand.
+//
+// These are not load failures -- the skill resolved and works -- but each one
+// means a line the author wrote had no effect, and for the invocation flags
+// the no-effect answer is the permissive one. Same channel as a malformed
+// skill, for the same reason: a rule that silently did not apply is
+// indistinguishable from one that did.
+func (r *Registry) noteSkillWarnings(s Skill) {
+	for _, w := range s.Invocation.Warnings {
+		r.warnings = append(r.warnings, fmt.Sprintf("%s skill %q: %s", s.Source, s.Name, w))
+	}
+}
+
 func (r *Registry) upsert(s Skill) {
+	// Warned here rather than in each loader: upsert is the one call every
+	// loader makes, the same reason newSkill carries the name validation.
+	r.noteSkillWarnings(s)
 	if idx, ok := r.byName[s.Name]; ok {
+		prev := r.ordered[idx]
+		s.Shadows = append(append([]string(nil), prev.Shadows...), prev.Source)
 		r.ordered[idx] = s
+		// Reported, not merely recorded. Since the precedence inversion the
+		// dangerous direction of this is unreachable -- a repository can no
+		// longer take over a name in the user's home directory -- but the
+		// remaining direction is still a surprise worth one line: someone
+		// wrote a skill into the repo expecting their teammates to get it,
+		// and a teammate with a same-named personal skill never sees it.
+		r.warnings = append(r.warnings, fmt.Sprintf(
+			"%s skill %q shadows the %s skill of the same name; the %s one is not loaded",
+			s.Source, s.Name, prev.Source, prev.Source))
 		return
 	}
 	r.byName[s.Name] = len(r.ordered)
@@ -236,13 +470,23 @@ func sortSkills(r *Registry) {
 	}
 }
 
+// loadScopeDir loads one directory, labelling what it finds with the layout it
+// was found under and marking foreign project skills pending approval.
+func (r *Registry) loadScopeDir(d skillScope) {
+	r.loadDirWith(d.path, d.source, d.origin, d.foreignProject)
+}
+
 func (r *Registry) loadDir(dir, source string) {
+	r.loadDirWith(dir, source, OriginNative, false)
+}
+
+func (r *Registry) loadDirWith(dir, source, origin string, foreignProject bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// An absent scope is the normal case. Any other failure is unreadable
 		// state and gets reported.
 		if !os.IsNotExist(err) {
-			r.errors = append(r.errors, fmt.Sprintf("%s skills: %s", source, err))
+			r.errors = append(r.errors, fmt.Sprintf("%s skills (%s): %s", source, dir, err))
 		}
 		return
 	}
@@ -272,6 +516,11 @@ func (r *Registry) loadDir(dir, source string) {
 			r.errors = append(r.errors, fmt.Sprintf("%s skill %q: %s", source, name, err))
 			continue
 		}
+		skill.Origin = origin
+		// Bound to this exact body: a repository that rewrites an approved
+		// skill is asked again, or the first benign version buys permanent
+		// trust for every version after it.
+		skill.NeedsApproval = foreignProject && !r.approvals.Approved(r.canonicalWS, skill.Name, skill.Body)
 		r.upsert(skill)
 		loaded++
 	}
@@ -301,35 +550,44 @@ func loadSkillDir(dir, name, source string) (Skill, error) {
 	if info.Size() > maxFileBytes {
 		return Skill{}, fmt.Errorf("file is %d bytes, over the %d byte cap", info.Size(), maxFileBytes)
 	}
-	data, err := readCapped(path)
+	data, err := readCapped(path, maxFileBytes)
 	if err != nil {
 		return Skill{}, err
 	}
-	return newSkill(name, string(data), source, path)
+	return newSkill(name, string(data), source, path, dir)
 }
 
-// readCapped reads at most maxFileBytes+1 bytes and refuses anything longer.
+// readCapped reads at most limit+1 bytes and refuses anything longer.
 // os.ReadFile treats the stat size as a capacity hint and reads to EOF
 // regardless, so it cannot be trusted to honour a cap that Stat reported --
 // including when the file grows between the two calls.
-func readCapped(path string) ([]byte, error) {
+func readCapped(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > maxFileBytes {
-		return nil, fmt.Errorf("file is over the %d byte cap", maxFileBytes)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("file is over the %d byte cap", limit)
 	}
 	return data, nil
 }
 
-func newSkill(name, raw, source, path string) (Skill, error) {
-	body, description := ParseFrontmatter(raw)
+func newSkill(name, raw, source, path, dir string) (Skill, error) {
+	// Checked here, not only in loadSkillDir. loadBuiltins builds skills from
+	// embedded directory names and never went through that check, so the one
+	// loader whose names are compiled in was the one loader with no gate.
+	// That is backwards, and it is the path a bad name would survive longest
+	// on. Every constructor of a Skill goes through this function.
+	if !ValidName(name) {
+		return Skill{}, fmt.Errorf("skill name %q is not a valid name", name)
+	}
+	body, fm := ParseFrontmatterFields(raw)
+	description := fm.Description
 	body = strings.TrimSpace(body)
 	description = strings.TrimSpace(description)
 	if description == "" {
@@ -354,6 +612,8 @@ func newSkill(name, raw, source, path string) (Skill, error) {
 		Description: description,
 		Body:        body,
 		Source:      source,
+		Invocation:  fm,
 		Path:        path,
+		Dir:         dir,
 	}, nil
 }

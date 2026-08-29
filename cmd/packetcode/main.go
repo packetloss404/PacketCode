@@ -11,6 +11,8 @@
 //	packetcode --trust                      auto-approve all tool actions
 //	packetcode --permission-mode ask        override approval profile
 //	packetcode doctor                       diagnose local setup
+//	packetcode skills list          show resolved skills and their source
+//	packetcode skills install REPO  install skills from a git repository
 package main
 
 import (
@@ -106,6 +108,8 @@ func dispatchSubcommand(args []string, stdout, stderr io.Writer) (int, bool) {
 		return runDoctorCommand(args[1:], stdout, stderr), true
 	case "acp":
 		return runACPCommand(args[1:], os.Stdin, stdout, stderr), true
+	case "skills":
+		return runSkillsCommand(args[1:], stdout, stderr), true
 	case "sugar":
 		if len(args) >= 2 && args[1] == "login" {
 			return runSugarLoginCommand(args[2:], stdout, stderr), true
@@ -577,6 +581,15 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	for _, skillErr := range skillRegistry.Errors() {
 		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillErr)
 	}
+	// Warnings too, for the same reason. A skill displaced by a narrower scope,
+	// or an invocation flag whose value did not parse, leaves a session that
+	// behaves differently from the file the user is looking at -- and the
+	// unparsed-flag case leaves the permissive default in place, so this line
+	// is the only thing standing between "the model must not run this" and the
+	// model running it.
+	for _, skillWarn := range skillRegistry.Warnings() {
+		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillWarn)
+	}
 	appBackups := bk
 	computerID := ""
 	workspaceIdentity := ""
@@ -592,15 +605,18 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	}
 
 	a, err := app.New(app.Deps{
-		Config:            cfg,
-		Registry:          reg,
-		Tools:             toolReg,
-		Sessions:          sessions,
-		CostTracker:       tracker,
-		Jobs:              jobsMgr,
-		Workflow:          workflowEngine,
-		Backups:           appBackups,
-		MCP:               mcpMgr,
+		Config:      cfg,
+		Registry:    reg,
+		Tools:       toolReg,
+		Sessions:    sessions,
+		CostTracker: tracker,
+		Jobs:        jobsMgr,
+		Workflow:    workflowEngine,
+		Backups:     appBackups,
+		MCP:         mcpMgr,
+		// The same registry the skill tool and the prompt index already use, so
+		// /skills reports the set this session actually resolved.
+		Skills:            skillRegistry,
 		PermissionPolicy:  permissionPolicy,
 		WorkingDir:        root,
 		RemoteWorkspace:   runtimeBackend != nil,

@@ -33,6 +33,7 @@ import (
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/skills"
 	"github.com/packetcode/packetcode/internal/statusline"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/agentview"
@@ -90,8 +91,27 @@ type statusLineMsg struct {
 }
 
 type queuedInput struct {
-	Text string
-	At   time.Time
+	// Text is what the model receives. Display is what the transcript shows
+	// and what /queue lists; they differ for a skill expansion, where Text is
+	// the framed body and Display is the command the user typed.
+	Text    string
+	Display string
+	// Authored marks Text the user did not type, so it is not re-scanned for
+	// @-mentions when the turn finally starts. See turnOptions.authored.
+	Authored bool
+	Attached []string
+	At       time.Time
+}
+
+// Label is what a human should be shown for this entry. Never Text: for a
+// skill expansion that is a framed 64KB document, and a queue listing that
+// prints the first hundred characters of it tells the reader nothing about
+// which of their queued prompts this is.
+func (q queuedInput) Label() string {
+	if strings.TrimSpace(q.Display) != "" {
+		return q.Display
+	}
+	return q.Text
 }
 
 // jobUpdateMsg is dispatched from the jobs.Manager Subscribe callback
@@ -117,15 +137,20 @@ type mcpRestartedMsg struct {
 // Deps bundles everything App needs from main(). main() owns the lifecycle
 // of these objects; App just borrows them.
 type Deps struct {
-	Config            *config.Config
-	Registry          *provider.Registry
-	Tools             *tools.Registry
-	Sessions          *session.Manager
-	CostTracker       *cost.Tracker
-	Jobs              *jobs.Manager
-	Workflow          *workflow.Engine
-	Backups           *session.BackupManager
-	MCP               *mcp.Manager
+	Config      *config.Config
+	Registry    *provider.Registry
+	Tools       *tools.Registry
+	Sessions    *session.Manager
+	CostTracker *cost.Tracker
+	Jobs        *jobs.Manager
+	Workflow    *workflow.Engine
+	Backups     *session.BackupManager
+	MCP         *mcp.Manager
+	// Skills is the resolved registry, shared with the skill tool and the
+	// system-prompt index so the three surfaces cannot disagree about what
+	// exists. Borrowed, never re-Loaded here: a listing that re-scanned disk
+	// would describe a set the running turn never saw.
+	Skills            *skills.Registry
 	PermissionPolicy  *permissions.Policy
 	WorkingDir        string
 	RemoteWorkspace   bool   // true when workspace I/O is provided by a non-local backend
@@ -358,7 +383,7 @@ func New(deps Deps) (*App, error) {
 		statusRunner = statusline.New(deps.Config.StatusLine, deps.WorkingDir)
 	}
 
-	slashCommands := LoadSlashRegistry(deps.WorkingDir)
+	slashCommands := LoadSlashRegistry(deps.WorkingDir, deps.Skills)
 	slashEntries := buildAutocompleteEntries(slashCommands.HelpRows())
 	inputModel := input.New()
 	if deps.Config != nil {
@@ -1433,12 +1458,59 @@ func (a *App) showPendingApproval() {
 }
 
 func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
+	return a.startTurnWith(turnOptions{display: text, text: text, emitUser: emitUser})
+}
+
+// startTurnDisplaying starts a turn whose transcript line is not the text the
+// model receives, for text the user typed.
+func (a *App) startTurnDisplaying(display, text string, emitUser bool) (tea.Model, tea.Cmd) {
+	return a.startTurnWith(turnOptions{display: display, text: text, emitUser: emitUser})
+}
+
+// turnOptions describes one turn's two texts and where its text came from.
+type turnOptions struct {
+	// display is the transcript line; text is what the model receives.
+	display  string
+	text     string
+	emitUser bool
+	// authored marks text the user did not type -- today, a skill body
+	// expanded by /<name>. It suppresses @-mention expansion over that text.
+	//
+	// This is the difference between a boundary and a suggestion. A project
+	// skill body is untrusted repository content wrapped in a label that says
+	// so, and expandFileMentions PREPENDS the files it finds, undefanged and
+	// above that label, under a heading that says "the user referenced these
+	// files". A hostile repo shipping a skill whose body is a single
+	// `@notes/setup.md` therefore gets arbitrary in-repo content into the turn
+	// outside the only thing marking it untrusted, attributed to the user. The
+	// body does not get to reach into the file tree; the person typing does.
+	authored bool
+	// attached names files the caller already resolved, so the "attached N
+	// files" line still appears for the arguments the user did type.
+	attached []string
+}
+
+func (a *App) startTurnWith(opt turnOptions) (tea.Model, tea.Cmd) {
+	return a.startTurnResolved(opt)
+}
+
+// startTurnResolved is the one place a turn begins.
+//
+// The transcript line and the model-facing text are allowed to differ. They
+// already did for @-mentions, where the visible message keeps the literal
+// @path and the model gets the file inlined. A skill expansion is the same
+// shape and a much bigger one: /deploy sends up to MaxBodyBytes of framed
+// skill body, and pasting that into the conversation pane buries the exchange
+// the user is actually having under a document they did not write. What they
+// typed is what they should see.
+func (a *App) startTurnResolved(opt turnOptions) (tea.Model, tea.Cmd) {
+	display, text, emitUser := opt.display, opt.text, opt.emitUser
 	// Resolve model-facing additions before checking the threshold. Large file
 	// mentions and the plan-mode instruction must count toward the upcoming
 	// request even though the visible user message keeps the original text.
 	turnText := text
-	var attached []string
-	if !a.deps.RemoteWorkspace {
+	attached := opt.attached
+	if !opt.authored && !a.deps.RemoteWorkspace {
 		expanded, files := expandFileMentions(text, a.deps.WorkingDir)
 		attached = files
 		if len(attached) > 0 {
@@ -1450,7 +1522,11 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	}
 
 	if !a.skipAutoCompactOnce && a.shouldAutoCompact(turnText) {
-		a.queueInput(text)
+		// Requeued whole. The compaction path re-runs this turn later, and
+		// dropping any of these would make the same command behave one way
+		// normally and another way after a compact -- including re-scanning an
+		// already-resolved skill body for @-mentions.
+		a.queueTurn(opt)
 		a.skipAutoCompactOnce = true
 		a.conversation.AppendSystem("automatic context compaction triggered")
 		return a.handleCompactCommand(nil)
@@ -1458,7 +1534,7 @@ func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	a.skipAutoCompactOnce = false
 	a.input.Reset()
 	if emitUser {
-		a.conversation.AppendUser(text)
+		a.conversation.AppendUser(display)
 	}
 
 	// @-file mentions: the displayed user message keeps the literal @path, but
@@ -1515,13 +1591,26 @@ func (a *App) shouldAutoCompact(text string) bool {
 }
 
 func (a *App) queueInput(text string) {
-	if strings.TrimSpace(text) == "" {
+	a.queueTurn(turnOptions{display: text, text: text})
+}
+
+// queueTurn defers a turn, keeping every fact the turn would have used so the
+// deferred run is identical to the immediate one.
+func (a *App) queueTurn(opt turnOptions) {
+	if strings.TrimSpace(opt.text) == "" {
 		a.input.Reset()
 		return
 	}
 	a.input.Reset()
-	a.queuedInputs = append(a.queuedInputs, queuedInput{Text: text, At: time.Now()})
-	a.conversation.AppendQueuedUser(text)
+	q := queuedInput{
+		Text:     opt.text,
+		Display:  opt.display,
+		Authored: opt.authored,
+		Attached: opt.attached,
+		At:       time.Now(),
+	}
+	a.queuedInputs = append(a.queuedInputs, q)
+	a.conversation.AppendQueuedUser(q.Label())
 	a.refreshTopBar()
 }
 
@@ -1553,7 +1642,18 @@ func (a *App) startNextQueuedInput() (tea.Model, tea.Cmd) {
 	next := a.queuedInputs[0]
 	copy(a.queuedInputs, a.queuedInputs[1:])
 	a.queuedInputs = a.queuedInputs[:len(a.queuedInputs)-1]
-	return a.startTurn(next.Text, false)
+	// Every field, not just Text. Dropping Display here sent the framed skill
+	// body back through the auto-compact branch, which re-queues by display --
+	// so a /deploy that happened to cross the compaction threshold pasted its
+	// whole body into the pane, which is the exact thing Display exists to
+	// prevent.
+	return a.startTurnWith(turnOptions{
+		display:  next.Label(),
+		text:     next.Text,
+		emitUser: false,
+		authored: next.Authored,
+		attached: next.Attached,
+	})
 }
 
 func (a *App) setOperation(label string) {
@@ -2017,6 +2117,8 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a.handleEffortCommand(args)
 	case "sessions":
 		return a.handleSessionsCommand(args)
+	case "skills":
+		return a.handleSkillsCommand(args)
 	case "resume":
 		return a.handleResumeCommand(args)
 	case "queue":
@@ -2053,14 +2155,54 @@ func (a *App) handleSlashCommand(cmd string, args []string, original string) (te
 		return a, tea.Quit
 	}
 	if custom, ok := a.slashRegistry().Lookup(cmd); ok && !custom.Builtin {
-		if a.streaming {
-			a.queueInput(custom.Expand(slashCommandArguments(original, cmd)))
-			return a, nil
-		}
-		return a.startTurn(custom.Expand(slashCommandArguments(original, cmd)), true)
+		return a.startCustomCommand(custom, original, cmd)
 	}
 	a.conversation.AppendSystem(unknownSlashCommandMessage(original))
 	return a, nil
+}
+
+// startCustomCommand runs a markdown command or a skill.
+//
+// The two differ in one way that matters and one that only looks like it.
+//
+// What matters: a markdown command body is a prompt the user wrote, so it is
+// their text and is treated as such -- @-mentions in it resolve, and the
+// expansion is what the transcript shows, because seeing what was actually
+// sent is the point of writing one. A skill body is neither theirs nor short.
+// It is up to MaxBodyBytes, and for a project skill it is repository content
+// carrying an untrusted label that @-mention expansion would hoist files above.
+// So the body is marked authored-elsewhere, and only the arguments the user
+// actually typed are scanned for mentions.
+//
+// What only looks like it: both accept arguments. The user typed them either
+// way and they must reach the turn either way.
+func (a *App) startCustomCommand(custom SlashCommand, original, cmd string) (tea.Model, tea.Cmd) {
+	args := slashCommandArguments(original, cmd)
+	opt := turnOptions{emitUser: true}
+	if custom.Skill {
+		opt.authored = true
+		// Mentions resolve over the arguments alone. expandFileMentions
+		// prepends what it finds, so the files land between the closing
+		// </skill> marker and the user's words -- outside the untrusted label,
+		// in the position the user's own message occupies.
+		if !a.deps.RemoteWorkspace {
+			expandedArgs, files := expandFileMentions(args, a.deps.WorkingDir)
+			if len(files) > 0 {
+				args = expandedArgs
+				opt.attached = files
+			}
+		}
+		opt.display = strings.TrimSpace(original)
+	}
+	opt.text = custom.Expand(args)
+	if !custom.Skill {
+		opt.display = opt.text
+	}
+	if a.streaming {
+		a.queueTurn(opt)
+		return a, nil
+	}
+	return a.startTurnWith(opt)
 }
 
 func (a *App) slashRegistry() *SlashCommandRegistry {

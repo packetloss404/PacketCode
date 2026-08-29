@@ -400,20 +400,26 @@ func (l *packetMCPLister) ListMCPServers() ([]acp.MCPServerStatus, error) {
 type packetCommandCatalog struct{}
 
 func (c *packetCommandCatalog) ListCommands(cwd string) ([]acp.CommandInfo, error) {
-	registry := app.LoadSlashRegistry(cwd)
+	// nil skills, deliberately. A user-invocable skill is a prompt expansion
+	// an ACP client could honour, but CommandInfo.Source is a closed
+	// vocabulary ("builtin"/"user"/"project") that clients group menus by, and
+	// a builtin skill would arrive as a "builtin" entry -- the one thing this
+	// catalogue promises never to emit. Offering skills here needs that
+	// vocabulary extended on the wire first, which is a protocol change and
+	// not a side effect of the TUI gaining /<skill-name>.
+	registry := app.LoadSlashRegistry(cwd, nil)
 	commands := registry.Commands()
 	out := make([]acp.CommandInfo, 0, len(commands))
 	for _, cmd := range commands {
 		if cmd.Builtin {
 			continue
 		}
-		// The only argument convention markdown commands have is the
-		// $ARGUMENTS placeholder; mirror app.loadMarkdownSlashCommand's usage
-		// suffix so clients show the same hint the TUI does.
-		hint := ""
-		if strings.Contains(cmd.Body, "$ARGUMENTS") {
-			hint = "[arguments]"
-		}
+		// Every custom command accepts arguments now: $ARGUMENTS places them
+		// if the body has the placeholder, and they are appended if it does
+		// not. Reporting a hint only for placeholder bodies told clients that
+		// most commands take none, which was true before Expand stopped
+		// dropping them and is not true now.
+		hint := "[arguments]"
 		out = append(out, acp.CommandInfo{
 			Name:         cmd.Name,
 			Description:  cmd.Description,

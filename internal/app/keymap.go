@@ -97,6 +97,8 @@ var (
 		{"/mcp tools <name>", "List tools exposed by an MCP server"},
 		{"/mcp logs <name>", "Tail an MCP server's stderr log"},
 		{"/mcp restart <name>", "Reconnect one MCP server process"},
+		{"/skills", "List resolved skills (builtin, user, project) and load warnings"},
+		{"/skills <name>", "Show one skill's scope, path, trust, and description"},
 		{"/ollama [status|models|ps|pull <model>]", "Local Ollama status, models, and management"},
 		{"/transcript", "Open the current session transcript"},
 		{"/exit", "Quit packetcode"},

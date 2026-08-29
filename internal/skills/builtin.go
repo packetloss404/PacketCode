@@ -13,7 +13,10 @@ import (
 // checkout answers "add a hook that blocks force-pushes" correctly with no
 // setup step, and so upgrading the binary upgrades the guidance.
 //
-//go:embed builtin/*/SKILL.md
+// The whole tree is embedded, not just each SKILL.md, so a builtin can carry
+// resource files beside its body on the same terms as an installed skill.
+//
+//go:embed builtin
 var builtinFS embed.FS
 
 const builtinRoot = "builtin"
@@ -34,7 +37,9 @@ func (r *Registry) loadBuiltins() {
 			r.errors = append(r.errors, fmt.Sprintf("builtin skill %q: %s", name, err))
 			continue
 		}
-		skill, err := newSkill(name, string(data), SourceBuiltin, "")
+		// Path stays empty: there is no on-disk file to report. Dir is an
+		// embedded-FS path, which only ReadResource knows how to open.
+		skill, err := newSkill(name, string(data), SourceBuiltin, "", path.Join(builtinRoot, name))
 		if err != nil {
 			// A malformed builtin is a build-time mistake, not user state; the
 			// package test asserts this list stays empty.
