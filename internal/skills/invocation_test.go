@@ -202,3 +202,102 @@ func TestBuiltins_AreInvocableBothWays(t *testing.T) {
 		}
 	}
 }
+
+// The form most published skills actually use. A line-based parser that does
+// not understand it read the value as the literal ">-" -- which is non-empty
+// and single-line, so it passed every validation and produced a meaningless
+// index entry, and once that was detected the skill was dropped instead.
+// 22 of the 37 skills in one real ~/.agents/skills directory are written this
+// way; refusing the form refuses the ecosystem.
+func TestParseFrontmatterFields_FoldedBlockScalarDescription(t *testing.T) {
+	raw := "---\n" +
+		"name: autopilot\n" +
+		"description: >-\n" +
+		"  Keep a PR merge-ready by triaging comments, resolving clear conflicts, and\n" +
+		"  fixing CI in a loop.\n" +
+		"---\n" +
+		"# Autopilot\n"
+
+	body, fm := ParseFrontmatterFields(raw)
+	want := "Keep a PR merge-ready by triaging comments, resolving clear conflicts, and fixing CI in a loop."
+	if fm.Description != want {
+		t.Fatalf("Description = %q,\n           want %q", fm.Description, want)
+	}
+	if len(fm.Warnings) != 0 {
+		t.Fatalf("a well-formed block scalar produced warnings: %v", fm.Warnings)
+	}
+	if body != "# Autopilot\n" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+// The continuation lines must be consumed, not re-read as keys. A continuation
+// line containing a colon would otherwise parse as one -- and a key parsed out
+// of prose can set a flag its author never wrote.
+func TestParseFrontmatterFields_BlockScalarDoesNotLeakIntoLaterKeys(t *testing.T) {
+	raw := "---\n" +
+		"description: >-\n" +
+		"  Use when: you want a thing done.\n" +
+		"  user-invocable: false\n" +
+		"disable-model-invocation: true\n" +
+		"---\n" +
+		"body\n"
+
+	_, fm := ParseFrontmatterFields(raw)
+	if !strings.Contains(fm.Description, "Use when: you want a thing done.") {
+		t.Fatalf("Description lost its colon-bearing line: %q", fm.Description)
+	}
+	// "user-invocable: false" was inside the block, so it is prose, not a key.
+	if fm.DisableUserInvocation {
+		t.Fatal("a line inside a block scalar was parsed as a key")
+	}
+	// The real key after the block still parses.
+	if !fm.DisableModelInvocation {
+		t.Fatal("the key following a block scalar was swallowed")
+	}
+}
+
+func TestParseFrontmatterFields_BlockScalarIndicators(t *testing.T) {
+	for _, indicator := range []string{">", ">-", ">+", "|", "|-", "|+"} {
+		raw := "---\ndescription: " + indicator + "\n  one\n  two\n---\nbody\n"
+		_, fm := ParseFrontmatterFields(raw)
+		// Literal blocks fold too: a description is a one-line routing string
+		// by contract, and keeping the newlines only to have newSkill reject
+		// them would drop a working skill over formatting.
+		if fm.Description != "one two" {
+			t.Errorf("%s: Description = %q, want %q", indicator, fm.Description, "one two")
+		}
+	}
+}
+
+// A blank line inside a block is a paragraph break, not the end of the block.
+func TestParseFrontmatterFields_BlockScalarSpansBlankLines(t *testing.T) {
+	raw := "---\ndescription: >-\n  first para\n\n  second para\nuser-invocable: false\n---\nbody\n"
+	_, fm := ParseFrontmatterFields(raw)
+	if fm.Description != "first para second para" {
+		t.Fatalf("Description = %q", fm.Description)
+	}
+	if !fm.DisableUserInvocation {
+		t.Fatal("the key after a block containing a blank line was swallowed")
+	}
+}
+
+// End to end: a real-shaped skill file must resolve rather than be dropped.
+func TestLoad_AcceptsBlockScalarDescriptions(t *testing.T) {
+	isolate(t)
+	project := t.TempDir()
+	writeSkill(t, ProjectSkillsDir(project), "autopilot",
+		"---\nname: autopilot\ndescription: >-\n  Keep a PR merge-ready by triaging\n  comments and fixing CI.\n---\nbody\n")
+
+	reg := Load(project)
+	if errs := reg.Errors(); len(errs) != 0 {
+		t.Fatalf("a block-scalar skill was refused: %v", errs)
+	}
+	s, ok := reg.Lookup("autopilot")
+	if !ok {
+		t.Fatal("autopilot did not resolve")
+	}
+	if s.Description != "Keep a PR merge-ready by triaging comments and fixing CI." {
+		t.Fatalf("Description = %q", s.Description)
+	}
+}

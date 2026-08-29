@@ -269,14 +269,20 @@ func Load(workingDir string) *Registry {
 	// Weakest first: upsert lets a later scope displace an earlier one.
 	r.loadBuiltins()
 
-	for _, d := range projectScopeDirs(workingDir) {
-		r.loadScopeDir(d)
-	}
 	userDirs, err := userScopeDirs()
 	if err != nil {
 		r.errors = append(r.errors, fmt.Sprintf("user skills: %s", err))
 	}
-	for _, d := range userDirs {
+	// Deduplicated by resolved path, keeping the strongest scope for each.
+	//
+	// Running packetcode from your home directory makes <cwd>/.agents/skills
+	// and ~/.agents/skills the same directory. Scanning it twice reported
+	// every malformed skill twice, made every skill in it "shadow" itself with
+	// a warning naming a project skill that was the same file, and labelled
+	// the user's own skills untrusted repository content on the project pass.
+	// One directory is one scope, and when the two claim it the user scope
+	// wins -- it is the truthful one, since those really are the user's files.
+	for _, d := range dedupeScopes(append(projectScopeDirs(workingDir), userDirs...)) {
 		r.loadScopeDir(d)
 	}
 	// Sorted once, here, now that upsert no longer does it per insert. A
@@ -468,6 +474,35 @@ func sortSkills(r *Registry) {
 	for i, s := range r.ordered {
 		r.byName[s.Name] = i
 	}
+}
+
+// dedupeScopes collapses directories that resolve to the same place.
+//
+// Input is weakest-first, so a later entry claiming a path replaces an earlier
+// one and the returned order is preserved. Paths are compared after cleaning
+// and case-folding: Windows paths differ in case for the same directory, and a
+// duplicate that slipped through would reintroduce exactly the double-scan
+// this exists to prevent.
+func dedupeScopes(in []skillScope) []skillScope {
+	at := make(map[string]int, len(in))
+	out := make([]skillScope, 0, len(in))
+	for _, d := range in {
+		key := scopePathKey(d.path)
+		if idx, seen := at[key]; seen {
+			out[idx] = d
+			continue
+		}
+		at[key] = len(out)
+		out = append(out, d)
+	}
+	return out
+}
+
+// scopePathKey identifies a directory for deduplication. Symlinks are not
+// resolved: the directories may not exist, which is the ordinary case, and
+// EvalSymlinks fails on a path that does not.
+func scopePathKey(path string) string {
+	return strings.ToLower(filepath.Clean(path))
 }
 
 // loadScopeDir loads one directory, labelling what it finds with the layout it

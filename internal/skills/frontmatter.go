@@ -64,12 +64,22 @@ func ParseFrontmatterFields(raw string) (body string, fm Frontmatter) {
 	seen := map[string]bool{}
 	body = strings.TrimPrefix(rest[end:], "\n---")
 	body = strings.TrimPrefix(body, "\n")
-	for _, line := range strings.Split(header, "\n") {
+	lines := strings.Split(header, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		key, val, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
-		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		// A block scalar's value is on the following indented lines, so the
+		// consumed count has to come back out of the reader and move i past
+		// them -- otherwise those lines are re-read as if they were keys.
+		if folded, consumed, isBlock := readBlockScalar(val, lines[i+1:]); isBlock {
+			val = folded
+			i += consumed
+		} else {
+			val = strings.Trim(strings.TrimSpace(val), `"'`)
+		}
 		name := strings.TrimSpace(strings.ToLower(key))
 		if seen[name] {
 			// First occurrence wins, for every key. Last-wins would let a
@@ -85,17 +95,6 @@ func ParseFrontmatterFields(raw string) (body string, fm Frontmatter) {
 		switch name {
 		case "description":
 			seen[name] = true
-			if isBlockScalar(val) {
-				// `description: >-` with the text on following indented lines.
-				// This parser is line-based, so the value here is ">-", which
-				// is non-empty and single-line and therefore passes every
-				// validation downstream -- the skill loads with a meaningless
-				// index entry and nothing reports it.
-				fm.Warnings = append(fm.Warnings,
-					"description uses a YAML block scalar, which is not supported; put it on one line")
-				fm.Description = ""
-				continue
-			}
 			fm.Description = val
 		case "disable-model-invocation":
 			seen[name] = true
@@ -142,13 +141,47 @@ func stripInlineComment(val string) string {
 	return val
 }
 
-// isBlockScalar reports a `>`/`|` folding indicator standing alone as a value.
-func isBlockScalar(val string) bool {
+// readBlockScalar folds a YAML block scalar into one line.
+//
+// `description: >-` followed by indented continuation lines is how most
+// published skills write a description, because it is how you fit a router
+// sentence into eighty columns. A line-based parser that does not know about
+// it reads the value as the literal ">-", which is non-empty and single-line
+// and so passes every validation downstream -- the skill loads with a
+// meaningless index entry, or, once that was detected, was dropped outright.
+// Neither is acceptable for a form this common.
+//
+// Both indicators fold to a single line here, including the literal `|`. A
+// description is a one-line routing string by contract -- newSkill rejects one
+// containing a newline -- so preserving the line breaks of a `|` block only to
+// reject the result would turn a working skill into a dropped one over
+// formatting. Chomping indicators (-, +) affect trailing newlines, which a
+// folded single line does not have.
+//
+// Returns the folded text, how many following lines it consumed, and whether
+// val was a block scalar at all.
+func readBlockScalar(val string, following []string) (folded string, consumed int, ok bool) {
 	switch strings.TrimSpace(val) {
 	case ">", ">-", ">+", "|", "|-", "|+":
-		return true
+	default:
+		return "", 0, false
 	}
-	return false
+	var parts []string
+	for _, line := range following {
+		// The block ends at the first line that is not indented. A blank line
+		// inside one is a paragraph break, which folds to a space like any
+		// other break, so it does not end the block.
+		if strings.TrimSpace(line) == "" {
+			consumed++
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			break
+		}
+		consumed++
+		parts = append(parts, strings.TrimSpace(line))
+	}
+	return strings.Join(parts, " "), consumed, true
 }
 
 // parseFrontmatterBool reports the value and whether it was understood at all.
