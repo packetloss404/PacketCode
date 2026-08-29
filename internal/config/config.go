@@ -27,6 +27,13 @@ type Config struct {
 	PacketComputers PacketComputersConfig      `toml:"packet_computers"`
 	Sugar           SugarConfig                `toml:"sugar"`
 	Conduit         ConduitConfig              `toml:"conduit"`
+
+	// dotEnv holds parsed .env values, attached by SetDotEnv. Unexported and
+	// untagged: it is not configuration, it is one more place a key may come
+	// from, and writing it back into config.toml would copy secrets out of the
+	// file the user chose to keep them in.
+	dotEnv         *DotEnv
+	dotEnvProblems []string
 }
 
 // ACPConfig controls the optional Agent Client Protocol stdio server. Enabled
@@ -351,12 +358,21 @@ func (c HookConfig) IsEnabled() bool {
 // Load reads ~/.packetcode/config.toml and returns the parsed config.
 // If the file does not exist, returns Default() — the caller can use
 // IsFirstRun() to distinguish a fresh install from a returning user.
+// Load reads config.toml from the conventional location.
 func Load() (*Config, error) {
 	path, err := ConfigPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 	return LoadFrom(path)
+}
+
+// DotEnvProblems returns .env files that exist and could not be read.
+func (c *Config) DotEnvProblems() []string {
+	if c == nil {
+		return nil
+	}
+	return append([]string(nil), c.dotEnvProblems...)
 }
 
 // LoadFrom reads config from an explicit path. Exposed for testing and
@@ -387,6 +403,14 @@ func LoadFrom(path string) (*Config, error) {
 	if cfg.Permissions.Profiles == nil {
 		cfg.Permissions.Profiles = map[string]PermissionProfile{}
 	}
+	// .env is attached here, not in Load, because Load is not the only door:
+	// `doctor` calls LoadFrom directly, and wiring this one level up left it
+	// unable to see a key the TUI used happily. Every config that exists has
+	// been through this function.
+	cwd, _ := os.Getwd()
+	dotEnv, dotEnvProblems := LoadDotEnv(cwd)
+	cfg.SetDotEnv(dotEnv)
+	cfg.dotEnvProblems = dotEnvProblems
 	if err := applyIntegrationEnvironment(cfg); err != nil {
 		return nil, err
 	}
@@ -555,18 +579,85 @@ func (c *Config) SetProviderKey(slug, apiKey string) error {
 	return c.Save()
 }
 
-// GetProviderKey returns the API key for a provider. The env var
-// PACKETCODE_<SLUG>_API_KEY takes precedence over the on-disk value.
-// Returns empty string if neither is set.
+// KeySource says where a provider key came from.
+type KeySource string
+
+const (
+	// KeySourceNone means no key is set anywhere.
+	KeySourceNone KeySource = "none"
+	// KeySourceEnv is a real environment variable in this process.
+	KeySourceEnv KeySource = "environment"
+	// KeySourceDotEnv is a .env file. Which one is in KeyOrigin.Path.
+	KeySourceDotEnv KeySource = "dotenv"
+	// KeySourceConfig is config.toml.
+	KeySourceConfig KeySource = "config"
+)
+
+// KeyOrigin describes where a provider key was resolved from, so `doctor` and
+// the TUI can answer "which key am I actually using" without printing it.
+type KeyOrigin struct {
+	Source KeySource
+	// Name is the environment variable name for env and dotenv sources.
+	Name string
+	// Path is the file for dotenv and config sources.
+	Path string
+}
+
+// Describe renders an origin for a human, naming no secret.
+func (o KeyOrigin) Describe() string {
+	switch o.Source {
+	case KeySourceEnv:
+		return "environment variable " + o.Name
+	case KeySourceDotEnv:
+		return o.Name + " in " + o.Path
+	case KeySourceConfig:
+		return "config.toml"
+	default:
+		return "not set"
+	}
+}
+
+// SetDotEnv attaches parsed .env values for key resolution.
+//
+// Held on the Config rather than read on demand so one process resolves keys
+// from one snapshot: a .env edited mid-session must not make two lookups in
+// the same turn disagree about which key is in use.
+func (c *Config) SetDotEnv(d *DotEnv) {
+	if c == nil {
+		return
+	}
+	c.dotEnv = d
+}
+
+// GetProviderKey returns the API key for a provider.
+//
+// Precedence, strongest first: a real environment variable, then a .env file,
+// then config.toml. A real environment variable wins because it is the one a
+// person set deliberately for this run -- a stale .env silently overriding
+// what someone just exported is the failure that makes dotenv loaders
+// infuriating. Returns empty when nothing is set.
 func (c *Config) GetProviderKey(slug string) string {
+	key, _ := c.ProviderKeyWithOrigin(slug)
+	return key
+}
+
+// ProviderKeyWithOrigin is GetProviderKey plus where the value came from.
+func (c *Config) ProviderKeyWithOrigin(slug string) (string, KeyOrigin) {
 	envKey := c.ProviderAPIKeyEnvName(slug)
 	if v := os.Getenv(envKey); v != "" {
-		return v
+		return v, KeyOrigin{Source: KeySourceEnv, Name: envKey}
 	}
-	if p, ok := c.Providers[slug]; ok {
-		return p.APIKey
+	if c != nil {
+		if v, from, ok := c.dotEnv.Lookup(envKey); ok && strings.TrimSpace(v) != "" {
+			return v, KeyOrigin{Source: KeySourceDotEnv, Name: envKey, Path: from}
+		}
 	}
-	return ""
+	if c != nil {
+		if p, ok := c.Providers[slug]; ok && p.APIKey != "" {
+			return p.APIKey, KeyOrigin{Source: KeySourceConfig}
+		}
+	}
+	return "", KeyOrigin{Source: KeySourceNone, Name: envKey}
 }
 
 // ProviderAPIKeyEnvName returns the environment variable that overrides

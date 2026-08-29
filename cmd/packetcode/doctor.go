@@ -594,13 +594,20 @@ func providerCredentialSource(cfg *config.Config, slug string) (string, bool) {
 	if configured && !requiresAPIKey {
 		return "keyless", true
 	}
-	envKey := cfg.ProviderAPIKeyEnvName(slug)
-	if os.Getenv(envKey) != "" {
-		return "env:" + envKey, true
+	// Asked of the config rather than re-derived, so doctor cannot disagree
+	// with the key the provider will actually use -- reporting a source that
+	// is not the one in force is worse than reporting nothing.
+	if key, origin := cfg.ProviderKeyWithOrigin(slug); key != "" {
+		switch origin.Source {
+		case config.KeySourceEnv:
+			return "env:" + origin.Name, true
+		case config.KeySourceDotEnv:
+			return "dotenv:" + origin.Path, true
+		default:
+			return "config:" + doctorConfigPath(), true
+		}
 	}
-	if configured && pc.APIKey != "" {
-		return "config:" + doctorConfigPath(), true
-	}
+	_ = pc
 	if configured || cfg.Default.Provider == slug {
 		return "missing", true
 	}

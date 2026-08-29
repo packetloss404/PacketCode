@@ -8,6 +8,28 @@ import (
 	"github.com/packetcode/packetcode/internal/ui/components/picker"
 )
 
+// providerKeyStatus says whether a key is set and where it came from.
+//
+// "key present" alone was fine when config.toml and an environment variable
+// were the only two places a key could live. With .env there are three, and
+// the question a person has when the wrong key is in use is not whether one
+// exists but which one won -- so the row answers that. Never the key itself:
+// this is a list rendered on screen.
+func providerKeyStatus(cfg *config.Config, slug, fallback string) string {
+	key, origin := cfg.ProviderKeyWithOrigin(slug)
+	if key == "" {
+		return fallback
+	}
+	switch origin.Source {
+	case config.KeySourceEnv:
+		return "key from " + origin.Name
+	case config.KeySourceDotEnv:
+		return "key from .env"
+	default:
+		return "key present"
+	}
+}
+
 // providerItems builds the rows displayed by the provider picker. Each
 // row's ID is the provider slug so SelectMsg.Item.ID plugs straight
 // into applyProviderSwitch. The active provider's marker is a filled
@@ -32,13 +54,13 @@ func providerItems(regs []provider.Provider, cfg *config.Config, activeSlug stri
 				if pc.DefaultModel != "" {
 					defModel = pc.DefaultModel
 				}
-				if cfg.ProviderRequiresAPIKey(slug) && (pc.APIKey != "" || cfg.GetProviderKey(slug) != "") {
-					keyStatus = "key present"
+				if cfg.ProviderRequiresAPIKey(slug) {
+					keyStatus = providerKeyStatus(cfg, slug, keyStatus)
 				}
 			}
 			// Env-var-only key case when the provider has no config entry.
-			if keyStatus == "(no key)" && !config.IsKeylessProvider(slug) && cfg.GetProviderKey(slug) != "" {
-				keyStatus = "key present"
+			if keyStatus == "(no key)" && !config.IsKeylessProvider(slug) {
+				keyStatus = providerKeyStatus(cfg, slug, keyStatus)
 			}
 		}
 		detail := keyStatus

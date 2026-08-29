@@ -126,6 +126,12 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	// config.Load attaches .env. Reported here because a .env that exists and
+	// did nothing is the failure worth naming: the user put a key in a file
+	// and packetcode behaved as if they had not.
+	for _, p := range cfg.DotEnvProblems() {
+		fmt.Fprintf(os.Stderr, "packetcode: .env %s\n", p)
+	}
 	if permissionMode != "" {
 		profile, err := permissions.ParseProfile(permissionMode)
 		if err != nil {

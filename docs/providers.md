@@ -141,9 +141,74 @@ PACKETCODE_OPENROUTER_API_KEY
 PACKETCODE_MY_PROVIDER_API_KEY
 ```
 
-Environment variables win over config file keys. Custom provider slugs are
-normalized to `PACKETCODE_<SLUG>_API_KEY`, with non-alphanumeric characters
-converted to `_`; set `api_key_env` to use a different variable.
+Custom provider slugs are normalized to `PACKETCODE_<SLUG>_API_KEY`, with
+non-alphanumeric characters converted to `_`; set `api_key_env` in that
+provider's config block to use a different variable name.
+
+## `.env` files
+
+The same variable names can go in a `.env` file, which is usually the easiest
+option: it survives across shells and reboots without going in `config.toml`,
+and it is the file you already gitignore.
+
+Two are read, both optional:
+
+| File | Applies to |
+| --- | --- |
+| `~/.packetcode/.env` | every project |
+| `<project>/.env` | that project only |
+
+```dotenv
+# ~/.packetcode/.env
+PACKETCODE_OPENAI_API_KEY=sk-...
+PACKETCODE_ANTHROPIC_API_KEY=sk-ant-...
+
+# Quotes are optional and stripped as a matched pair.
+PACKETCODE_GROK_API_KEY="xai-..."
+
+# `export ` is accepted, so a file you also source in a shell works as-is.
+export PACKETCODE_MISTRAL_API_KEY=...
+```
+
+Blank lines and `#` comments are ignored. A trailing `# comment` after an
+unquoted value is stripped, so quote any value that genuinely contains ` #`.
+Escape sequences are **not** interpreted — an API key is an opaque token, and
+turning a backslash in one into something else would corrupt it.
+
+### Precedence
+
+Strongest first:
+
+1. A real environment variable in the shell you launched from
+2. `<project>/.env`
+3. `~/.packetcode/.env`
+4. `api_key` in `~/.packetcode/config.toml`
+
+A real environment variable wins because it is the one you set deliberately for
+this run; a stale `.env` silently overriding an exported key is the failure mode
+that makes dotenv loading frustrating. A project `.env` beats the user one
+because that is what a project file is for.
+
+`/provider` shows which of these answered — a row reads `key from .env`,
+`key from PACKETCODE_OPENAI_API_KEY`, or `key present` for `config.toml`.
+`packetcode doctor` reports the same as `dotenv:<path>`, `env:<NAME>`, or
+`config:<path>`. Neither ever prints the key.
+
+### What `.env` does not do
+
+Values are **not** exported into the environment of anything packetcode runs.
+Hooks, MCP servers, and every shell command the model executes see the
+environment packetcode was launched with, unchanged. A file that exists to hold
+API keys is the last thing an arbitrary subprocess should inherit, so `.env` is
+consulted where keys are resolved and nowhere else. If you want a variable
+visible to a subprocess, export it in your shell — that is what the first
+precedence tier is for.
+
+A `.env` that cannot be read is reported on stderr at startup rather than
+ignored: a key you put in a file and that did nothing is worth one line.
+
+Add `.env` to your `.gitignore`. packetcode never writes one; `Ctrl+A` in the
+provider picker writes to `config.toml`.
 
 ## Switch Providers
 
