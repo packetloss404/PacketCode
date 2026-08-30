@@ -321,7 +321,7 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 	}
 
 	ch := make(chan provider.StreamEvent, 8)
-	go parseSSE(ctx, sctx, guard, resp.Body, ch)
+	go parseSSE(ctx, sctx, guard, resp.Body, ch, c.Backend)
 	return ch, nil
 }
 
@@ -433,6 +433,15 @@ type sseEvent struct {
 	Response    *sseResponse `json:"response"`
 	Message     string       `json:"message"` // top-level "error" events
 	Code        string       `json:"code"`
+	// Error is the nested form, which is what the public API actually sends:
+	//
+	//   {"type":"error","error":{"code":"model_not_found","message":"..."}}
+	//
+	// Reading only the top-level "message" turned a message that told the user
+	// exactly what to do -- verify the organization, with the URL -- into
+	// "stream error". An error the server took the trouble to explain must not
+	// be thrown away on the way to the person who can act on it.
+	Error *sseError `json:"error"`
 }
 
 type sseItem struct {
@@ -472,7 +481,7 @@ type callState struct {
 
 // parseSSE reads Responses-API server-sent events and translates them into the
 // provider.StreamEvent sequence. It closes ch and body before returning.
-func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interface{ Read([]byte) (int, error) }, ch chan<- provider.StreamEvent) {
+func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interface{ Read([]byte) (int, error) }, ch chan<- provider.StreamEvent, backend Backend) {
 	defer close(ch)
 	if closer, ok := body.(interface{ Close() error }); ok {
 		defer closer.Close()
@@ -603,8 +612,11 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 
 		case "error":
 			msg := ev.Message
+			if msg == "" && ev.Error != nil {
+				msg = ev.Error.Message
+			}
 			if msg == "" {
-				msg = "codex stream error"
+				msg = backend.name() + " stream error"
 			}
 			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}
 			return
@@ -623,7 +635,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 	}
 	// Stream ended without an explicit completed/failed event.
 	if len(calls) > 0 {
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("codex stream ended before completion")}
+		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s stream ended before completion", backend.name())}
 		return
 	}
 	ch <- provider.StreamEvent{Type: provider.EventDone}
