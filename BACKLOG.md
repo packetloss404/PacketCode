@@ -271,21 +271,85 @@ the evidence, effort, and risk for each item.
   adapter that turns "it's broken" into a self-diagnosing session. Move the
   checks out of `cmd/` first — `internal/doctor/` is an empty directory — and
   give the model-facing surface its own redaction test.
-- Add skills: an `<available_skills>` name-and-description index in the system
-  prompt with a `skill` tool that loads a body on demand. Additive rather than
-  redundant — slash commands are human-typed and the model cannot invoke them,
-  workflows are human-started orchestration, and neither can be selected by the
-  model mid-turn. Reuse the slash-command frontmatter parser, and mark `skill`
-  read-only so loading a body is not approval-gated while the actions it
-  suggests stay gated. Ship embedded builtin skills covering packetcode's own
-  configuration, hooks, workflows, MCP, and theming, so the agent can configure
-  packetcode correctly. Static block only — the upstream delta protocol is dead
-  code against this cache fingerprint. Project-directory skill bodies are
-  attacker-controllable in a hostile repo, the same trust class as project slash
-  commands. Leave remote skill discovery out of v1.
+- ~~Add skills: an `<available_skills>` index with a `skill` tool that loads a
+  body on demand.~~ **Shipped 2026-08-30.** The index, the read-only tool, and
+  the five embedded builtins landed as specified, then grew three things this
+  entry did not ask for. `disable-model-invocation` and `user-invocable` decide
+  who may load a skill, enforced at the index *and* at the tool, because
+  omitting a skill from the index stops the model being told about it and does
+  not stop the model naming one the user mentioned. `/<skill-name>` expands a
+  user-invocable skill as text, matching Claude Code; the transcript shows the
+  verb while the model gets the framed body. And discovery now reads
+  `.claude/skills` and `.agents/skills` at both scopes.
+  That last one reverses this entry's "leave remote skill discovery out of v1",
+  and needed a gate to be safe: a repository's foreign-layout skills are
+  discovered, listed, and inert until `/skills allow <name>`, with approval
+  bound to workspace and body digest so a rewritten skill is asked about again.
+  Scope precedence was also inverted to user > project > builtin — only one
+  direction of that choice has a victim, and it is the one where cloning a
+  hostile repo replaces the `deploy` skill you wrote for yourself with one you
+  have never read. Claude Code orders it the same way.
 - Move tool prompts and the system prompt out of Go string literals into
   embedded files, so prompt changes are reviewable in diffs. The system prompt
   first, since it has two call sites. Write our own text.
+
+### Skill ecosystem gaps — found 2026-08-30
+
+Measured against the 37 skills in one real `~/.agents/skills`, and against the
+published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
+[Agent Skills spec](https://agentskills.io/specification). Published skills now
+*load* here; not all of them *work*. Ordered by how often each bites.
+
+- Substitute `${CLAUDE_SKILL_DIR}` and `${CLAUDE_PLUGIN_ROOT}` in skill bodies.
+  It is the documented way a skill points at its own bundled scripts, and 5 of
+  37 use it. Unsubstituted, the model is handed a literal
+  `${CLAUDE_SKILL_DIR}/scripts/x.py` it cannot resolve — the skill does not
+  fail, it quietly instructs the model to use a path that does not exist. The
+  highest-frequency real breakage of the set.
+- Read `allowed-tools` from skill frontmatter; 10 of 37 set it. It pre-approves
+  tools for the invoking turn, so ignoring it costs approval prompts rather
+  than safety — feature loss in the safe direction. But it is the difference
+  between a skill that runs and one that interrogates the user at every step,
+  and it is one of the six fields in the Agent Skills spec proper.
+- Decide on `` !`command` `` dynamic context injection; 1 of 37 uses it, and
+  Claude Code's own `/commit` is built on it. Today the backticked command is
+  passed through as literal text, so the model is told ``PR diff: !`gh pr
+  diff` `` instead of the diff. Not implementing is defensible — upstream ships
+  `disableSkillShellExecution` for exactly this concern, and running repository
+  shell text is the sharpest edge in the whole ecosystem. Being silent about it
+  is not: a skill that reads as broken is worse than one that reports itself
+  disabled.
+- Support indexed `$0`/`$1` arguments and an `arguments:` frontmatter list.
+  Only `$ARGUMENTS` is substituted today, so a skill using the indexed form
+  gets literal placeholders *and* the arguments appended — the model sees both
+  and has to guess. All 8 argument-using skills observed use plain
+  `$ARGUMENTS`, so today's exposure is low and tomorrow's is not.
+- Accept skills packetcode currently refuses. Upstream loads a skill with no
+  `description` (falling back to the first paragraph of the body) and truncates
+  an oversized one; packetcode drops both, and drops a body over `MaxBodyBytes`
+  where upstream has no body cap. A published skill that works in every other
+  agent and vanishes here reads as packetcode being broken, which is the wrong
+  lesson for the user to draw. The caps exist for real reasons — decide which
+  are worth a refusal and which should degrade.
+- Decide whether a repository's own `.packetcode/skills` should need the
+  approval a `.claude/skills` one now does. Today it does not: the 2026-08-30
+  gate exists to avoid opening a *new* automatic-loading surface across every
+  repo that already ships `.claude/skills`, not to fence off a directory
+  existing projects depend on. That leaves the gate looking like a general
+  project-skill trust boundary when it is not — a hostile repo can still use
+  the native layout. Tightening it breaks existing projects, so it needs to be
+  a decision rather than a drift.
+- Offer user-invocable skills through the ACP command catalogue. Blocked on the
+  wire vocabulary: `CommandInfo.Source` is a closed `builtin`/`user`/`project`
+  set that clients group menus by, and a builtin skill would arrive as a
+  `builtin` entry — the one thing that catalogue promises never to emit.
+  Extending the protocol comes first; `ListCommands` passes nil skills until
+  then, so an ACP client's menu is missing verbs the TUI has.
+- Reconsider commands-vs-skills precedence. packetcode gives a name collision
+  to `commands/<name>.md`; Claude Code gives it to the skill. Deliberate, and
+  marked as a divergence in the README rather than presented as the ecosystem
+  rule — but a project carrying both resolves `/name` differently here than
+  upstream, which is exactly the surprise a porting user cannot debug.
 
 ## MCP and Extensions
 

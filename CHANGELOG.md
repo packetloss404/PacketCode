@@ -6,6 +6,52 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Agent Skills: invocation flags, `/<skill-name>`, and foreign discovery.
+  `disable-model-invocation` and `user-invocable` decide who may load a skill,
+  spelled as Claude Code spells them and defaulting the same way, so a skill
+  written for that ecosystem behaves the same here. Both are enforced at the
+  system-prompt index *and* at the `skill` tool: omitting a skill from the index
+  stops the model being told it exists and does not stop the model naming one
+  the user just mentioned. A flag value that does not parse keeps its default
+  and is reported, because for both flags the default is the permissive answer
+  and a typo must not silently grant what the author refused.
+- A user-invocable skill registers as a slash command, so `/<skill-name>`
+  expands its body into the turn as text — the mechanism Claude Code uses, not
+  a routed tool call. The transcript shows the verb you typed while the model
+  receives the framed body, because a skill body runs to 64KB and pasting one
+  into the conversation pane buries the exchange under a document nobody wrote.
+  Arguments reach the turn either way; `$ARGUMENTS` is honoured only for a body
+  its user wrote, since a repository body must not choose where a user's words
+  land. Precedence is builtin > `commands/<name>.md` > skill, and every
+  displacement is reported rather than leaving an author with a file that
+  silently does nothing.
+- Skills are discovered from six directories: `.packetcode/skills`,
+  `.claude/skills` and `.agents/skills`, at both user and project scope, with
+  the native layout winning within a scope — so skills already installed for
+  another agent are found where they are. A repository's foreign-layout skills
+  are the exception: discovered, listed, and inert until `/skills allow <name>`,
+  because that is the one directory you acquire by cloning, and a skill's
+  description reaches the system prompt while its name would become a command
+  you can type. Approval is per skill, per workspace, and bound to the body
+  approved, so a repository that rewrites a skill afterwards is asked again
+  rather than inheriting the answer.
+- Skill scope precedence is now user > project > builtin, inverted from
+  project-first. Only one direction of that choice has a victim: if the
+  repository won, cloning a hostile one would replace the `deploy` skill you
+  wrote for yourself with one you have never read, invoked by the same name and
+  the same habit. Claude Code orders its scopes the same way, so published
+  skills are written expecting it. Displacements are reported through a new
+  warnings channel, kept apart from load errors so an ordinary override does not
+  fail `packetcode skills list`.
+- Provider keys can come from a `.env` file: `~/.packetcode/.env` for every
+  project and `<project>/.env` for one. Precedence is a real environment
+  variable, then the project file, then the user file, then `config.toml` — the
+  environment wins because it is what someone set deliberately for this run.
+  Values are never injected into the process environment: packetcode runs shell
+  commands on the model's behalf, and a file that exists to hold API keys is the
+  last thing an arbitrary subprocess should inherit. With three possible
+  sources, `/provider` and `doctor` now report which one is in force, naming the
+  variable or the file and never the key.
 - Explicit `abandoned` terminal state for background jobs (PCMP10), so a job
   whose outcome was never observed is no longer reported as a cancellation
   somebody chose. Carries an `AbandonCause` of `app-exit`, `transport-lost`, or
@@ -107,6 +153,29 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- OpenAI models that refuse function tools on `/v1/chat/completions` are routed
+  to `/v1/responses` instead. Selecting `gpt-5.6-sol` previously failed every
+  turn with a 400, because packetcode sends tools on every turn and that model
+  only accepts them on the other endpoint. Routing is per request, so switching
+  models mid-session takes the endpoint with it. The `-pro` family is no longer
+  hidden from the catalog either: it was excluded because chat-completions was
+  the only endpoint spoken here, and hiding a model packetcode can drive leaves
+  capability on the floor.
+- The Responses API's own error message reaches the user. An error nested under
+  `error` in the SSE frame was reduced to `codex stream error`, so a message
+  naming the exact fix — with the URL — was replaced by a phrase that says
+  nothing. Fallback text also names the backend the user configured rather than
+  always saying `codex`.
+- YAML block scalars in skill frontmatter parse. `description: >-` with the text
+  on following indented lines is how most published skills write a description;
+  the line-based parser read the value as the literal `">-"`, which passed every
+  validation and produced a meaningless index entry. Continuation lines are now
+  folded in and consumed, so a colon inside the prose is prose rather than a key
+  that sets a flag its author never wrote.
+- Skill directories that resolve to the same place are scanned once. Running
+  packetcode from a home directory that has skills in it reported every
+  malformed skill twice, made every skill shadow itself, and — worse — labelled
+  the user's own skills untrusted repository content on the project pass.
 - An abandoned background agent is no longer reported as a success. Two
   workflow gates, `spawn_agent`, `collect_agent_results`, and Agent View's
   grouping all tested for known failure states, so any terminal state they did
