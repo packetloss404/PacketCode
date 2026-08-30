@@ -186,8 +186,12 @@ func renderMCPStatus(name string, reports []mcp.StartupReport, clients []*mcp.Cl
 		if client == nil || !client.IsAlive() {
 			status = "exited"
 			pid = -1
-			if client != nil && client.DeathReason() != nil {
-				lastErr = client.DeathReason().Error()
+			if client != nil {
+				// Waited rather than sampled, so a dead server reports its
+				// exit status instead of the EOF that preceded it.
+				if reason := client.DeathReasonWithin(mcp.DeathReasonWait); reason != nil {
+					lastErr = reason.Error()
+				}
 			}
 		}
 	}

@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,9 +109,16 @@ func TestClient_DeathReason_PreservesNonZeroExit(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	require.False(t, cli.IsAlive())
-	reason := cli.DeathReason()
+	// Waited, not sampled. This used to call DeathReason directly, which reads
+	// in the window between the reader seeing stdout close and the reaper
+	// collecting the status -- so it passed only because the poll above
+	// usually let the reaper land first. Whether a test passes must not depend
+	// on which of two goroutines won.
+	reason := cli.DeathReasonWithin(DeathReasonWait)
 	require.Error(t, reason)
 	assert.True(t, strings.Contains(reason.Error(), "exit status 7") || strings.Contains(reason.Error(), "ExitStatus 7"), "death reason = %v", reason)
+	// And never the symptom in place of the cause.
+	assert.False(t, errors.Is(reason, io.EOF), "reported EOF as the cause: %v", reason)
 }
 
 func requireStub(t *testing.T) {

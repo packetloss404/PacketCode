@@ -235,8 +235,13 @@ func (m *Manager) Reports() []StartupReport {
 			if c == nil || !c.IsAlive() {
 				r.Status = "exited"
 				r.PID = -1
-				if c != nil && c.DeathReason() != nil {
-					r.Err = c.DeathReason().Error()
+				// Waited, not sampled: this is the line a human reads to find
+				// out why a server died, and asking before the child is reaped
+				// reported "exited: EOF" for one that exited 7.
+				if c != nil {
+					if reason := c.DeathReasonWithin(DeathReasonWait); reason != nil {
+						r.Err = reason.Error()
+					}
 				}
 			}
 		}

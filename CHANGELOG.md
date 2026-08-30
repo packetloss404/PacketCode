@@ -153,6 +153,12 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- An MCP server that died with a non-zero exit status could be reported as
+  `exited: EOF`. A child's stdout closes before it is reaped, so the reader
+  usually won the race and recorded EOF as the cause; the reaper corrected it a
+  moment later, but anything asking right after seeing the server was dead got
+  the wrong answer. The reader now records only that the server exited, and the
+  reaper supplies the status. `/mcp` and the MCP report wait for it.
 - A self-paced `/loop` started while a turn was streaming now runs. The
   streaming guard sat before the line claiming loop ownership, so the loop
   registered, appeared in `/loop list` forever, and did nothing — and slash
