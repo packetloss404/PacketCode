@@ -88,7 +88,8 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   person spends an hour on them: Git Bash rewrites `-w /w` into a Windows path
   unless `MSYS_NO_PATHCONV=1` is set, and `scripts/tui_golden.sh` has CRLF
   endings in the working tree, which `dash` rejects with `set: Illegal option -`
-  until the script is passed through `sed 's/$//'`.
+  until the script is passed through `sed 's/
+$//'`.
 - ~~A self-paced `/loop` started during a streaming turn never advances.~~
   **Fixed 2026-08-30.** `runLoopBody`'s streaming guard sat before
   `a.activeLoopID = ls.id`, so the loop registered, listed forever, and did
@@ -361,12 +362,29 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
 [Agent Skills spec](https://agentskills.io/specification). Published skills now
 *load* here; not all of them *work*. Ordered by how often each bites.
 
-- Substitute `${CLAUDE_SKILL_DIR}` and `${CLAUDE_PLUGIN_ROOT}` in skill bodies.
-  It is the documented way a skill points at its own bundled scripts, and 5 of
-  37 use it. Unsubstituted, the model is handed a literal
-  `${CLAUDE_SKILL_DIR}/scripts/x.py` it cannot resolve — the skill does not
-  fail, it quietly instructs the model to use a path that does not exist. The
-  highest-frequency real breakage of the set.
+- ~~Substitute `${CLAUDE_SKILL_DIR}` in skill bodies and resources.~~
+  **Done 2026-08-30.** Expanded at render, in `Block` and `ResourceBlock`, so
+  the stored body still matches the bytes on disk and only what reaches the
+  model is rewritten. Before defanging, not after: the substituted text is a
+  filesystem path, `<` is legal in a POSIX path, and expanding after the pass
+  that neutralises markers would let a directory name forge the block boundary.
+  Builtins are excluded — their `Dir` is inside the embedded filesystem, so
+  substituting would swap one unusable path for a plausible-looking one.
+  **The counts in the first version of this entry were wrong.** They said "5 of
+  37" and called it the highest-frequency real breakage. Re-measured:
+  `CLAUDE_SKILL_DIR` appears in zero files across `~/.agents/skills`,
+  `~/.claude/skills` and `~/.claude/plugins`. The 5-of-28 figure was for
+  `CLAUDE_PLUGIN_ROOT` in a different population, and I merged the two when
+  writing the entry up. Nothing was broken by this; it is done because it is
+  cheap and correct for any skill that does use it.
+- `${CLAUDE_PLUGIN_ROOT}` is a separate question and probably a no. It resolves
+  to the root of a plugin bundle, and packetcode has no plugin bundles:
+  `docs/plugins.md` is explicit that the plugin model is declarative (MCP
+  servers, custom providers, skills) with no in-process plugin runtime. The 27
+  files using it here all live under `~/.claude/plugins`, which packetcode does
+  not discover. Mapping it to the skill directory would be inventing a meaning
+  the ecosystem does not give it; leaving it literal is at least honest. Revisit
+  only if plugin-bundle discovery is ever added.
 - Read `allowed-tools` from skill frontmatter; 10 of 37 set it. It pre-approves
   tools for the invoking turn, so ignoring it costs approval prompts rather
   than safety — feature loss in the safe direction. But it is the difference

@@ -6,6 +6,12 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- `${CLAUDE_SKILL_DIR}` in a skill body or resource expands to that skill's own
+  directory when it reaches the model, so a skill can point at the files bundled
+  beside it. Left literal it did not fail — it directed the model at a path that
+  does not exist. Builtin skills are embedded and have no directory, so the
+  variable is left alone for them; `${CLAUDE_PLUGIN_ROOT}` is not substituted,
+  because packetcode has no plugin bundles for it to name.
 - Agent Skills: invocation flags, `/<skill-name>`, and foreign discovery.
   `disable-model-invocation` and `user-invocable` decide who may load a skill,
   spelled as Claude Code spells them and defaulting the same way, so a skill
