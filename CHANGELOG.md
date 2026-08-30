@@ -153,6 +153,14 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- A self-paced `/loop` started while a turn was streaming now runs. The
+  streaming guard sat before the line claiming loop ownership, so the loop
+  registered, appeared in `/loop list` forever, and did nothing — and slash
+  commands dispatch during a stream, so typing `/loop <prompt>` mid-turn hit
+  this every time. Ownership now travels with the queued turn and is claimed
+  when that turn starts. The queued body also carried no iteration instruction,
+  leaving the model with no way to declare the work finished; the turn is built
+  once now, so the queued and immediate paths cannot differ.
 - OpenAI models that refuse function tools on `/v1/chat/completions` are routed
   to `/v1/responses` instead. Selecting `gpt-5.6-sol` previously failed every
   turn with a 400, because packetcode sends tools on every turn and that model
