@@ -136,6 +136,11 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Changed
 
+- Removed the unused `agent.ToolDecider` seam and its `uiApprover.DecideTool`
+  implementation. Nothing ever consulted it: the commit that added it also gave
+  the agent its own permission-policy consult, which is the one that runs. No
+  behaviour changes, and the security property it appeared to provide — a deny
+  rule blocking a tool that never prompts — is now covered by a test.
 - Reworked the TUI toward Claude Code's flow: flat conversation blocks, `❯` submitted prompts, understated horizontal input rules, Claude-style thinking/tool markers, numbered approval choices, message spacing, full-screen Agent/Workflow views, and exact mode footers.
 - Shift+Tab now changes permission mode during an active turn. The new policy applies to later tool actions and can resolve an approval already waiting; an already-running command is left alone.
 - The default system prompt favors concise, terminal-friendly answers and avoids unnecessary scaffolding.

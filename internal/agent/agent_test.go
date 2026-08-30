@@ -1136,3 +1136,47 @@ func TestAgent_ReasoningIsNotVisibleContent(t *testing.T) {
 	assert.Equal(t, "Here is the answer.", cur.Messages[1].Content)
 	assert.Equal(t, "thinking out loud", cur.Messages[1].Reasoning)
 }
+
+// A deny rule blocks a tool that does not require approval.
+//
+// This is the property that made the unused ToolDecider seam look load-bearing:
+// if the policy were only consulted on the approval path, a deny rule could not
+// reach a tool whose RequiresApproval is false, and the agent would run it. The
+// agent consults the policy itself, before and independently of approval, so it
+// does — and removing the seam took nothing with it.
+func TestAgent_PolicyDeniesAToolThatDoesNotRequireApproval(t *testing.T) {
+	prov := &scriptedProvider{turns: [][]provider.StreamEvent{{
+		{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "read", ArgumentsDelta: `{}`}},
+		{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}},
+		{Type: provider.EventDone},
+	}, {
+		{Type: provider.EventTextDelta, TextDelta: "ok"},
+		{Type: provider.EventDone},
+	}}}
+	// approval: false — nothing would ever prompt for this tool.
+	tool := &recordingTool{name: "read", approval: false}
+	a, _, _ := newAgentRig(t, prov, tool)
+	// An approver that would wave anything through, so a pass could only come
+	// from the policy being skipped rather than from the approver agreeing.
+	a.SetApprover(AutoApprove())
+	a.SetPolicy(permissions.DefaultPolicy().WithRule("read", permissions.DecisionDeny))
+
+	events := collect(a.Run(context.Background(), "read the file"))
+
+	if got := atomic.LoadInt32(&tool.executed); got != 0 {
+		t.Fatalf("a denied tool ran %d times; the policy was not consulted for a "+
+			"tool that does not require approval", got)
+	}
+	rejected := false
+	for _, ev := range events {
+		if ev.Type == EventToolCallRejected {
+			rejected = true
+			if !strings.Contains(ev.Text, "permission denied") {
+				t.Fatalf("rejection does not name the policy: %q", ev.Text)
+			}
+		}
+	}
+	if !rejected {
+		t.Fatal("no rejection event was emitted for a denied tool")
+	}
+}

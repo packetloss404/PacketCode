@@ -55,26 +55,6 @@ func (u *uiApprover) PromptApproval(ctx context.Context, req agent.ApprovalReque
 	return u.prompt(ctx, req, false)
 }
 
-func (u *uiApprover) DecideTool(ctx context.Context, req agent.ApprovalRequest, requiresApproval bool) (agent.ApprovalDecision, bool) {
-	decision := u.policyDecision(req, requiresApproval)
-	switch decision.Decision {
-	case permissions.DecisionDeny:
-		return agent.ApprovalDecision{
-			Approved: false,
-			Reason:   "permission policy denied " + req.ToolCall.Name + " (" + decision.Reason + ")",
-		}, true
-	case permissions.DecisionAllow:
-		if requiresApproval {
-			return agent.ApprovalDecision{Approved: true, EditedParams: req.Params}, true
-		}
-		return agent.ApprovalDecision{}, false
-	case permissions.DecisionAsk:
-		return u.decideOrPrompt(ctx, req, requiresApproval), true
-	default:
-		return agent.ApprovalDecision{}, false
-	}
-}
-
 func (u *uiApprover) policyDecision(req agent.ApprovalRequest, requiresApproval bool) permissions.Result {
 	u.mu.Lock()
 	policy := u.policy
