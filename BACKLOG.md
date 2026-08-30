@@ -131,14 +131,27 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   implements `DecideTool` and it is never called. Either the agent is missing
   a consult site or both halves are dead; deleting is unsafe without knowing
   which.
-- **Session persistence.** `Load`/`New` return the live `*Session` the manager
-  holds while `Current()` deliberately returns a clone, so callers can mutate
-  manager-owned state outside the mutex; `List()` silently skips unreadable
-  files, so a corrupt session simply vanishes from `/resume`; and
-  `writeSessionFile` never fsyncs before rename, so the package doc's "atomic
-  writes" claim covers naming but not durability. Same fsync gap exists in
-  `internal/jobs/persistence.go`, so it is a repo-wide durability decision
-  rather than a local fix.
+- ~~Session persistence.~~ **Fixed 2026-08-30.** All three, including the part
+  held back as a repo-wide decision.
+  `New` and `Load` returned the manager's own `*Session` while `Current`
+  cloned, so a caller could mutate mutex-guarded state from outside the mutex —
+  and `Save` writes whatever `m.current` points at, so the mutation would have
+  silently persisted. Both now clone, matching `Current`. No caller was
+  relying on the aliasing.
+  `List` skipped unreadable files in silence, so a corrupt session vanished
+  from `/resume` — indistinguishable from one that never existed, which is the
+  wrong failure for the command whose whole job is finding a conversation the
+  user knows they had. `ListWithProblems` reports them alongside, never instead
+  of, the sessions that loaded; `/sessions` and `/resume` print them, bounded so
+  a corrupt directory cannot flood the pane.
+  The fsync gap is closed in both writers through a new `internal/atomicfile`.
+  The decision it was waiting on came down to cost, and the cost is not there:
+  a benchmark against the previous no-sync shape measures ~130µs on a small
+  session file, about 6%, for a write that happens once a turn. Rename is
+  atomic for a *reader*; without the sync it can reach the disk ahead of the
+  bytes it names, so a crash leaves a file that exists, is correctly named, and
+  is empty — the conversation for a session, and the state a restart
+  reconciles from for a job record.
 - **Several tests are timing-brittle under CPU load.** `internal/jobs` and
   `internal/mcp` tests using short `waitFor` deadlines fail in batches on a
   loaded machine and pass in isolation — e.g. a job spawning a PowerShell hook

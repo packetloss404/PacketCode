@@ -3,6 +3,7 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,23 +308,11 @@ func savePersistedSnapshot(jobsDir string, p persistedJob) error {
 	if err != nil {
 		return fmt.Errorf("save job: marshal: %w", err)
 	}
-	tmp, err := os.CreateTemp(jobsDir, ".job.*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("save job: create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("save job: write temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("save job: close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, final); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("save job: rename: %w", err)
+	// fsynced before the rename, for the same reason as a session file: a job
+	// record that exists and is empty after a crash is the state a restart
+	// reconciles from, and it would reconcile from nothing.
+	if err := atomicfile.Write(final, data, 0o600, ".job.*.json.tmp"); err != nil {
+		return fmt.Errorf("save job: %w", err)
 	}
 	return nil
 }

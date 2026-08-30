@@ -153,6 +153,17 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- Session and job records are fsynced before the rename that publishes them.
+  The rename alone is atomic for a reader, but it could reach the disk ahead of
+  the bytes it names, so a crash could leave a correctly-named, empty file —
+  the conversation, for a session, and the state a restart reconciles from, for
+  a job. Measured cost is about 130µs on a small session file.
+- A session file that cannot be read is now reported by `/sessions` and
+  `/resume` instead of silently missing from the list, where it was
+  indistinguishable from a session that never existed.
+- `session.Manager.New` and `Load` return a copy rather than the manager's live
+  session, matching `Current`. Callers could previously mutate mutex-guarded
+  state from outside the mutex, and the change would have persisted.
 - A finished background job whose only output was artifacts reported none. The
   job line returned early when there was no summary, error or worktree, which
   skipped the artifacts line below it — losing both the description of what the

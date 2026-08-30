@@ -3,13 +3,15 @@
 //
 // Layout under ~/.packetcode:
 //
-//	sessions/<id>.json      one file per session, atomic writes
+//	sessions/<id>.json      one file per session, written atomically and
+//	                        fsynced before the rename
 //	backups/<id>/...        per-session file snapshots for /undo
 package session
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -145,7 +147,12 @@ func (m *Manager) New(providerSlug, model string) (*Session, error) {
 	if err := m.Save(); err != nil {
 		return nil, err
 	}
-	return s, nil
+	// A copy, matching Current. Returning the manager's own *Session let a
+	// caller mutate state the manager guards with a mutex, from outside it --
+	// and Save writes whatever m.current points at, so such a mutation would
+	// silently persist. Current was already careful about this; New and Load
+	// were the two doors left open.
+	return cloneSession(s), nil
 }
 
 // BindWorkspace records the remote computer identity for the active session.
@@ -239,7 +246,7 @@ func (m *Manager) Load(id string) (*Session, error) {
 	m.mu.Lock()
 	m.current = &s
 	m.mu.Unlock()
-	return &s, nil
+	return cloneSession(&s), nil
 }
 
 // Save writes the current session to disk atomically.
@@ -391,13 +398,31 @@ func (m *Manager) ReplaceMessagesAfterCompaction(messages []provider.Message) er
 }
 
 // List returns every session sorted newest-first.
+// List returns every readable session, newest first.
+//
+// Files it could not read or parse are reported by ListWithProblems rather
+// than surfaced here, so existing callers keep the same shape.
 func (m *Manager) List() ([]Summary, error) {
+	out, _, err := m.ListWithProblems()
+	return out, err
+}
+
+// ListWithProblems is List plus the sessions it could not read.
+//
+// A corrupt or unreadable session file used to be skipped in silence, so it
+// simply vanished from /resume -- indistinguishable, from the user's chair,
+// from a session that never existed. That is the wrong failure for the one
+// command whose entire job is to find a conversation the user knows they had.
+// The problems are reported alongside, never in place of, the sessions that
+// did load.
+func (m *Manager) ListWithProblems() ([]Summary, []string, error) {
+	var problems []string
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]Summary, 0, len(entries))
 	for _, e := range entries {
@@ -406,13 +431,23 @@ func (m *Manager) List() ([]Summary, error) {
 		}
 		data, err := os.ReadFile(filepath.Join(m.dir, e.Name()))
 		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s", e.Name(), err))
 			continue
 		}
 		var s Session
 		if err := json.Unmarshal(data, &s); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s", e.Name(), err))
 			continue
 		}
-		if err := validateSessionID(s.ID); err != nil || e.Name() != s.ID+".json" {
+		if err := validateSessionID(s.ID); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s", e.Name(), err))
+			continue
+		}
+		if e.Name() != s.ID+".json" {
+			// A file whose name disagrees with the id inside it. Loading by
+			// either spelling would give a different answer, so neither is
+			// offered without saying why.
+			problems = append(problems, fmt.Sprintf("%s: contains session id %q", e.Name(), s.ID))
 			continue
 		}
 		out = append(out, Summary{
@@ -430,7 +465,8 @@ func (m *Manager) List() ([]Summary, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
-	return out, nil
+	sort.Strings(problems)
+	return out, problems, nil
 }
 
 // ResolveID accepts either a full session ID (exact match) or a unique
@@ -577,23 +613,12 @@ func writeSessionFile(dir string, s *Session) error {
 		return err
 	}
 	path := filepath.Join(dir, s.ID+".json")
-	tmp, err := os.CreateTemp(dir, ".session.*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+	// fsynced before the rename. The rename alone makes the write atomic for a
+	// reader; it does not stop the rename reaching the disk ahead of the bytes
+	// it names, which after a crash leaves a session file that exists and is
+	// empty. See internal/atomicfile.
+	if err := atomicfile.Write(path, data, 0o600, ".session.*.json.tmp"); err != nil {
+		return fmt.Errorf("save session: %w", err)
 	}
 	return nil
 }
