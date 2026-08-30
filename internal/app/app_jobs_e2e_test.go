@@ -18,6 +18,7 @@ import (
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
 	"github.com/packetcode/packetcode/internal/ui/components/conversation"
@@ -292,17 +293,11 @@ func conversationContains(a *App, needle string) bool {
 	return strings.Contains(a.conversation.View(), needle)
 }
 
-// waitForEq polls fn up to timeout and fails the test if it doesn't
-// return want in time. Mirrors internal/jobs/waitFor, minus the
-// boolean-predicate shape.
-func waitForEq(t *testing.T, timeout time.Duration, msg string, fn func() int, want int) {
+// waitForEq polls fn until it returns want, on a scaled deadline. The duration
+// each call site passes is a baseline describing what the author expected, not
+// the budget: see internal/testwait for why these deadlines could not
+// previously tell a busy machine apart from a broken one.
+func waitForEq(t *testing.T, baseline time.Duration, msg string, fn func() int, want int) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if fn() == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("waitForEq timed out after %s: %s (got %d, want %d)", timeout, msg, fn(), want)
+	testwait.ForEq(t, baseline, msg, fn, want)
 }

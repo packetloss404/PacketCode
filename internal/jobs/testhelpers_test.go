@@ -18,6 +18,7 @@ import (
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -222,18 +223,13 @@ func scriptedHello() [][]provider.StreamEvent {
 	}
 }
 
-// waitFor polls predicate up to timeout. Test helper to bridge the
-// async transitions.
-func waitFor(t *testing.T, timeout time.Duration, msg string, pred func() bool) {
+// waitFor polls predicate up to a scaled deadline. The duration passed by each
+// call site is a baseline describing what the author expected, not the budget:
+// see internal/testwait for why these deadlines could not previously tell a
+// busy machine apart from a broken one.
+func waitFor(t *testing.T, baseline time.Duration, msg string, pred func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if pred() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("waitFor timed out after %s: %s", timeout, msg)
+	testwait.For(t, baseline, msg, pred)
 }
 
 func initTestGitRepo(t *testing.T) string {

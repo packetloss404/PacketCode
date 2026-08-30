@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,10 +106,9 @@ func TestClient_DeathReason_PreservesNonZeroExit(t *testing.T) {
 	cli, ok := mgr.Client("crashy")
 	require.True(t, ok)
 
-	for i := 0; i < 100 && cli.IsAlive(); i++ {
-		time.Sleep(10 * time.Millisecond)
-	}
-	require.False(t, cli.IsAlive())
+	// A one-second hand-rolled budget: ample when the machine is idle, and the
+	// reason this test failed in batches under load. See internal/testwait.
+	testwait.For(t, time.Second, "server to exit", func() bool { return !cli.IsAlive() })
 	// Waited, not sampled. This used to call DeathReason directly, which reads
 	// in the window between the reader seeing stdout close and the reaper
 	// collecting the status -- so it passed only because the poll above

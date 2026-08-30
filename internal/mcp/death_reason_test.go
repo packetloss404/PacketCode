@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,8 +51,8 @@ func TestDeathReason_ReaderDoesNotRecordEOFAsTheCause(t *testing.T) {
 	defer func() { _ = c.cmd.Wait() }()
 
 	go c.readerLoop()
-	require.Eventually(t, func() bool { return !c.IsAlive() }, 5*time.Second, 5*time.Millisecond,
-		"the reader must mark the client dead as soon as stdout closes")
+	testwait.For(t, time.Second, "the reader to mark the client dead once stdout closes",
+		func() bool { return !c.IsAlive() })
 
 	reason := c.DeathReason()
 	require.NotNil(t, reason, "a dead client always has some reason")
@@ -68,7 +69,7 @@ func TestDeathReason_ReaperUpgradesToTheExitStatus(t *testing.T) {
 	c := exitingChild(t, 7)
 
 	go c.readerLoop()
-	require.Eventually(t, func() bool { return !c.IsAlive() }, 5*time.Second, 5*time.Millisecond)
+	testwait.For(t, time.Second, "the client to be marked dead", func() bool { return !c.IsAlive() })
 
 	go c.reaperLoop()
 
@@ -138,7 +139,7 @@ func TestDeathReasonWithin_AttachedClientDoesNotWait(t *testing.T) {
 	defer stub.Stop()
 
 	stub.CloseStdout()
-	require.Eventually(t, func() bool { return !cli.IsAlive() }, time.Second, 5*time.Millisecond)
+	testwait.For(t, time.Second, "the client to be marked dead", func() bool { return !cli.IsAlive() })
 
 	start := time.Now()
 	reason := cli.DeathReasonWithin(2 * time.Second)

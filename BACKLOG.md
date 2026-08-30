@@ -164,12 +164,23 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   bytes it names, so a crash leaves a file that exists, is correctly named, and
   is empty — the conversation for a session, and the state a restart
   reconciles from for a job record.
-- **Several tests are timing-brittle under CPU load.** `internal/jobs` and
-  `internal/mcp` tests using short `waitFor` deadlines fail in batches on a
-  loaded machine and pass in isolation — e.g. a job spawning a PowerShell hook
-  gets a 2s budget. They are not broken, but they cannot distinguish a slow
-  machine from a regression, which is the one thing a test must do.
-
+- ~~Several tests are timing-brittle under CPU load.~~ **Fixed 2026-08-30.**
+  The deadlines were not wrong about *what* they waited for, only about how
+  long that is allowed to take — and polling already returns the instant a
+  condition holds, so a generous budget costs a fast machine nothing and is
+  only spent when something is actually wrong. `internal/testwait` treats each
+  call site's duration as a baseline and scales it (x10 by default,
+  `PACKETCODE_TEST_TIMEOUT_SCALE` to override), so the literal still documents
+  what the author expected while the budget reflects what a busy machine needs.
+  The distinction the entry asked for is now made explicitly: a condition that
+  holds later than its baseline logs one line saying the machine was slow and
+  the test still passed, so slowness is visible without being reported as a
+  regression.
+  Evidence rather than assertion: `internal/jobs -count=6` previously failed
+  and now passes; the full suite passes twice while a second package stress-run
+  competes for the same cores. Shared package rather than three copies of the
+  same helper, for the reason `provider.StreamSink` is shared — three copies of
+  a convention drift.
 ## TUI and Interaction Parity
 
 - Add transcript search/filter and a compact jump-to-latest affordance.

@@ -136,6 +136,11 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Changed
 
+- Asynchronous tests wait on a scaled deadline (`internal/testwait`) instead of
+  a fixed one, so a loaded machine no longer fails tests that pass in isolation
+  — the one thing a test must never do. A wait that takes longer than its
+  baseline logs that the machine was slow rather than failing. Development-only;
+  no shipped behaviour changes.
 - Removed the unused `agent.ToolDecider` seam and its `uiApprover.DecideTool`
   implementation. Nothing ever consulted it: the commit that added it also gave
   the agent its own permission-policy consult, which is the one that runs. No
