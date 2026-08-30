@@ -93,9 +93,14 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   was bare text with no way for the model to declare the work finished; the
   turn is now built once, before the branch, and the queued and immediate paths
   consume the same value.
-- **`formatTerminalJobLine` drops the artifacts line** (`app.go:1852`) when a
-  job has no summary, error or worktree: it returns before the
-  `jobs.ArtifactDigest` block, so `artifacts: … · /agents <id>` is lost.
+- ~~`formatTerminalJobLine` drops the artifacts line.~~ **Fixed 2026-08-30.**
+  The early `return head` inside the empty-body branch sat above the
+  `jobs.ArtifactDigest` block, so a job that finished with artifacts and
+  nothing else lost the one line naming what it produced — and the `/agents`
+  pointer for reading it — precisely for the jobs whose only output was
+  artifacts. Every part is now gathered before anything decides the line is
+  empty, which is how the sibling `formatAgentPeek` was already written and why
+  it never had this bug.
 - ~~MCP death reason can report EOF instead of the real exit status.~~
   **Fixed 2026-08-30.** The contract this was waiting on turned out not to need
   the lifecycle reordering the diagnosis feared. Liveness and cause are two

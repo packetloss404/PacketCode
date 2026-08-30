@@ -220,3 +220,43 @@ func TestRenderSessionsTable_NameTruncationIsRuneSafe(t *testing.T) {
 	assert.NotContains(t, out, "�")
 	assert.Contains(t, out, strings.Repeat("é", 29)+"...")
 }
+
+// A job that produced artifacts but no summary, error or worktree still has to
+// say so. The early return that used to sit in the empty-body branch skipped
+// the artifacts block entirely, so the one line naming what the job produced --
+// and the pointer to /agents for reading it -- was lost precisely for the jobs
+// whose only output was artifacts.
+func TestFormatTerminalJobLine_ArtifactsSurviveAnEmptyBody(t *testing.T) {
+	line := formatTerminalJobLine(jobs.Snapshot{
+		ID:        "art12345",
+		State:     jobs.StateCompleted,
+		Artifacts: []jobs.Artifact{{ID: "a1", Kind: "file_change", Title: "main.go"}},
+	})
+	assert.Contains(t, line, "artifacts:", "the artifacts line was dropped:\n%s", line)
+	assert.Contains(t, line, "/agents art12345", "the pointer to the transcript was dropped:\n%s", line)
+	assert.Contains(t, line, "changed file")
+	// One newline between the head and the artifacts line. Appending the
+	// separator unconditionally puts a blank line there, which reads as a
+	// rendering glitch in the conversation pane.
+	assert.NotContains(t, line, "\n\n", "blank line between the head and the artifacts line:\n%q", line)
+}
+
+// And it must still compose with the other body parts rather than replacing
+// them, which is the failure a naive fix would introduce.
+func TestFormatTerminalJobLine_ArtifactsComposeWithSummary(t *testing.T) {
+	line := formatTerminalJobLine(jobs.Snapshot{
+		ID:        "art22222",
+		State:     jobs.StateCompleted,
+		Summary:   "did the thing",
+		Artifacts: []jobs.Artifact{{ID: "a1", Kind: "file_change", Title: "main.go"}},
+	})
+	assert.Contains(t, line, "did the thing")
+	assert.Contains(t, line, "artifacts:")
+	assert.NotContains(t, line, "did the thingartifacts:", "the two body parts ran together:\n%s", line)
+}
+
+// A job with nothing to report is still one line, not a line plus a blank one.
+func TestFormatTerminalJobLine_NoBodyStaysOneLine(t *testing.T) {
+	line := formatTerminalJobLine(jobs.Snapshot{ID: "bare1234", State: jobs.StateCompleted})
+	assert.NotContains(t, line, "\n", "an empty body added a trailing line:\n%q", line)
+}

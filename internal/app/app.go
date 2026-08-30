@@ -1975,16 +1975,25 @@ func formatTerminalJobLine(snap jobs.Snapshot) string {
 		}
 		body += "error: " + snap.Error
 	}
+	// Every part is gathered before anything decides the line is empty. The
+	// early return that used to sit inside this first branch skipped the
+	// artifacts block below it, so a job that finished with artifacts but no
+	// summary, error or worktree lost the one line naming what it produced --
+	// and the pointer to /agents for reading it. formatAgentPeek builds its
+	// body the same way, which is why it never had this bug.
 	if body == "" {
 		body = worktreeSummary(snap)
-		if body == "" {
-			return head
-		}
 	} else if wt := worktreeSummary(snap); wt != "" {
 		body += "\n" + wt
 	}
 	if digest := jobs.ArtifactDigest(snap.Artifacts); digest != "" {
-		body += "\nartifacts: " + digest + " · /agents " + snap.ID
+		if body != "" {
+			body += "\n"
+		}
+		body += "artifacts: " + digest + " · /agents " + snap.ID
+	}
+	if body == "" {
+		return head
 	}
 	return head + "\n" + body
 }
