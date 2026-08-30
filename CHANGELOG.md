@@ -153,6 +153,12 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- Provider stream parsers can no longer be stranded by a consumer that stops
+  reading. Every event now goes through a sink bound to the turn's context, so
+  a send cannot block indefinitely on a full channel; previously a cancelled
+  turn whose consumer never drained again left the parser goroutine holding the
+  response body and the stall guard for the life of the process. Applies to the
+  OpenAI-compatible, Responses, Anthropic, Gemini, and Ollama parsers.
 - An MCP server that died with a non-zero exit status could be reported as
   `exited: EOF`. A child's stdout closes before it is reaped, so the reader
   usually won the race and recorded EOF as the cause; the reaper corrected it a

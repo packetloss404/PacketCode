@@ -426,6 +426,11 @@ type activeToolBlock struct {
 }
 
 func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.ReadCloser, ch chan<- provider.StreamEvent) {
+	// Every event goes through the sink, which observes cancellation. Bare
+	// sends could block forever on a full buffer if the consumer ever stopped
+	// draining, stranding this goroutine with the response body and the stall
+	// guard still held.
+	sink := provider.NewStreamSink(ctx, ch)
 	defer close(ch)
 	defer body.Close()
 	defer guard.Stop()
@@ -453,11 +458,15 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		}
 		var ev streamEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse anthropic chunk: %w", err)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse anthropic chunk: %w", err)}) {
+				return false
+			}
 			return false
 		}
 		if ev.Error != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s: %s", ev.Error.Type, ev.Error.Message)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s: %s", ev.Error.Type, ev.Error.Message)}) {
+				return false
+			}
 			return false
 		}
 		if ev.Message != nil && ev.Message.Usage != nil {
@@ -471,13 +480,15 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
 				block := activeToolBlock{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
 				tools[ev.Index] = block
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type: provider.EventToolCallStart,
 					ToolCall: &provider.ToolCallDelta{
 						Index: ev.Index,
 						ID:    block.id,
 						Name:  block.name,
 					},
+				}) {
+					return false
 				}
 			}
 		case "content_block_delta":
@@ -487,11 +498,13 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			switch ev.Delta.Type {
 			case "text_delta":
 				if ev.Delta.Text != "" {
-					ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: ev.Delta.Text}
+					if !sink.Send(provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: ev.Delta.Text}) {
+						return false
+					}
 				}
 			case "input_json_delta":
 				block := tools[ev.Index]
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type: provider.EventToolCallDelta,
 					ToolCall: &provider.ToolCallDelta{
 						Index:          ev.Index,
@@ -499,22 +512,28 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 						Name:           block.name,
 						ArgumentsDelta: ev.Delta.PartialJSON,
 					},
+				}) {
+					return false
 				}
 			}
 		case "content_block_stop":
 			if block, ok := tools[ev.Index]; ok {
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type: provider.EventToolCallEnd,
 					ToolCall: &provider.ToolCallDelta{
 						Index: ev.Index,
 						ID:    block.id,
 						Name:  block.name,
 					},
+				}) {
+					return false
 				}
 				delete(tools, ev.Index)
 			}
 		case "message_stop":
-			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}) {
+				return false
+			}
 			return false
 		}
 		return true
@@ -522,7 +541,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 
 	for scanner.Scan() {
 		if err := provider.StreamHaltError(ctx, sctx); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+				return
+			}
 			return
 		}
 		line := scanner.Text()
@@ -539,10 +560,14 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 	}
 	if err := scanner.Err(); err != nil {
 		if haltErr := provider.StreamHaltError(ctx, sctx); haltErr != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: haltErr}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: haltErr}) {
+				return
+			}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+			return
+		}
 		return
 	}
 	if len(dataLines) > 0 {
@@ -550,7 +575,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			return
 		}
 	}
-	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}
+	if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}) {
+		return
+	}
 }
 
 // mergeAnthropicUsage folds one event's usage into the running raw totals.
