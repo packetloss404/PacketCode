@@ -153,6 +153,10 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- A finished background job whose only output was artifacts reported none. The
+  job line returned early when there was no summary, error or worktree, which
+  skipped the artifacts line below it — losing both the description of what the
+  job produced and the `/agents <id>` pointer for reading it.
 - Provider stream parsers can no longer be stranded by a consumer that stops
   reading. Every event now goes through a sink bound to the turn's context, so
   a send cannot block indefinitely on a full channel; previously a cancelled
