@@ -67,17 +67,28 @@ type rpcResponse struct {
 // Client drives a single MCP server over stdio. All public methods are
 // safe for concurrent use.
 type Client struct {
-	name        string
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	stdout      io.ReadCloser
-	logFile     *os.File
-	wmu         sync.Mutex // serialises stdin writes
-	deathMu     sync.Mutex
-	nextID      atomic.Int64
-	pending     sync.Map // map[int64]chan rpcResponse
-	dead        atomic.Bool
-	deadErr     atomic.Value // error
+	name    string
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	logFile *os.File
+	wmu     sync.Mutex // serialises stdin writes
+	deathMu sync.Mutex
+	nextID  atomic.Int64
+	pending sync.Map // map[int64]chan rpcResponse
+	dead    atomic.Bool
+	deadErr atomic.Value // error
+	// reaped is closed once the child has been waited on and the authoritative
+	// exit reason stored, or immediately when there is no child to reap.
+	//
+	// Liveness and cause are two different facts and used to share one atomic.
+	// `dead` has to flip the instant either goroutine sees the end, because it
+	// is what unblocks callers stuck in write(); the *cause* is not known until
+	// cmd.Wait returns. A child's stdout closes before it is reaped, so the
+	// reader almost always wins that race and stores EOF -- and anything
+	// reading DeathReason right after seeing !IsAlive got "exited: EOF" for a
+	// server that died with "exit status 7".
+	reaped      chan struct{}
 	serverInfo  ServerInfo
 	tools       []ServerTool
 	callTimeout time.Duration
@@ -108,6 +119,7 @@ func NewClient(ctx context.Context, cfg ServerConfig, logDir string, info Client
 		stdout:      stdout,
 		logFile:     logFile,
 		callTimeout: timeout,
+		reaped:      make(chan struct{}),
 	}
 
 	go c.readerLoop()
@@ -132,10 +144,17 @@ func newClientFromIO(ctx context.Context, name string, stdin io.WriteCloser, std
 		stdout:      stdout,
 		logFile:     logFile,
 		callTimeout: timeout,
+		reaped:      make(chan struct{}),
 	}
 	go c.readerLoop()
 	if cmd != nil {
 		go c.reaperLoop()
+	} else {
+		// Nothing to reap, so whatever the reader records is already the whole
+		// story. Closed here rather than left open, or every DeathReasonWithin
+		// on an attached client would burn its full timeout waiting for a
+		// goroutine that was never started.
+		close(c.reaped)
 	}
 	if err := c.handshake(ctx, timeout, info); err != nil {
 		c.markDead(err)
@@ -220,8 +239,14 @@ func (c *Client) PID() int {
 // the reaper has not yet recorded an exit.
 func (c *Client) IsAlive() bool { return !c.dead.Load() }
 
-// DeathReason returns the error recorded when the client was marked
-// dead, or nil if still alive.
+// DeathReason returns the error recorded when the client was marked dead, or
+// nil if still alive.
+//
+// Non-blocking, and therefore possibly incomplete: between the reader seeing
+// stdout close and the reaper collecting the exit status, this reports the
+// bare "server exited". That is deliberate -- the alternative is reporting a
+// cause that is not the cause. Callers that want the exit status should use
+// DeathReasonWithin.
 func (c *Client) DeathReason() error {
 	if v := c.deadErr.Load(); v != nil {
 		if e, ok := v.(error); ok {
@@ -229,6 +254,35 @@ func (c *Client) DeathReason() error {
 		}
 	}
 	return nil
+}
+
+// DeathReasonWithin is DeathReason, waiting up to d for the child to be reaped
+// so the exit status is included.
+//
+// Diagnostics use this: a human asking why a server died can afford to wait a
+// few milliseconds, and the gap is normally that small -- the reaper is already
+// blocked in Wait when stdout closes. The bound exists for the pathological
+// case of a child that closes its output and lingers; there, the honest answer
+// is the one already recorded, that the server stopped talking.
+//
+// Returns nil while the client is alive, exactly like DeathReason.
+func (c *Client) DeathReasonWithin(d time.Duration) error {
+	if c.IsAlive() {
+		return nil
+	}
+	if c.reaped != nil {
+		select {
+		case <-c.reaped:
+		default:
+			timer := time.NewTimer(d)
+			defer timer.Stop()
+			select {
+			case <-c.reaped:
+			case <-timer.C:
+			}
+		}
+	}
+	return c.DeathReason()
 }
 
 // CallTool invokes tools/call against the server and decodes the result.
@@ -363,7 +417,17 @@ func (c *Client) readerLoop() {
 	if err == nil {
 		err = io.EOF
 	}
-	c.markDead(eofExit(err))
+	// Provisional when there is still a child to reap. EOF on stdout is not a
+	// cause of death, it is the first symptom -- and recording it as the cause
+	// is worse than recording nothing, because "exited: EOF" reads like an
+	// explanation and displaces the real one. The reaper replaces this with the
+	// exit status. A scanner error is kept: that one really is what happened to
+	// the stream, and the reaper's status does not describe it.
+	if c.cmd != nil && errors.Is(err, io.EOF) {
+		c.markDead(pendingExit())
+	} else {
+		c.markDead(eofExit(err))
+	}
 	c.flushPendingExited()
 }
 
@@ -382,14 +446,35 @@ func eofExit(underlying error) error {
 	return &serverExitError{underlying: underlying}
 }
 
+// DeathReasonWait is how long a diagnostic should wait for a dying server's
+// exit status. The gap between stdout closing and cmd.Wait returning is
+// normally sub-millisecond -- the reaper is already blocked in Wait when the
+// pipe closes -- so this is a bound on the pathological case of a child that
+// stops talking and lingers, not a delay anyone pays in the normal one.
+const DeathReasonWait = 2 * time.Second
+
+// pendingExit is the reason recorded when the server is known to be gone but
+// its exit status has not been collected yet. It renders as the bare sentinel
+// -- "server exited" -- because that is all that is known, and the reaper
+// replaces it with the real status.
+func pendingExit() error {
+	return &serverExitError{pending: true}
+}
+
 // serverExitError is the structured error stored in deadErr by the
 // reader goroutine. Its Unwrap chain visits ErrServerExited first
 // (via errors.Is) and the underlying io error second.
 type serverExitError struct {
 	underlying error
+	// pending marks a reason recorded before the child was reaped, so the
+	// exit status is not in it yet. See pendingExit.
+	pending bool
 }
 
 func (e *serverExitError) Error() string {
+	if e.underlying == nil {
+		return ErrServerExited.Error()
+	}
 	return ErrServerExited.Error() + ": " + e.underlying.Error()
 }
 
@@ -397,6 +482,9 @@ func (e *serverExitError) Error() string {
 func (e *serverExitError) Is(target error) bool {
 	if target == ErrServerExited {
 		return true
+	}
+	if e.underlying == nil {
+		return false
 	}
 	return errors.Is(e.underlying, target)
 }
@@ -480,6 +568,9 @@ func (c *Client) reaperLoop() {
 	if c.cmd == nil {
 		return
 	}
+	// Closed on every exit path, including a Wait that fails: a caller waiting
+	// for the authoritative reason must never wait for one that is not coming.
+	defer close(c.reaped)
 	err := c.cmd.Wait()
 	_ = procrun.ReleaseTree(c.cmd)
 	if err == nil {
@@ -553,6 +644,14 @@ func closeExitErr(reason error) error {
 		return nil
 	}
 	if reason == ErrServerExited {
+		return nil
+	}
+	// A reason still awaiting the exit status is "we do not know yet", not
+	// "it failed". Close waits for the reaper before asking, so this is
+	// belt-and-braces; reporting a spurious close error would be worse than
+	// the silence.
+	var exit *serverExitError
+	if errors.As(reason, &exit) && exit.pending {
 		return nil
 	}
 	return reason
