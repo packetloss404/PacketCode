@@ -96,14 +96,16 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
 - **`formatTerminalJobLine` drops the artifacts line** (`app.go:1852`) when a
   job has no summary, error or worktree: it returns before the
   `jobs.ArtifactDigest` block, so `artifacts: … · /agents <id>` is lost.
-- **MCP death reason can report EOF instead of the real exit status.** A
-  child's stdout closes before it is reaped, so `readerLoop` usually wins the
-  `markDead` race with a bare `eofExit(io.EOF)`; `reaperLoop` then overwrites
-  `deadErr` with the real `exec.ExitError`, but `IsAlive()` has already
-  flipped. Anything reading `DeathReason()` right after seeing `!IsAlive()` —
-  including `Manager.Reports()` — can print `exited: EOF` for a server that
-  died with `exit status 7`. Diagnostic-only, but every candidate fix reorders
-  process-lifecycle concurrency; it needs the lifecycle contract decided first.
+- ~~MCP death reason can report EOF instead of the real exit status.~~
+  **Fixed 2026-08-30.** The contract this was waiting on turned out not to need
+  the lifecycle reordering the diagnosis feared. Liveness and cause are two
+  facts that were sharing one atomic: `dead` has to flip the instant the reader
+  sees stdout close, because that is what unblocks callers stuck in `write()`,
+  while the cause is not known until `cmd.Wait` returns. Nothing about that
+  ordering changed — the reader simply stopped claiming to know why. With a
+  child still to reap it records the bare sentinel, and the reaper replaces it
+  with the exit status. `DeathReasonWithin` waits for the reap for callers that
+  want the status, and the diagnostics use it.
 - **Provider SSE parsers send on an unguarded channel.** Every
   `ch <- provider.StreamEvent{...}` in `openaicompat`, `responses`,
   `anthropic`, `gemini`, and `ollama` is a bare send on an 8-buffered channel
