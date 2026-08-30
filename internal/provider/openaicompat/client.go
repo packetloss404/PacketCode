@@ -462,42 +462,48 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 	defer body.Close()
 	defer guard.Stop()
 
+	// Every event goes through the sink, which observes cancellation. Bare
+	// sends could block forever on a full buffer if the consumer ever stopped
+	// draining, stranding this goroutine with the response body and the stall
+	// guard still held.
+	sink := provider.NewStreamSink(ctx, ch)
+
 	// emitContent routes one content delta. Without a filter this preserves the
 	// original behaviour exactly, including suppressing text that shares a frame
 	// with tool calls. With a filter, text is never suppressed: a frame that
 	// carries both a closing </think> and a tool call is normal for M3, and
 	// dropping it would lose the tail of the reasoning chain.
-	emitContent := func(text string, hasToolCalls bool) {
+	// Returns false when the turn was cancelled, which the callers treat as the
+	// end of the stream. A closure returning nothing could not report that, so
+	// a cancelled turn would have carried on parsing into a channel nobody was
+	// reading.
+	emitContent := func(text string, hasToolCalls bool) bool {
 		if text == "" {
-			return
+			return true
 		}
 		if filter == nil {
 			if !hasToolCalls {
-				ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: text}
+				return sink.Text(text)
 			}
-			return
+			return true
 		}
 		visible, reasoning := filter.Write(text)
-		if reasoning != "" {
-			ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: reasoning}
+		if !sink.Reasoning(reasoning) {
+			return false
 		}
-		if visible != "" {
-			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: visible}
-		}
+		return sink.Text(visible)
 	}
 
 	// flushFilter drains any text held back as a possible partial tag.
-	flushFilter := func() {
+	flushFilter := func() bool {
 		if filter == nil {
-			return
+			return true
 		}
 		visible, reasoning := filter.Flush()
-		if reasoning != "" {
-			ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: reasoning}
+		if !sink.Reasoning(reasoning) {
+			return false
 		}
-		if visible != "" {
-			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: visible}
-		}
+		return sink.Text(visible)
 	}
 
 	// activeCalls tracks which indices we've already emitted Start for.
@@ -508,7 +514,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 
 	for scanner.Scan() {
 		if err := provider.StreamHaltError(ctx, sctx); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+				return
+			}
 			return
 		}
 		line := scanner.Text()
@@ -521,48 +529,62 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		guard.Tick()
 		if data == "[DONE]" {
-			flushFilter()
+			if !flushFilter() {
+				return
+			}
 			// End any tool calls still open (defensive — most providers
 			// emit finish_reason before [DONE]).
 			for idx := range activeCalls {
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type:     provider.EventToolCallEnd,
 					ToolCall: &provider.ToolCallDelta{Index: idx},
+				}) {
+					return
 				}
 			}
-			ch <- provider.StreamEvent{Type: provider.EventDone}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventDone}) {
+				return
+			}
 			return
 		}
 
 		var chunk chatStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse SSE chunk: %w", err)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse SSE chunk: %w", err)}) {
+				return
+			}
 			return
 		}
 
 		for _, choice := range chunk.Choices {
 			hasToolCalls := len(choice.Delta.ToolCalls) > 0
 			if choice.Delta.ReasoningContent != "" {
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type:      provider.EventReasoningDelta,
 					TextDelta: choice.Delta.ReasoningContent,
+				}) {
+					return
 				}
 			}
-			emitContent(choice.Delta.Content, hasToolCalls)
+			if !emitContent(choice.Delta.Content, hasToolCalls) {
+				return
+			}
 			for _, tc := range choice.Delta.ToolCalls {
 				if !activeCalls[tc.Index] {
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type: provider.EventToolCallStart,
 						ToolCall: &provider.ToolCallDelta{
 							Index: tc.Index,
 							ID:    tc.ID,
 							Name:  tc.Function.Name,
 						},
+					}) {
+						return
 					}
 					activeCalls[tc.Index] = true
 				}
 				if tc.Function.Arguments != "" || tc.Function.Name != "" || tc.ID != "" {
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type: provider.EventToolCallDelta,
 						ToolCall: &provider.ToolCallDelta{
 							Index:          tc.Index,
@@ -570,23 +592,31 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 							Name:           tc.Function.Name,
 							ArgumentsDelta: tc.Function.Arguments,
 						},
+					}) {
+						return
 					}
 				}
 			}
 			if choice.FinishReason != nil {
 				reason := *choice.FinishReason
 				if reason == "length" || reason == "content_filter" {
-					ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}
+					if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}) {
+						return
+					}
 					return
 				}
 				if reason != "tool_calls" && len(activeCalls) > 0 {
-					ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}
+					if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream stopped with finish_reason %q", reason)}) {
+						return
+					}
 					return
 				}
 				for idx := range activeCalls {
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type:     provider.EventToolCallEnd,
 						ToolCall: &provider.ToolCallDelta{Index: idx},
+					}) {
+						return
 					}
 					delete(activeCalls, idx)
 				}
@@ -594,7 +624,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		}
 
 		if chunk.Usage != nil {
-			flushFilter()
+			if !flushFilter() {
+				return
+			}
 			usage := provider.Usage{
 				InputTokens:  chunk.Usage.PromptTokens,
 				OutputTokens: chunk.Usage.CompletionTokens,
@@ -602,22 +634,34 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			if d := chunk.Usage.PromptTokensDetails; d != nil {
 				usage.CacheReadInputTokens = d.CachedTokens
 			}
-			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &usage}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: &usage}) {
+				return
+			}
 			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil && sctx.Err() != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}) {
+				return
+			}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+			return
+		}
 		return
 	}
 	if len(activeCalls) > 0 {
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream ended before completion")}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("tool call stream ended before completion")}) {
+			return
+		}
 		return
 	}
-	flushFilter()
-	ch <- provider.StreamEvent{Type: provider.EventDone}
+	if !flushFilter() {
+		return
+	}
+	if !sink.Send(provider.StreamEvent{Type: provider.EventDone}) {
+		return
+	}
 }

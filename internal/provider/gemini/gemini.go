@@ -432,6 +432,12 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 // body-close from Scanner. On cancel we emit EventError with ctx.Err()
 // so the agent path surfaces the friendlier "turn cancelled" rendering.
 func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.ReadCloser, ch chan<- provider.StreamEvent) {
+	// Every event goes through the sink, which observes cancellation.
+	// Bare sends here could block forever on a full buffer if the consumer
+	// ever stopped draining, stranding this goroutine with the response
+	// body and the stall guard still held.
+	sink := provider.NewStreamSink(ctx, ch)
+
 	defer close(ch)
 	defer body.Close()
 	defer guard.Stop()
@@ -444,7 +450,9 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 
 	for scanner.Scan() {
 		if err := provider.StreamHaltError(ctx, sctx); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+				return
+			}
 			return
 		}
 		line := scanner.Text()
@@ -459,13 +467,17 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse gemini chunk: %w", err)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse gemini chunk: %w", err)}) {
+				return
+			}
 			return
 		}
 
 		for _, cand := range chunk.Candidates {
 			if isMalformedFunctionCallFinish(cand.FinishReason) {
-				ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini returned %s", cand.FinishReason)}
+				if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini returned %s", cand.FinishReason)}) {
+					return
+				}
 				return
 			}
 			hasFunctionCall := false
@@ -477,27 +489,33 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 			}
 			for _, part := range cand.Content.Parts {
 				if part.Text != "" && !hasFunctionCall {
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type:      provider.EventTextDelta,
 						TextDelta: part.Text,
+					}) {
+						return
 					}
 				}
 				if part.FunctionCall != nil {
 					args, err := normalizeToolArgs(part.FunctionCall.Name, part.FunctionCall.Args)
 					if err != nil {
-						ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+						if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+							return
+						}
 						return
 					}
 					id := fmt.Sprintf("call_%d", toolCallIdx)
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type: provider.EventToolCallStart,
 						ToolCall: &provider.ToolCallDelta{
 							Index: toolCallIdx,
 							ID:    id,
 							Name:  part.FunctionCall.Name,
 						},
+					}) {
+						return
 					}
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type: provider.EventToolCallDelta,
 						ToolCall: &provider.ToolCallDelta{
 							Index:          toolCallIdx,
@@ -505,10 +523,14 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 							Name:           part.FunctionCall.Name,
 							ArgumentsDelta: string(args),
 						},
+					}) {
+						return
 					}
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type:     provider.EventToolCallEnd,
 						ToolCall: &provider.ToolCallDelta{Index: toolCallIdx},
+					}) {
+						return
 					}
 					toolCallIdx++
 				}
@@ -525,13 +547,19 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 	}
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil && sctx.Err() != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}) {
+				return
+			}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+			return
+		}
 		return
 	}
-	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}
+	if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}) {
+		return
+	}
 }
 
 func normalizeToolArgs(name string, args json.RawMessage) (json.RawMessage, error) {

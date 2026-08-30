@@ -593,6 +593,12 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 // the body-close from Scanner. On cancel we emit EventError with
 // ctx.Err() so the agent surfaces the friendlier "turn cancelled" line.
 func (p *Provider) parseOllamaStream(ctx, sctx context.Context, guard *provider.StallGuard, body io.ReadCloser, ch chan<- provider.StreamEvent) {
+	// Every event goes through the sink, which observes cancellation.
+	// Bare sends here could block forever on a full buffer if the consumer
+	// ever stopped draining, stranding this goroutine with the response
+	// body and the stall guard still held.
+	sink := provider.NewStreamSink(ctx, ch)
+
 	defer close(ch)
 	defer body.Close()
 	defer guard.Stop()
@@ -605,7 +611,9 @@ func (p *Provider) parseOllamaStream(ctx, sctx context.Context, guard *provider.
 
 	for scanner.Scan() {
 		if err := provider.StreamHaltError(ctx, sctx); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+				return
+			}
 			return
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -615,28 +623,34 @@ func (p *Provider) parseOllamaStream(ctx, sctx context.Context, guard *provider.
 		guard.Tick()
 		var chunk chatChunk
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse ollama chunk: %w", err)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse ollama chunk: %w", err)}) {
+				return
+			}
 			return
 		}
 
 		if chunk.Message.Content != "" && len(chunk.Message.ToolCalls) == 0 {
-			ch <- provider.StreamEvent{
+			if !sink.Send(provider.StreamEvent{
 				Type:      provider.EventTextDelta,
 				TextDelta: chunk.Message.Content,
+			}) {
+				return
 			}
 		}
 
 		for _, tc := range chunk.Message.ToolCalls {
 			id := fmt.Sprintf("call_%d", toolIdx)
-			ch <- provider.StreamEvent{
+			if !sink.Send(provider.StreamEvent{
 				Type: provider.EventToolCallStart,
 				ToolCall: &provider.ToolCallDelta{
 					Index: toolIdx,
 					ID:    id,
 					Name:  tc.Function.Name,
 				},
+			}) {
+				return
 			}
-			ch <- provider.StreamEvent{
+			if !sink.Send(provider.StreamEvent{
 				Type: provider.EventToolCallDelta,
 				ToolCall: &provider.ToolCallDelta{
 					Index:          toolIdx,
@@ -644,10 +658,14 @@ func (p *Provider) parseOllamaStream(ctx, sctx context.Context, guard *provider.
 					Name:           tc.Function.Name,
 					ArgumentsDelta: string(tc.Function.Arguments),
 				},
+			}) {
+				return
 			}
-			ch <- provider.StreamEvent{
+			if !sink.Send(provider.StreamEvent{
 				Type:     provider.EventToolCallEnd,
 				ToolCall: &provider.ToolCallDelta{Index: toolIdx},
+			}) {
+				return
 			}
 			toolIdx++
 		}
@@ -672,22 +690,32 @@ func (p *Provider) parseOllamaStream(ctx, sctx context.Context, guard *provider.
 			// OpenAI-compatible path rather than presenting a partial answer as
 			// complete. "stop" (and empty) is a normal completion.
 			if chunk.DoneReason == "length" {
-				ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("ollama response truncated (hit token limit; raise num_ctx or shorten the prompt)")}
+				if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("ollama response truncated (hit token limit; raise num_ctx or shorten the prompt)")}) {
+					return
+				}
 				return
 			}
-			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}) {
+				return
+			}
 			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil && sctx.Err() != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}) {
+				return
+			}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+			return
+		}
 		return
 	}
-	ch <- provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}
+	if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: lastUsage}) {
+		return
+	}
 }
 
 // Pricing — local inference is free.

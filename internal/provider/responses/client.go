@@ -482,6 +482,12 @@ type callState struct {
 // parseSSE reads Responses-API server-sent events and translates them into the
 // provider.StreamEvent sequence. It closes ch and body before returning.
 func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interface{ Read([]byte) (int, error) }, ch chan<- provider.StreamEvent, backend Backend) {
+	// Every event goes through the sink, which observes cancellation.
+	// Bare sends here could block forever on a full buffer if the consumer
+	// ever stopped draining, stranding this goroutine with the response
+	// body and the stall guard still held.
+	sink := provider.NewStreamSink(ctx, ch)
+
 	defer close(ch)
 	if closer, ok := body.(interface{ Close() error }); ok {
 		defer closer.Close()
@@ -495,7 +501,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 
 	for scanner.Scan() {
 		if err := provider.StreamHaltError(ctx, sctx); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+				return
+			}
 			return
 		}
 		line := scanner.Text()
@@ -510,31 +518,39 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 
 		var ev sseEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse SSE event: %w", err)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("parse SSE event: %w", err)}) {
+				return
+			}
 			return
 		}
 
 		switch ev.Type {
 		case "response.output_text.delta":
 			if ev.Delta != "" {
-				ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: ev.Delta}
+				if !sink.Send(provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: ev.Delta}) {
+					return
+				}
 			}
 
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			if ev.Delta != "" {
-				ch <- provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: ev.Delta}
+				if !sink.Send(provider.StreamEvent{Type: provider.EventReasoningDelta, TextDelta: ev.Delta}) {
+					return
+				}
 			}
 
 		case "response.output_item.added":
 			if ev.Item != nil && ev.Item.Type == "function_call" {
 				calls[ev.OutputIndex] = &callState{started: true}
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type: provider.EventToolCallStart,
 					ToolCall: &provider.ToolCallDelta{
 						Index: ev.OutputIndex,
 						ID:    ev.Item.CallID,
 						Name:  ev.Item.Name,
 					},
+				}) {
+					return
 				}
 			}
 
@@ -543,12 +559,14 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 				if st := calls[ev.OutputIndex]; st != nil {
 					st.gotDelta = true
 				}
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type: provider.EventToolCallDelta,
 					ToolCall: &provider.ToolCallDelta{
 						Index:          ev.OutputIndex,
 						ArgumentsDelta: ev.Delta,
 					},
+				}) {
+					return
 				}
 			}
 
@@ -559,26 +577,32 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 				// complete arguments now so the agent can assemble the call.
 				if (st == nil || !st.gotDelta) && ev.Item.Arguments != "" {
 					if st == nil || !st.started {
-						ch <- provider.StreamEvent{
+						if !sink.Send(provider.StreamEvent{
 							Type: provider.EventToolCallStart,
 							ToolCall: &provider.ToolCallDelta{
 								Index: ev.OutputIndex,
 								ID:    ev.Item.CallID,
 								Name:  ev.Item.Name,
 							},
+						}) {
+							return
 						}
 					}
-					ch <- provider.StreamEvent{
+					if !sink.Send(provider.StreamEvent{
 						Type: provider.EventToolCallDelta,
 						ToolCall: &provider.ToolCallDelta{
 							Index:          ev.OutputIndex,
 							ArgumentsDelta: ev.Item.Arguments,
 						},
+					}) {
+						return
 					}
 				}
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type:     provider.EventToolCallEnd,
 					ToolCall: &provider.ToolCallDelta{Index: ev.OutputIndex},
+				}) {
+					return
 				}
 				delete(calls, ev.OutputIndex)
 			}
@@ -586,9 +610,11 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 		case "response.completed":
 			// Close any calls that somehow never emitted a done frame.
 			for idx := range calls {
-				ch <- provider.StreamEvent{
+				if !sink.Send(provider.StreamEvent{
 					Type:     provider.EventToolCallEnd,
 					ToolCall: &provider.ToolCallDelta{Index: idx},
+				}) {
+					return
 				}
 			}
 			done := provider.StreamEvent{Type: provider.EventDone}
@@ -607,7 +633,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 			if ev.Response != nil && ev.Response.Error != nil && ev.Response.Error.Message != "" {
 				msg = ev.Response.Error.Message
 			}
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}) {
+				return
+			}
 			return
 
 		case "error":
@@ -618,7 +646,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 			if msg == "" {
 				msg = backend.name() + " stream error"
 			}
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s", msg)}) {
+				return
+			}
 			return
 		}
 		// All other event types (response.created, reasoning_summary_part.*,
@@ -627,16 +657,24 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil && sctx.Err() != nil {
-			ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("provider stream stalled (no data received)")}) {
+				return
+			}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err}) {
+			return
+		}
 		return
 	}
 	// Stream ended without an explicit completed/failed event.
 	if len(calls) > 0 {
-		ch <- provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s stream ended before completion", backend.name())}
+		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s stream ended before completion", backend.name())}) {
+			return
+		}
 		return
 	}
-	ch <- provider.StreamEvent{Type: provider.EventDone}
+	if !sink.Send(provider.StreamEvent{Type: provider.EventDone}) {
+		return
+	}
 }

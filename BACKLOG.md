@@ -106,12 +106,21 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   child still to reap it records the bare sentinel, and the reaper replaces it
   with the exit status. `DeathReasonWithin` waits for the reap for callers that
   want the status, and the diagnostics use it.
-- **Provider SSE parsers send on an unguarded channel.** Every
-  `ch <- provider.StreamEvent{...}` in `openaicompat`, `responses`,
-  `anthropic`, `gemini`, and `ollama` is a bare send on an 8-buffered channel
-  with no `select` on `ctx.Done()`. Latent today because the consumer in
-  `internal/agent` drains, but it is a contract held by convention across five
-  providers rather than by construction.
+- ~~Provider SSE parsers send on an unguarded channel.~~ **Fixed 2026-08-30.**
+  Sixty-nine bare sends across five parsers now go through `provider.StreamSink`,
+  which selects on the turn's context. The point was to make the guarantee
+  structural rather than repeat a select at every site: a parser cannot send
+  without going through the sink, and the sink cannot send without observing
+  cancellation.
+  Narrower than it looked, and in an instructive way. Each parser already
+  re-checks cancellation at the top of its scanner loop, so a consumer that
+  cancelled *and then drained* was always safe — the drain releases the send
+  and the next iteration bails. The reachable gap was a consumer that cancels
+  and never drains again: the send never returns, the loop never reaches its
+  check, and the goroutine holds the response body and stall guard forever.
+  The regression test therefore never receives after cancelling and asserts on
+  the goroutine, because observing a channel close means receiving from it,
+  which is the one thing that hides the bug.
 - **`agent.ToolDecider` / `DecideTool` is a half-wired interface.** Nothing in
   `internal/agent` ever type-asserts to it, yet `internal/app.uiApprover`
   implements `DecideTool` and it is never called. Either the agent is missing
