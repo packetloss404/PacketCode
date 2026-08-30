@@ -234,3 +234,97 @@ func TestRenderLoops_ListsInCreationOrder(t *testing.T) {
 		}
 	}
 }
+
+// A self-paced loop started during a streaming turn used to register, appear
+// in /loop list forever, and do nothing. runLoopBody's streaming guard sat
+// before the line that claims loop ownership, so agentDoneMsg had nothing to
+// re-run -- and slash commands dispatch during a stream, so typing /loop
+// mid-turn hit this every time.
+func TestLoopSelfPaced_StartedWhileStreamingKeepsOwnership(t *testing.T) {
+	r := newTestApp(t)
+	if r.app.loops == nil {
+		r.app.loops = map[string]*loopState{}
+	}
+	ls := &loopState{id: "loop1", mode: loopSelfPaced, body: "do a thing", maxIters: 25}
+	r.app.loops["loop1"] = ls
+
+	// A turn is already running, which is the case this test exists for.
+	r.app.streaming = true
+	r.app.runLoopBody(ls)
+
+	if len(r.app.queuedInputs) != 1 {
+		t.Fatalf("expected the body to be queued, got %d queued", len(r.app.queuedInputs))
+	}
+	q := r.app.queuedInputs[0]
+	if q.LoopID != "loop1" {
+		t.Fatalf("queued turn does not carry loop ownership: LoopID = %q", q.LoopID)
+	}
+	// The iteration instruction has to travel with it too. Without it the model
+	// is never told it is in a loop or how to declare the work finished, so
+	// even a loop that resumed would run to its iteration cap every time.
+	if !strings.Contains(q.Text, "Loop iteration 1") {
+		t.Fatalf("queued turn lost the loop instruction:\n%s", q.Text)
+	}
+	// But the transcript shows what the user asked to loop, not the protocol.
+	if q.Label() != "do a thing" {
+		t.Fatalf("Label = %q, want the plain body", q.Label())
+	}
+
+	// Draining the queue must claim ownership, or agentDoneMsg still has
+	// nothing to re-run. A real turn has to start for that, so the provider
+	// hangs rather than completing: the claim happens as the turn begins.
+	wireAgent(r, &hangingProvider{})
+	r.app.streaming = false
+	r.app.startNextQueuedInput()
+	if r.app.cancelTurn != nil {
+		defer r.app.cancelTurn()
+	}
+	if r.app.activeLoopID != "loop1" {
+		t.Fatalf("activeLoopID = %q after the queued turn started; the loop is orphaned", r.app.activeLoopID)
+	}
+}
+
+// The immediate path must behave identically -- one builder, two callers.
+func TestLoopSelfPaced_StartedIdleClaimsOwnership(t *testing.T) {
+	r := newTestApp(t)
+	if r.app.loops == nil {
+		r.app.loops = map[string]*loopState{}
+	}
+	ls := &loopState{id: "loop2", mode: loopSelfPaced, body: "do a thing", maxIters: 25}
+	r.app.loops["loop2"] = ls
+
+	wireAgent(r, &hangingProvider{})
+	r.app.streaming = false
+	r.app.runLoopBody(ls)
+	if r.app.cancelTurn != nil {
+		defer r.app.cancelTurn()
+	}
+
+	if r.app.activeLoopID != "loop2" {
+		t.Fatalf("activeLoopID = %q, want loop2", r.app.activeLoopID)
+	}
+	if len(r.app.queuedInputs) != 0 {
+		t.Fatalf("an idle start should not queue: %d queued", len(r.app.queuedInputs))
+	}
+}
+
+// An interval loop is driven by its ticker, not by turn completion, so it must
+// not claim ownership and hand itself to agentDoneMsg as well.
+func TestLoopInterval_DoesNotClaimTurnOwnership(t *testing.T) {
+	r := newTestApp(t)
+	if r.app.loops == nil {
+		r.app.loops = map[string]*loopState{}
+	}
+	ls := &loopState{id: "loop3", mode: loopInterval, body: "tick", maxIters: 25}
+	r.app.loops["loop3"] = ls
+
+	r.app.streaming = true
+	r.app.runLoopBody(ls)
+
+	if len(r.app.queuedInputs) != 1 {
+		t.Fatalf("expected one queued turn, got %d", len(r.app.queuedInputs))
+	}
+	if got := r.app.queuedInputs[0].LoopID; got != "" {
+		t.Fatalf("an interval loop claimed turn ownership: LoopID = %q", got)
+	}
+}

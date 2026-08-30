@@ -83,13 +83,16 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   (`scripts/tui_capture.py:207`); a Linux binary cross-compiled from Windows
   plus a throwaway `python:3.13-slim` container with `pyte` is enough to
   regenerate them without installing anything on the host.
-- **A self-paced `/loop` started during a streaming turn never advances.** In
-  `slashcmd_loop.go`, `runLoopBody`'s `if a.streaming { queueInput; return }`
-  guard sits before `a.activeLoopID = ls.id`, so `agentDoneMsg` never re-runs
-  the body. The loop registers, appears in `/loop list` forever, and does
-  nothing. Slash commands dispatch during a stream, so typing `/loop <prompt>`
-  mid-turn hits this every time. A correct fix re-attaches loop ownership to
-  the queued turn.
+- ~~A self-paced `/loop` started during a streaming turn never advances.~~
+  **Fixed 2026-08-30.** `runLoopBody`'s streaming guard sat before
+  `a.activeLoopID = ls.id`, so the loop registered, listed forever, and did
+  nothing. The diagnosis named the fix -- re-attach ownership to the queued
+  turn -- and that is what landed: `turnOptions`/`queuedInput` carry a
+  `loopID`, claimed when the turn actually starts rather than when it is
+  created. The guard also skipped the iteration instruction, so the queued body
+  was bare text with no way for the model to declare the work finished; the
+  turn is now built once, before the branch, and the queued and immediate paths
+  consume the same value.
 - **`formatTerminalJobLine` drops the artifacts line** (`app.go:1852`) when a
   job has no summary, error or worktree: it returns before the
   `jobs.ArtifactDigest` block, so `artifacts: … · /agents <id>` is lost.

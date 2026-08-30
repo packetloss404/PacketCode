@@ -143,17 +143,25 @@ func (a *App) runLoopBody(ls *loopState) tea.Cmd {
 		return teacmd
 	}
 
+	// Built once, before the streaming check. The queued path used to skip
+	// this, so a loop body typed mid-turn was queued as bare text: it claimed
+	// no loop ownership, and it did not carry the iteration instruction that
+	// tells the model how to declare the work finished. The loop then sat in
+	// /loop list forever, doing nothing.
+	opt := turnOptions{text: body, emitUser: true}
+	if ls.mode == loopSelfPaced {
+		opt.loopID = ls.id
+		opt.text = body + "\n\n[Loop iteration " + fmt.Sprint(ls.iterations) + ". If the task is complete and no further iterations are needed, end your reply with " + loopDecisionOpen + `{"version":1,"decision":"stop","reason":"brief reason"}` + loopDecisionClose + ". The legacy " + loopDoneSentinel + " sentinel is also accepted.]"
+	}
+	// The transcript shows the body the user asked to loop, not the body plus
+	// the machine-readable stop protocol appended to it.
+	opt.display = body
+
 	if a.streaming {
-		a.queueInput(body)
+		a.queueTurn(opt)
 		return nil
 	}
-
-	turnText := body
-	if ls.mode == loopSelfPaced {
-		a.activeLoopID = ls.id
-		turnText = body + "\n\n[Loop iteration " + fmt.Sprint(ls.iterations) + ". If the task is complete and no further iterations are needed, end your reply with " + loopDecisionOpen + `{"version":1,"decision":"stop","reason":"brief reason"}` + loopDecisionClose + ". The legacy " + loopDoneSentinel + " sentinel is also accepted.]"
-	}
-	_, teacmd := a.startTurn(turnText, true)
+	_, teacmd := a.startTurnWith(opt)
 	return teacmd
 }
 

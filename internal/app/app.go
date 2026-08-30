@@ -100,7 +100,9 @@ type queuedInput struct {
 	// @-mentions when the turn finally starts. See turnOptions.authored.
 	Authored bool
 	Attached []string
-	At       time.Time
+	// LoopID is the self-paced loop that owns this turn. See turnOptions.
+	LoopID string
+	At     time.Time
 }
 
 // Label is what a human should be shown for this entry. Never Text: for a
@@ -1488,6 +1490,15 @@ type turnOptions struct {
 	// attached names files the caller already resolved, so the "attached N
 	// files" line still appears for the arguments the user did type.
 	attached []string
+	// loopID is the self-paced loop that owns this turn, claimed when the turn
+	// actually starts rather than when it is created.
+	//
+	// A loop body typed during a stream is queued, and ownership has to travel
+	// with it: claiming it at creation would hand the running turn to the loop,
+	// and claiming it nowhere -- which is what happened -- left agentDoneMsg
+	// with nothing to re-run, so the loop registered, listed forever, and did
+	// nothing.
+	loopID string
 }
 
 func (a *App) startTurnWith(opt turnOptions) (tea.Model, tea.Cmd) {
@@ -1505,6 +1516,12 @@ func (a *App) startTurnWith(opt turnOptions) (tea.Model, tea.Cmd) {
 // typed is what they should see.
 func (a *App) startTurnResolved(opt turnOptions) (tea.Model, tea.Cmd) {
 	display, text, emitUser := opt.display, opt.text, opt.emitUser
+	// Claimed as the turn starts, so a queued loop body owns the turn it
+	// actually runs in rather than the one that was already streaming when it
+	// was typed.
+	if opt.loopID != "" {
+		a.activeLoopID = opt.loopID
+	}
 	// Resolve model-facing additions before checking the threshold. Large file
 	// mentions and the plan-mode instruction must count toward the upcoming
 	// request even though the visible user message keeps the original text.
@@ -1607,6 +1624,7 @@ func (a *App) queueTurn(opt turnOptions) {
 		Display:  opt.display,
 		Authored: opt.authored,
 		Attached: opt.attached,
+		LoopID:   opt.loopID,
 		At:       time.Now(),
 	}
 	a.queuedInputs = append(a.queuedInputs, q)
@@ -1653,6 +1671,7 @@ func (a *App) startNextQueuedInput() (tea.Model, tea.Cmd) {
 		emitUser: false,
 		authored: next.Authored,
 		attached: next.Attached,
+		loopID:   next.LoopID,
 	})
 }
 
