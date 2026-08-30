@@ -74,11 +74,16 @@ func (a *App) handleSessionsCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 
 	if sub == "" {
-		summaries, listErr := a.deps.Sessions.List()
+		summaries, problems, listErr := a.deps.Sessions.ListWithProblems()
 		if listErr != nil {
 			a.conversation.AppendSystem("sessions: list failed: " + listErr.Error())
 			return a, nil
 		}
+		// Reported, not swallowed. A session file that cannot be read used to
+		// vanish from this list, which is indistinguishable from a session
+		// that never existed -- and this is the command someone runs when they
+		// know it did.
+		a.reportSessionProblems("sessions", problems)
 		currentID := ""
 		if cur := a.deps.Sessions.Current(); cur != nil {
 			currentID = cur.ID
@@ -429,13 +434,41 @@ func (a *App) handleResumeCommand(args []string) (tea.Model, tea.Cmd) {
 // sessions come off local disk, so a spinner would only add a frame of
 // latency, and an empty list is better reported as a message than as an empty
 // overlay the user has to dismiss.
+// reportSessionProblems names session files that could not be read.
+//
+// Bounded, because a corrupt sessions directory must not flood the pane the
+// listing itself is trying to render; the count is still reported in full so
+// the user knows the list is short by more than what is named.
+func (a *App) reportSessionProblems(label string, problems []string) {
+	if len(problems) == 0 {
+		return
+	}
+	const show = 3
+	shown := problems
+	if len(shown) > show {
+		shown = shown[:show]
+	}
+	msg := fmt.Sprintf("%s: %s could not be read and %s not listed:",
+		label,
+		plural(len(problems), "session file", "session files"),
+		map[bool]string{true: "is", false: "are"}[len(problems) == 1])
+	for _, p := range shown {
+		msg += "\n  " + p
+	}
+	if len(problems) > show {
+		msg += fmt.Sprintf("\n  ... and %d more", len(problems)-show)
+	}
+	a.conversation.AppendSystem(msg)
+}
+
 func (a *App) openSessionPicker() tea.Cmd {
 	a.autocomplete.Close()
-	summaries, err := a.deps.Sessions.List()
+	summaries, problems, err := a.deps.Sessions.ListWithProblems()
 	if err != nil {
 		a.conversation.AppendSystem("resume: list failed: " + err.Error())
 		return nil
 	}
+	a.reportSessionProblems("resume", problems)
 	if len(summaries) == 0 {
 		a.conversation.AppendSystem("resume: no saved sessions yet")
 		return nil
