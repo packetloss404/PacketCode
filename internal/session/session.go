@@ -11,7 +11,6 @@ package session
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"github.com/packetcode/packetcode/internal/handoff"
 	"github.com/packetcode/packetcode/internal/provider"
 )
