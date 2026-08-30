@@ -75,14 +75,20 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   column never rendering. Both `truncate` helpers now measure display width via
   `ansi.Truncate`, which also fixes wide-rune under-measurement. Guarded by a
   unit test using literal escapes, because lipgloss emits none without a TTY.
-- **The TUI goldens were stale for 25 days.** Last regenerated 2026-08-01;
-  `targetLabel` entered the Agent View detail line on 2026-08-02, so
-  `make tui-golden-check` — and CI's `tui-golden` job — had been failing on
-  `main` since then, unrelated to any later change. Regenerated 2026-08-27 and
-  now passing. The harness refuses to run off POSIX
-  (`scripts/tui_capture.py:207`); a Linux binary cross-compiled from Windows
-  plus a throwaway `python:3.13-slim` container with `pyte` is enough to
-  regenerate them without installing anything on the host.
+- ~~The TUI goldens were stale for 25 days.~~ **Closed 2026-08-30.** Last
+  regenerated 2026-08-01; `targetLabel` entered the Agent View detail line on
+  2026-08-02, so `make tui-golden-check` — and CI's `tui-golden` job — had been
+  failing on `main` since then, unrelated to any later change. Regenerated
+  2026-08-27, and re-verified against a fresh build on 2026-08-30 rather than
+  taking the earlier note's word for it: `TUI goldens match`.
+  The harness refuses to run off POSIX (`scripts/tui_capture.py:207`), so
+  checking this from Windows means a cross-compiled Linux binary plus a
+  throwaway `python:3.13-slim` container with `pyte` — nothing installed on the
+  host. Two things bite on that path and are worth knowing before the next
+  person spends an hour on them: Git Bash rewrites `-w /w` into a Windows path
+  unless `MSYS_NO_PATHCONV=1` is set, and `scripts/tui_golden.sh` has CRLF
+  endings in the working tree, which `dash` rejects with `set: Illegal option -`
+  until the script is passed through `sed 's/$//'`.
 - ~~A self-paced `/loop` started during a streaming turn never advances.~~
   **Fixed 2026-08-30.** `runLoopBody`'s streaming guard sat before
   `a.activeLoopID = ls.id`, so the loop registered, listed forever, and did
