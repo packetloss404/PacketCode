@@ -126,11 +126,23 @@ they were left unfixed for the reason given, not for lack of a diagnosis.
   The regression test therefore never receives after cancelling and asserts on
   the goroutine, because observing a channel close means receiving from it,
   which is the one thing that hides the bug.
-- **`agent.ToolDecider` / `DecideTool` is a half-wired interface.** Nothing in
-  `internal/agent` ever type-asserts to it, yet `internal/app.uiApprover`
-  implements `DecideTool` and it is never called. Either the agent is missing
-  a consult site or both halves are dead; deleting is unsafe without knowing
-  which.
+- ~~`agent.ToolDecider` / `DecideTool` is a half-wired interface.~~
+  **Removed 2026-08-30.** The question was which half was dead, and the answer
+  is both: `git log -S` shows no commit in the history ever type-asserted to
+  `ToolDecider` or called `DecideTool` from the agent. The commit that
+  introduced the interface (`d57a944`) also gave the agent its own
+  `policy.Decide` consult, so the seam was superseded on the day it was
+  written. The two would have applied the same policy to the same request.
+  The one behavioural difference was a red herring: `DecideTool` strips the
+  `[job:<id>]` prefix from a tool name and the agent does not. That prefix is
+  added by the jobs approver when it forwards to the parent TUI approver, so it
+  only ever exists inside `uiApprover` — which is where the stripping already
+  lives. No agent-side gap.
+  Deleting dead code should not quietly delete a guarantee, so the property the
+  seam appeared to protect is now pinned: a deny rule blocks a tool whose
+  `RequiresApproval` is false. If the policy were only consulted on the
+  approval path that could not work, and the test fails if the agent's own
+  consult is removed.
 - ~~Session persistence.~~ **Fixed 2026-08-30.** All three, including the part
   held back as a repo-wide decision.
   `New` and `Load` returned the manager's own `*Session` while `Current`

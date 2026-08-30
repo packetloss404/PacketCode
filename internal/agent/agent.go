@@ -442,6 +442,12 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			})
 	}
 
+	// The agent consults the permission policy itself rather than delegating
+	// it to the Approver. An Approver-side hook for this existed from the same
+	// commit that added policies and was never called from here; the two would
+	// have applied the same policy to the same request, so this is the one
+	// that runs and the other has been removed. Approve is consulted only for
+	// the Ask outcome below.
 	params := json.RawMessage(call.Arguments)
 	policyResult := a.currentPolicy().Decide(permissions.Request{
 		ToolName:         call.Name,
