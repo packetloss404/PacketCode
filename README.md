@@ -463,6 +463,12 @@ its name, while a skill is also loaded by the model mid-turn on a description
 it matched — so a skill is the one a repository could substitute without you
 choosing it.)
 
+A body can refer to those files with `${CLAUDE_SKILL_DIR}`, which expands to
+the skill's own directory when the body is handed to the model. (Builtin skills
+are embedded in the binary and have no directory, so the variable is left alone
+there. `${CLAUDE_PLUGIN_ROOT}` is not substituted: it names a plugin bundle, and
+packetcode has no plugin bundles — see [docs/plugins.md](docs/plugins.md).)
+
 A skill may carry resource files beside its body -- `references/`, `categories/`,
 `templates/` -- which is how larger published skills keep a method the body only
 dispatches to. Loading a skill lists those files; the model reads one by calling
