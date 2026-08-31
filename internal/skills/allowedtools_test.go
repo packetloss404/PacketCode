@@ -121,3 +121,43 @@ func TestAllowedTools_ReturnsACopy(t *testing.T) {
 		t.Fatalf("the grant list aliases the skill: %v", again)
 	}
 }
+
+// One warning per skill, not one per grant. A real ported skill lists eight
+// `Bash(cmd:*)` entries, and eight identical lines on every startup is a
+// warning nobody reads the ninth time.
+func TestParseAllowedTools_CoalescesRefusalsIntoOneWarning(t *testing.T) {
+	_, fm := ParseFrontmatterFields("---\ndescription: d\nallowed-tools: " +
+		"Bash(hf:*), Bash(gh:*), Bash(docker:*), Bash(aws:*), Bash(ssh-add:*)\n---\nbody\n")
+
+	if len(fm.AllowedTools) != 0 {
+		t.Fatalf("argument-scoped grants were honoured: %v", fm.AllowedTools)
+	}
+	if len(fm.Warnings) != 1 {
+		t.Fatalf("expected one warning for five refusals, got %d: %v", len(fm.Warnings), fm.Warnings)
+	}
+	w := fm.Warnings[0]
+	// Names the first few and counts the rest, so the reader can find them
+	// without the line growing without bound.
+	if !strings.Contains(w, `"Bash(hf:*)"`) {
+		t.Fatalf("the warning does not name what was refused: %q", w)
+	}
+	if !strings.Contains(w, "and 2 more") {
+		t.Fatalf("the warning does not account for the rest: %q", w)
+	}
+}
+
+// A single refusal reads as a single refusal.
+func TestParseAllowedTools_SingleRefusalReadsNaturally(t *testing.T) {
+	_, fm := ParseFrontmatterFields(
+		"---\ndescription: d\nallowed-tools: execute_command(git status)\n---\nbody\n")
+	if len(fm.Warnings) != 1 {
+		t.Fatalf("warnings = %v", fm.Warnings)
+	}
+	w := fm.Warnings[0]
+	if strings.Contains(w, "and 0 more") || strings.Contains(w, "narrow ") {
+		t.Fatalf("plural phrasing for a single refusal: %q", w)
+	}
+	if !strings.Contains(w, "narrows") || !strings.Contains(w, "for it") {
+		t.Fatalf("singular phrasing missing: %q", w)
+	}
+}
