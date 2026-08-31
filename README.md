@@ -439,6 +439,22 @@ without it fails `skills-ref validate` and will not upload to claude.ai.)
 - `user-invocable: false` keeps the skill from registering as a typed command.
   It stays background knowledge the model may consult; nobody types it.
 
+A skill can list the tools it expects to use, so a turn that invokes it does not
+stop to ask for each:
+
+```yaml
+allowed-tools: read_file, execute_command
+```
+
+This is honoured only for **your own** skills — builtin and `~/` scope — never
+for a repository's. A project skill pre-approving the tools it then tells the
+model to use would be a repo granting itself permission. It converts "ask" to
+"allow" and nothing else, so an explicit deny still applies; it lasts only the
+turn that invoked the skill; and names that are not packetcode tools grant
+nothing and are reported. (packetcode's tool names are its own — `execute_command`,
+not `Bash` — so a skill written for another agent will usually need its list
+translated.)
+
 `/skills` lists what resolved, with a leading slash on the ones you can type,
 and `/skills <name>` says who can reach a particular skill and what resource
 files sit beside it. `packetcode skills list` reports the same from the shell.

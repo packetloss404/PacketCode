@@ -145,6 +145,29 @@ func (s Skill) Enabled() bool { return !s.NeedsApproval }
 // out of the index, so the model is never told about something it cannot use.
 func (s Skill) ModelInvocable() bool { return !s.Invocation.DisableModelInvocation }
 
+// AllowedTools returns the tools this skill may have pre-approved for the turn
+// that invokes it, and whether the request was refused for being untrusted.
+//
+// Refused for a project skill, always. This is the only skill field that widens
+// authority rather than describing content, and a project body is repository
+// content: honouring it would let a hostile repo pre-approve execute_command in
+// the same file that tells the model what to run with it. Every other decision
+// in this package runs the other way -- foreign project skills need approval
+// before they load at all, and $ARGUMENTS is refused inside a project body so
+// it cannot place the user's words. This is the same judgement.
+//
+// A skill that asked and was refused is reported rather than silently ignored,
+// because its author will otherwise wonder why the prompts kept coming.
+func (s Skill) AllowedTools() (tools []string, refused bool) {
+	if len(s.Invocation.AllowedTools) == 0 {
+		return nil, false
+	}
+	if !s.Trusted() {
+		return nil, true
+	}
+	return append([]string(nil), s.Invocation.AllowedTools...), false
+}
+
 // UserInvocable reports whether a person may trigger this skill directly.
 // False when the header says `user-invocable: false` -- background knowledge
 // the model may consult but nobody types.
@@ -439,6 +462,12 @@ func escapeIndexText(s string) string {
 func (r *Registry) noteSkillWarnings(s Skill) {
 	for _, w := range s.Invocation.Warnings {
 		r.warnings = append(r.warnings, fmt.Sprintf("%s skill %q: %s", s.Source, s.Name, w))
+	}
+	if _, refused := s.AllowedTools(); refused {
+		r.warnings = append(r.warnings, fmt.Sprintf(
+			"%s skill %q sets allowed-tools, which is not honoured for a project skill: "+
+				"a repository must not pre-approve the tools it then asks the model to use",
+			s.Source, s.Name))
 	}
 }
 

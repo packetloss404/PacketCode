@@ -6,6 +6,11 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- `allowed-tools` in skill frontmatter pre-approves those tools for the turn
+  that invokes the skill, so it does not stop to ask for each. Honoured only for
+  builtin and user-scope skills, never a repository's; converts "ask" to "allow"
+  and never lifts an explicit deny; released when the turn ends; and a name that
+  is not a packetcode tool grants nothing and is reported rather than guessed at.
 - `${CLAUDE_SKILL_DIR}` in a skill body or resource expands to that skill's own
   directory when it reaches the model, so a skill can point at the files bundled
   beside it. Left literal it did not fail — it directed the model at a path that
