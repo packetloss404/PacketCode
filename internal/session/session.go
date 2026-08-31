@@ -116,6 +116,12 @@ type Manager struct {
 	modelToolResultLimit int
 	mu                   sync.RWMutex
 	current              *Session
+	// cacheRead and cacheWrite override how cached input is priced. Pointers
+	// rather than floats so "not configured" is distinguishable from a
+	// deliberate zero -- a provider that genuinely serves cache reads free is
+	// a legitimate setting, and a plain float could not say it.
+	cacheRead  *float64
+	cacheWrite *float64
 }
 
 func NewManager(dir string) *Manager {
@@ -325,10 +331,55 @@ func (m *Manager) UpdateUsage(usage provider.Usage, inputPer1M, outputPer1M floa
 		m.current.TokenUsage.ContextCacheCreation = usage.CacheCreationInputTokens
 		m.current.TokenUsage.ContextCacheRead = usage.CacheReadInputTokens
 	}
-	m.current.Cost.TotalUSD = float64(m.current.TokenUsage.TotalInput)*inputPer1M/1_000_000 +
-		float64(m.current.TokenUsage.TotalOutput)*outputPer1M/1_000_000
+	// Cached input is billed at a fraction of fresh input, and this line used
+	// to ignore that: it multiplied TotalInput -- which the comment above says
+	// is cache-inclusive -- by the full rate, so a session running at 93% cache
+	// hits reported roughly six times its real cost. The counts were already
+	// being recorded correctly; only this arithmetic was wrong.
+	m.current.Cost.TotalUSD = provider.EstimateCost(
+		m.current.TokenUsage.TotalInput,
+		m.current.TokenUsage.TotalOutput,
+		m.current.TokenUsage.TotalCacheRead,
+		m.current.TokenUsage.TotalCacheCreation,
+		inputPer1M, outputPer1M,
+		m.cacheReadMultiplier(), m.cacheWriteMultiplier(),
+	)
 	m.mu.Unlock()
 	return m.Save()
+}
+
+// SetCacheMultipliers overrides how cached input is priced relative to fresh
+// input for this session's provider.
+//
+// Optional. Unset, the package defaults apply, which are right for OpenAI and
+// right for Anthropic reads; Anthropic charges a premium for cache writes and
+// is the reason this exists. Values below zero are ignored -- a negative
+// multiplier would subtract from the bill.
+func (m *Manager) SetCacheMultipliers(read, write float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if read >= 0 {
+		m.cacheRead = &read
+	}
+	if write >= 0 {
+		m.cacheWrite = &write
+	}
+}
+
+// cacheReadMultiplier and cacheWriteMultiplier resolve the configured value or
+// the package default. Callers hold m.mu.
+func (m *Manager) cacheReadMultiplier() float64 {
+	if m.cacheRead != nil {
+		return *m.cacheRead
+	}
+	return provider.CacheReadMultiplier
+}
+
+func (m *Manager) cacheWriteMultiplier() float64 {
+	if m.cacheWrite != nil {
+		return *m.cacheWrite
+	}
+	return provider.CacheWriteMultiplier
 }
 
 // SetContextTokens immediately updates the live context occupancy without

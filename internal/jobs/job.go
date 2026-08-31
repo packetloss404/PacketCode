@@ -181,45 +181,49 @@ func normalizeResultStatus(s ResultStatus) ResultStatus {
 // Manager owns the canonical Job; UI/test code should consume Snapshots
 // to avoid sharing mutable state.
 type Job struct {
-	ID                string // 8-char short id, also the subsession suffix
-	SessionID         string // full id of the job's underlying session.Session
-	ParentJobID       string // "" when spawned from the main session
-	Prompt            string // initial user message
-	Provider          string // slug; may differ from main session
-	Model             string // model id under that provider
-	State             State
-	CreatedAt         time.Time
-	StartedAt         time.Time
-	FinishedAt        time.Time
-	UpdatedAt         time.Time
-	Summary           string        // short result summary surfaced into main convo
-	Error             string        // populated on StateFailed and on StateAbandoned
-	Reason            string        // free-form; "previous app exit" / "app shutdown" / etc.
-	AbandonCause      AbandonCause  // why the outcome is unknown; set with StateAbandoned
-	CancelRequest     CancelRequest // durable record that a stop was asked for
-	LastActivity      string        // concise activity label for dashboards
-	LastMessage       string        // latest human-visible text/result snippet
-	NeedsInput        bool          // true while a job is blocked on user action
-	NeedsApproval     bool          // true while a job is blocked on tool approval
-	Seq               int64         // monotonic snapshot sequence for stale-update guards
-	InputTokens       int
-	OutputTokens      int
-	CostUSD           float64
-	Depth             int                // 0 for main-spawned, parent.Depth+1 otherwise
-	Transcript        []provider.Message // snapshot taken when state becomes terminal
-	AllowWrite        bool               // tracks whether destructive tools were enabled
-	ComputerID        string             // stable Packet Computer id; empty for local jobs
-	ComputerName      string             // display name captured at spawn time
-	WorkingDir        string             // immutable local or remote workspace root
-	WorkspaceIdentity string             // immutable endpoint+root identity for resubmit safety
-	OwnerRoot         string             // project root of the instance that created the job
-	ComputerPolicy    computers.Policy   // conservative per-computer policy captured at spawn
-	ResultStatus      ResultStatus       // pending/seen/ignored/injected/consumed after terminal result exists
-	Artifacts         []Artifact         // bounded structured refs captured from tool execution
-	WorktreePath      string             // per-job git worktree root when write isolation is active
-	WorktreeBranch    string             // branch checked out by the worktree
-	WorktreeBase      string             // base ref/SHA used to create the worktree
-	WorktreeNote      string             // fallback or setup note when no worktree was created
+	ID            string // 8-char short id, also the subsession suffix
+	SessionID     string // full id of the job's underlying session.Session
+	ParentJobID   string // "" when spawned from the main session
+	Prompt        string // initial user message
+	Provider      string // slug; may differ from main session
+	Model         string // model id under that provider
+	State         State
+	CreatedAt     time.Time
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	UpdatedAt     time.Time
+	Summary       string        // short result summary surfaced into main convo
+	Error         string        // populated on StateFailed and on StateAbandoned
+	Reason        string        // free-form; "previous app exit" / "app shutdown" / etc.
+	AbandonCause  AbandonCause  // why the outcome is unknown; set with StateAbandoned
+	CancelRequest CancelRequest // durable record that a stop was asked for
+	LastActivity  string        // concise activity label for dashboards
+	LastMessage   string        // latest human-visible text/result snippet
+	NeedsInput    bool          // true while a job is blocked on user action
+	NeedsApproval bool          // true while a job is blocked on tool approval
+	Seq           int64         // monotonic snapshot sequence for stale-update guards
+	InputTokens   int
+	OutputTokens  int
+	// Cache counts are subsets of InputTokens, kept so the cost estimate
+	// can price them at the cached rate.
+	CacheReadTokens     int
+	CacheCreationTokens int
+	CostUSD             float64
+	Depth               int                // 0 for main-spawned, parent.Depth+1 otherwise
+	Transcript          []provider.Message // snapshot taken when state becomes terminal
+	AllowWrite          bool               // tracks whether destructive tools were enabled
+	ComputerID          string             // stable Packet Computer id; empty for local jobs
+	ComputerName        string             // display name captured at spawn time
+	WorkingDir          string             // immutable local or remote workspace root
+	WorkspaceIdentity   string             // immutable endpoint+root identity for resubmit safety
+	OwnerRoot           string             // project root of the instance that created the job
+	ComputerPolicy      computers.Policy   // conservative per-computer policy captured at spawn
+	ResultStatus        ResultStatus       // pending/seen/ignored/injected/consumed after terminal result exists
+	Artifacts           []Artifact         // bounded structured refs captured from tool execution
+	WorktreePath        string             // per-job git worktree root when write isolation is active
+	WorktreeBranch      string             // branch checked out by the worktree
+	WorktreeBase        string             // base ref/SHA used to create the worktree
+	WorktreeNote        string             // fallback or setup note when no worktree was created
 
 	// Reconcile lineage. A job left active by a previous process exit is
 	// rewritten as Abandoned with cause app-exit and marked Recovered; it is
