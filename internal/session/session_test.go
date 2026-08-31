@@ -578,9 +578,16 @@ func TestManager_UpdateUsageCacheFieldsAreSubsets(t *testing.T) {
 	assert.Equal(t, 2100, got.TotalCacheRead, "cumulative cache reads")
 	assert.LessOrEqual(t, got.TotalCacheCreation+got.TotalCacheRead, got.TotalInput)
 
-	// Cost prices TotalInput alone; adding the subsets would have made this
-	// 2500+2300 = 4800 input tokens.
-	assert.InDelta(t, (2500.0+250.0)/1_000_000, m.Current().Cost.TotalUSD, 1e-12)
+	// Cost has two things to get right here, and this assertion used to encode
+	// only the first. Adding the subsets into the total would bill 2500+2300 =
+	// 4800 input tokens; billing them all at the fresh rate would charge 2500.
+	// Both are wrong. With reads at a tenth and writes at par: 200 fresh + 2100
+	// read + 200 written = 200 + 210 + 200 = 610 effective input tokens.
+	wantCost := (200.0 + 2100.0*provider.CacheReadMultiplier +
+		200.0*provider.CacheWriteMultiplier + 250.0) / 1_000_000
+	assert.InDelta(t, wantCost, m.Current().Cost.TotalUSD, 1e-12)
+	assert.Less(t, m.Current().Cost.TotalUSD, (2500.0+250.0)/1_000_000,
+		"cached input must cost less than fresh input")
 
 	// The context-scoped split describes the last request only, so it tracks
 	// ContextTokens rather than accumulating.
@@ -644,4 +651,55 @@ func TestManager_LoadSessionWithoutCacheFields(t *testing.T) {
 		InputTokens: 100, OutputTokens: 10, CacheReadInputTokens: 60,
 	}, 1, 1))
 	assert.Equal(t, 60, m.Current().TokenUsage.TotalCacheRead)
+}
+
+// The cost a user actually sees, end to end.
+//
+// A session running mostly on cache hits reported roughly six times its real
+// spend, because the running total multiplied cache-inclusive input by the
+// full rate. The counts were already recorded; only the arithmetic was wrong.
+func TestUpdateUsage_DoesNotBillCachedInputAtTheFullRate(t *testing.T) {
+	m := NewManager(t.TempDir())
+	if _, err := m.New("openai", "gpt-5.6-sol"); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// 10,000 input of which 9,000 came from cache, at $5/M in, $15/M out.
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens:          10_000,
+		OutputTokens:         1_000,
+		CacheReadInputTokens: 9_000,
+	}, 5.0, 15.0))
+
+	cur := m.Current()
+	// 1,000 fresh + 9,000 at a tenth = 1,900 effective input tokens.
+	want := 1_900*5.0/1_000_000 + 1_000*15.0/1_000_000
+	if diff := cur.Cost.TotalUSD - want; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("cost = %.8f, want %.8f (cached input billed as fresh?)", cur.Cost.TotalUSD, want)
+	}
+
+	naive := 10_000*5.0/1_000_000 + 1_000*15.0/1_000_000
+	if cur.Cost.TotalUSD >= naive {
+		t.Fatalf("cost %.8f is not below the uncached figure %.8f", cur.Cost.TotalUSD, naive)
+	}
+}
+
+// A provider that charges a premium to write the cache is honoured, so the
+// correction cannot silently understate the other direction.
+func TestUpdateUsage_HonoursConfiguredCacheMultipliers(t *testing.T) {
+	m := NewManager(t.TempDir())
+	if _, err := m.New("anthropic", "claude"); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.SetCacheMultipliers(0.10, 1.25)
+	require.NoError(t, m.UpdateUsage(provider.Usage{
+		InputTokens:              1_000,
+		CacheReadInputTokens:     600,
+		CacheCreationInputTokens: 200,
+	}, 1.0, 0))
+
+	// 200 fresh + 600 at 0.10 + 200 at 1.25 = 510 effective.
+	want := 510 * 1.0 / 1_000_000
+	if diff := m.Current().Cost.TotalUSD - want; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("cost = %.10f, want %.10f", m.Current().Cost.TotalUSD, want)
+	}
 }

@@ -373,9 +373,22 @@ func (m *Manager) applyUsage(j *Job, usage provider.Usage) {
 	}
 	j.InputTokens += usage.InputTokens
 	j.OutputTokens += usage.OutputTokens
+	// Subsets of InputTokens, not addends -- see provider.EstimateCost.
+	j.CacheReadTokens += usage.CacheReadInputTokens
+	j.CacheCreationTokens += usage.CacheCreationInputTokens
 	if m.cfg.PricingFor != nil {
 		in, out := m.cfg.PricingFor(j.Provider, j.Model)
-		j.CostUSD = float64(j.InputTokens)*in/1_000_000 + float64(j.OutputTokens)*out/1_000_000
+		// Same correction as internal/session: cached input is a subset of
+		// InputTokens and is billed at a fraction of the fresh rate. Jobs
+		// carried an independent copy of the same wrong formula, so fixing one
+		// would have left background agents still overstating.
+		//
+		// PricingFor yields only the two headline rates and there is no
+		// provider handle here, so the package defaults apply. They are right
+		// for OpenAI and for Anthropic reads.
+		j.CostUSD = provider.EstimateCost(
+			j.InputTokens, j.OutputTokens, j.CacheReadTokens, j.CacheCreationTokens,
+			in, out, provider.CacheReadMultiplier, provider.CacheWriteMultiplier)
 	}
 	m.stampSnapshotLocked(j, time.Now().UTC(), "", "", j.NeedsInput, j.NeedsApproval)
 	subs := snapshotCallbacks(m.subscribers)

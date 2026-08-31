@@ -178,6 +178,17 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 	return ch, nil
 }
 
+// CacheMultipliers implements provider.CacheRated.
+//
+// Anthropic is the reason that interface exists: a cache read costs a tenth of
+// fresh input, like everyone else, but a cache WRITE costs a premium over it.
+// Costing writes at the plain input rate would understate a prompt that is
+// being cached for the first time, which is every prompt at the start of a
+// conversation.
+func (p *Provider) CacheMultipliers(string) (read, write float64) {
+	return 0.10, 1.25
+}
+
 func (p *Provider) Pricing(modelID string) (float64, float64) {
 	if entry, ok := pricingTable[modelID]; ok {
 		return entry.Input, entry.Output

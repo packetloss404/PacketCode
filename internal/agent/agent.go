@@ -372,6 +372,12 @@ func (a *Agent) oneTurn(ctx context.Context, events chan<- AgentEvent, shadow *c
 
 	if lastUsage != nil {
 		inRate, outRate := prov.Pricing(modelID)
+		// Cache pricing is asked for here, where the provider is in hand. The
+		// session manager prices cached input at a fraction of fresh input and
+		// defaults are right for most providers; this is what lets Anthropic
+		// state its cache-write premium instead of being averaged into them.
+		readMul, writeMul := provider.CacheMultipliersFor(prov, modelID)
+		a.session.SetCacheMultipliers(readMul, writeMul)
 		_ = a.session.UpdateUsage(*lastUsage, inRate, outRate)
 		if a.costTracker != nil {
 			cur := a.session.Current()

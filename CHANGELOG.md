@@ -4,6 +4,20 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ## [Unreleased]
 
+### Fixed
+
+- Cost estimates no longer bill cached input at the full input rate. Every
+  provider serves cached tokens at a fraction of fresh ones and reports how
+  many; packetcode recorded that number faithfully and then multiplied the
+  whole cache-inclusive input count by the standard price. Measured over a
+  six-task benchmark where 93% of input came from cache, the displayed figure
+  was roughly **6x the real bill** — a tool that is cheap reporting itself as
+  expensive. The counts were always there; only the arithmetic was wrong.
+  Fixed in `internal/session` and `internal/jobs`, which carried independent
+  copies of the same formula, through one shared `provider.EstimateCost`.
+  Cache reads default to a tenth of the input rate and writes to par;
+  Anthropic states its own, since it charges a premium for cache writes.
+
 ### Added
 
 - A published compatibility contract: [docs/compatibility.md](docs/compatibility.md),
