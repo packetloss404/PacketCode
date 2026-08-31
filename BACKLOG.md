@@ -357,6 +357,30 @@ the evidence, effort, and risk for each item.
 
 ### Skill ecosystem gaps — found 2026-08-30
 
+**Every count in this section was re-measured on 2026-08-30 by reading each
+file.** The original figures came from a research pass that mixed two
+populations: the 37 top-level skills packetcode discovers under
+`~/.agents/skills`, and the 28 under `~/.claude/plugins`, which it does not
+load. Three entries were wrong as first written. The table below is the
+measured state of the loaded population; anything not listed is zero there.
+
+| Feature | Loaded (37) | Plugins (28) |
+| --- | --- | --- |
+| Block-scalar `description` | 22 | 0 |
+| `allowed-tools` | 3 | 7 |
+| `$ARGUMENTS` | 1 | 8 |
+| `` !`command` `` | 0 | 1 |
+| Indexed `$0`/`$1` | 0 | 1 |
+| `${CLAUDE_SKILL_DIR}` | 0 | 0 |
+| `${CLAUDE_PLUGIN_ROOT}` | 0 | 5 |
+| Missing `description` | 0 | 1 |
+| Over packetcode's description or body cap | 0 | 0 |
+| `when_to_use`, `context: fork`, invalid name | 0 | 0 |
+
+The 22 block-scalar descriptions are the reason that fix mattered: before it,
+those skills loaded with `">-"` as their entire index entry.
+
+
 Measured against the 37 skills in one real `~/.agents/skills`, and against the
 published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
 [Agent Skills spec](https://agentskills.io/specification). Published skills now
@@ -386,40 +410,49 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   the ecosystem does not give it; leaving it literal is at least honest. Revisit
   only if plugin-bundle discovery is ever added.
 - ~~Decide whether to read `allowed-tools` from skill frontmatter.~~
-  **Done 2026-08-30, bounded.** The "10 of 37" in the original entry was wrong,
-  the same conflation as the `${CLAUDE_SKILL_DIR}` entry: re-measured, **none**
-  of the 37 top-level skills packetcode discovers set it. The ten were in
-  `~/.claude/plugins`, which packetcode does not load.
-  Built anyway, in the shape the corrected entry proposed, because the field is
-  ecosystem-standard and will arrive eventually. Honoured for trusted scopes
-  only — a repository must not pre-approve the tools it then asks the model to
-  use. Converts Ask to Allow and nothing else: `permissions.Policy` checks deny
-  floors before any other rule, so an explicit deny wins over a grant added
-  after it, structurally rather than by remembering to check. Released when the
-  turn ends, however it ends. A name that is not a registered tool grants
-  nothing and is reported, because Claude Code's tool names are not packetcode's
-  and granting the closest-looking one would be guessing about the one thing
-  that must not be guessed.
-- Decide on `` !`command` `` dynamic context injection; 1 of 37 uses it, and
-  Claude Code's own `/commit` is built on it. Today the backticked command is
-  passed through as literal text, so the model is told ``PR diff: !`gh pr
-  diff` `` instead of the diff. Not implementing is defensible — upstream ships
-  `disableSkillShellExecution` for exactly this concern, and running repository
-  shell text is the sharpest edge in the whole ecosystem. Being silent about it
-  is not: a skill that reads as broken is worse than one that reports itself
-  disabled.
+  **Done 2026-08-30, bounded.** Counts corrected twice, which is the useful part
+  of this entry's history. The original "10 of 37" merged two populations. My
+  first re-measure then said "none of the 37", which was also wrong — piping an
+  array of paths to PowerShell's `Select-String` searches the strings, not the
+  files. Measured a third time, from Python, reading each file:
+  **3 of the 37 skills packetcode loads set `allowed-tools`** — `companion-clis`,
+  `runpod-mcp`, `runpodctl` — and 7 of the 28 in `~/.claude/plugins` do.
+  All three loaded ones use `Bash(cmd:*)`, so in practice they grant nothing
+  here twice over: the argument-scoped form is refused, and `Bash` is not a
+  packetcode tool name. That is the correct outcome, and it is the case the
+  implementation was built for even when the count said it could not happen.
+- Decide on `` !`command` `` dynamic context injection. **Measured: 0 of the 37
+  loaded skills use it**, one of the 28 in `~/.claude/plugins` does — the
+  original "1 of 37" was that plugin skill, counted against the wrong
+  population. Claude Code's own `/commit` is built on it, so it will arrive
+  eventually.
+  Not implementing is defensible and probably right: it runs shell text out of
+  a skill body before the model sees the result, and upstream ships
+  `disableSkillShellExecution` for exactly that concern. What is not defensible
+  is the current silence — the backticked command is passed through verbatim, so
+  the model is told ``PR diff: !`gh pr diff` `` and reads it as literal text.
+  The cheap half is worth doing on its own: detect the syntax and say it is not
+  executed, so the skill reads as disabled rather than as broken.
 - Support indexed `$0`/`$1` arguments and an `arguments:` frontmatter list.
-  Only `$ARGUMENTS` is substituted today, so a skill using the indexed form
-  gets literal placeholders *and* the arguments appended — the model sees both
-  and has to guess. All 8 argument-using skills observed use plain
-  `$ARGUMENTS`, so today's exposure is low and tomorrow's is not.
-- Accept skills packetcode currently refuses. Upstream loads a skill with no
-  `description` (falling back to the first paragraph of the body) and truncates
-  an oversized one; packetcode drops both, and drops a body over `MaxBodyBytes`
-  where upstream has no body cap. A published skill that works in every other
-  agent and vanishes here reads as packetcode being broken, which is the wrong
-  lesson for the user to draw. The caps exist for real reasons — decide which
-  are worth a refusal and which should degrade.
+  **Measured: 0 of the 37 loaded skills use an indexed form**, and one of the 28
+  plugin skills does; 1 loaded skill uses plain `$ARGUMENTS`, which already
+  works. The original "8 of 28" was the `$ARGUMENTS` count from the plugin
+  population, not an indexed-argument count from anywhere.
+  So this is latent rather than live. A skill using `$1` today gets literal
+  placeholders *and* the arguments appended, so the model sees both and has to
+  guess — which is the same class of silent misdirection as the unexpanded
+  `${CLAUDE_SKILL_DIR}`, and cheap to fix the same way.
+- Accept skills packetcode currently refuses. **Measured: 0 of the 37 loaded
+  skills are refused today** — none lack a `description`, none exceed
+  `MaxDescriptionBytes`, none exceed `MaxBodyBytes`. One of the 28 plugin skills
+  has no description. The block-scalar case, which the original entry called
+  theoretical at "0/28", was in fact 22 of the 37 loaded skills, and is fixed.
+  What remains is a policy question with no current victims: upstream loads a
+  skill with no `description` by falling back to the first paragraph, and
+  truncates an oversized one rather than dropping it, while packetcode refuses
+  both. A published skill that works everywhere else and vanishes here reads as
+  packetcode being broken. The caps exist for real reasons — decide which are
+  worth a refusal and which should degrade.
 - Decide whether a repository's own `.packetcode/skills` should need the
   approval a `.claude/skills` one now does. Today it does not: the 2026-08-30
   gate exists to avoid opening a *new* automatic-loading surface across every

@@ -127,19 +127,44 @@ func ParseFrontmatterFields(raw string) (body string, fm Frontmatter) {
 // permission to run one command into permission to run any, which is the
 // opposite of what the author wrote; refusing it grants nothing and says so.
 func (fm *Frontmatter) parseAllowedTools(val string) []string {
-	var out []string
+	var out, scoped []string
 	for _, raw := range strings.Split(val, ",") {
 		name := strings.TrimSpace(raw)
 		if name == "" {
 			continue
 		}
 		if strings.ContainsAny(name, "()") {
-			fm.Warnings = append(fm.Warnings, fmt.Sprintf(
-				"allowed-tools: %q narrows a grant to particular arguments, which packetcode "+
-					"does not support; nothing was granted for it", name))
+			scoped = append(scoped, name)
 			continue
 		}
 		out = append(out, name)
+	}
+	// One line per skill, not per grant. A skill listing eight `Bash(cmd:*)`
+	// entries -- which is what a real ported skill looks like -- otherwise
+	// produced eight identical warnings on every startup, and a warning
+	// repeated eight times is one nobody reads the ninth time.
+	if len(scoped) > 0 {
+		shown := scoped
+		const cap = 3
+		suffix := ""
+		if len(shown) > cap {
+			shown = shown[:cap]
+			suffix = fmt.Sprintf(" and %d more", len(scoped)-cap)
+		}
+		fm.Warnings = append(fm.Warnings, fmt.Sprintf(
+			"allowed-tools: %s%s %s a grant to particular arguments, which packetcode does "+
+				"not support; nothing was granted for %s",
+			strings.Join(quoteAll(shown), ", "), suffix,
+			map[bool]string{true: "narrows", false: "narrow"}[len(scoped) == 1],
+			map[bool]string{true: "it", false: "them"}[len(scoped) == 1]))
+	}
+	return out
+}
+
+func quoteAll(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, fmt.Sprintf("%q", s))
 	}
 	return out
 }
