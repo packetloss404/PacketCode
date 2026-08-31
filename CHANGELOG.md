@@ -6,6 +6,29 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Release artifacts are signed, attested, and checked before they ship.
+  `checksums.txt` now carries a Sigstore signature made with the release
+  workflow's OIDC token — no key to store or rotate. That was the missing half
+  of the existing check: both installers verified an archive *against* a
+  checksum file that nothing established as ours, so anyone who could serve a
+  modified archive could serve the matching checksums beside it. `install.sh`
+  and `install.ps1` verify the signature when `cosign` is present, say so
+  plainly when it is not, and refuse outright when a signature is present and
+  invalid. `REQUIRE_SIGNATURE=1` / `-RequireSignature` makes an unverifiable
+  download an error.
+  Archives also carry `LICENSE`, `README.md` and `CHANGELOG.md`; builds are
+  reproducible (`mod_timestamp` from the commit, not the clock); and every
+  release is attested with SLSA build provenance (`gh attestation verify`).
+  macOS Developer ID signing with notarization, and Windows Authenticode, are
+  wired and gated on their certificates being configured — the release states
+  in its summary which ran, and `REQUIRE_SIGNING=1` turns a skip into a failure
+  once the certificates exist. See docs/releases.md.
+- CI now builds a full release snapshot on every push and asserts it: six
+  archives, checksums that match, the binary and licence inside each, and the
+  built Linux binary actually running. `goreleaser check` validated the config
+  file and none of that, so the pipeline was previously first exercised by
+  tagging — the worst moment to find a problem, because the version number is
+  already spent.
 - Skills now say what packetcode did not do with them. Two ecosystem syntaxes
   reach the model as literal text: `` !`gh pr diff` `` dynamic command
   injection, and positional `$1`/`$2` placeholders. Neither errors and neither

@@ -1,4 +1,4 @@
-.PHONY: build test lint verify vulncheck goreleaser-check smoke run clean ci tui-deps tui-snapshots tui-snapshots-claude tui-golden-update tui-golden-check
+.PHONY: build test lint verify vulncheck goreleaser-check release-dry-run release-check install-test smoke run clean ci tui-deps tui-snapshots tui-snapshots-claude tui-golden-update tui-golden-check
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -26,6 +26,23 @@ vulncheck:
 goreleaser-check:
 	goreleaser check
 
+# Build the full set of release artifacts locally and assert they are usable.
+# Signing takes its skip paths without credentials, which is the same path a
+# fork and a pull request take.
+release-dry-run:
+	goreleaser release --snapshot --clean --skip=publish
+	sh scripts/check-release-artifacts.sh dist
+
+# Assert an already-built dist/ without rebuilding it.
+release-check:
+	sh scripts/check-release-artifacts.sh dist
+
+# The installers' signature check, against stubbed curl and cosign. `curl |
+# bash` cannot be dry-run any other way, and it is the code most users meet
+# first.
+install-test:
+	bash scripts/test-install-verify.sh
+
 smoke: build
 	./$(BINARY) --version
 
@@ -49,7 +66,7 @@ tui-golden-check: build
 run: build
 	./$(BINARY)
 
-ci: verify lint test vulncheck build smoke goreleaser-check
+ci: verify lint test vulncheck build smoke goreleaser-check release-dry-run install-test
 
 clean:
 	rm -rf bin/ dist/

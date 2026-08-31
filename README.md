@@ -36,7 +36,7 @@ Install without `sudo`:
 curl -fsSL https://raw.githubusercontent.com/packetloss404/packetcode/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-Install the latest checksum-verified Windows release:
+Install the latest Windows release:
 
 ```powershell
 & ([scriptblock]::Create((Invoke-WebRequest https://raw.githubusercontent.com/packetloss404/packetcode/main/install.ps1).Content))
@@ -45,6 +45,17 @@ Install the latest checksum-verified Windows release:
 The Windows installer defaults to
 `%LOCALAPPDATA%\Programs\PacketCode\bin` and does not silently modify `PATH`.
 PacketADE also checks that documented location.
+
+Both installers check the download against `checksums.txt`, and check
+`checksums.txt` itself against its Sigstore signature when `cosign` is on
+`PATH` — the second is the one that matters, since anyone who could serve you a
+modified archive could serve the matching checksum file beside it. They say so
+plainly when `cosign` is absent, and refuse outright when a signature is present
+and does not verify. Pass `REQUIRE_SIGNATURE=1` (or `-RequireSignature` on
+Windows) to make an unverifiable download an error rather than a note.
+
+See [docs/releases.md](docs/releases.md) for what is published, how to verify a
+download by hand, and how release signing is configured.
 
 Build from source with Go 1.24.2 or newer:
 

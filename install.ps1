@@ -1,7 +1,12 @@
 [CmdletBinding()]
 param(
     [string]$Version = "latest",
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\PacketCode\bin")
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\PacketCode\bin"),
+
+    # Abort unless the Sigstore signature on checksums.txt verifies. Off by
+    # default only because cosign is rarely installed on Windows and releases
+    # before v0.6.0 are unsigned; turn it on for anything unattended.
+    [switch]$RequireSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +40,59 @@ try {
     Write-Host "Downloading packetcode $Version for windows/$architecture..."
     Invoke-WebRequest -Uri "$releaseBase/$archive" -OutFile $archivePath
     Invoke-WebRequest -Uri "$releaseBase/checksums.txt" -OutFile $checksumsPath
+
+    # Check the checksum file before believing what it says.
+    #
+    # Matching the archive against checksums.txt proves the download was not
+    # corrupted. It proves nothing about substitution: whoever could serve a
+    # modified archive could serve the checksums.txt that matches it, and this
+    # script would confirm the forgery. The signature is what ends the chain
+    # somewhere an attacker does not control.
+    $cosign = Get-Command cosign -ErrorAction SilentlyContinue
+    if (-not $cosign) {
+        if ($RequireSignature) {
+            throw "packetcode: -RequireSignature was given but cosign is not installed (https://docs.sigstore.dev/cosign/installation/)"
+        }
+        Write-Host "  note: cosign is not installed, so the checksum file's signature was not checked."
+        Write-Host "        Install cosign and re-run with -RequireSignature to verify properly."
+    }
+    else {
+        $signaturePath = Join-Path $temporaryRoot "checksums.txt.sig"
+        $certificatePath = Join-Path $temporaryRoot "checksums.txt.pem"
+        $haveSignature = $true
+        foreach ($pair in @(@("$releaseBase/checksums.txt.sig", $signaturePath),
+                            @("$releaseBase/checksums.txt.pem", $certificatePath))) {
+            try {
+                Invoke-WebRequest -Uri $pair[0] -OutFile $pair[1] -ErrorAction Stop
+            }
+            catch {
+                $haveSignature = $false
+                break
+            }
+        }
+
+        if (-not $haveSignature) {
+            if ($RequireSignature) {
+                throw "packetcode: -RequireSignature was given but $Version publishes no signature"
+            }
+            Write-Host "  note: $Version has no signature (releases before v0.6.0 are unsigned)."
+        }
+        else {
+            $identity = "^https://github.com/$([regex]::Escape($repository))/\.github/workflows/release\.yml@refs/tags/"
+            & $cosign.Source verify-blob $checksumsPath `
+                --signature $signaturePath `
+                --certificate $certificatePath `
+                --certificate-identity-regexp $identity `
+                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                # Always fatal. A signature that is present and does not verify
+                # is a failed guarantee, not a missing one, and must never be
+                # softened into the "unsigned release" path above.
+                throw "packetcode: the signature on checksums.txt did NOT verify. Refusing to install - this is what a substituted release looks like."
+            }
+            Write-Host "  signature verified: checksums.txt was produced by $repository's release workflow."
+        }
+    }
 
     $checksumLine = Get-Content -LiteralPath $checksumsPath |
         Where-Object { $_ -match "^\s*([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($archive))\s*$" } |

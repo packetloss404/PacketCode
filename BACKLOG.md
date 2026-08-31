@@ -14,7 +14,27 @@ copy its code or prompt text.
 
 ## v1 Release Readiness
 
-- Automate signed/notarized macOS, Linux, and Windows release artifacts and checksum verification.
+- ~~Automate signed/notarized macOS, Linux, and Windows release artifacts and
+  checksum verification.~~ **Mostly shipped 2026-08-30.** See
+  [docs/releases.md](docs/releases.md).
+  Done and verifiable today: Sigstore keyless signing of `checksums.txt` (the
+  missing half — both installers verified an archive *against* a checksum file
+  that nothing established as ours, so the check was circular); SLSA build
+  provenance attestation; reproducible builds via `mod_timestamp`; signature
+  verification in `install.sh` and `install.ps1`, which refuse outright on a
+  present-but-invalid signature and never soften it into "unsigned"; and a
+  release dry run on every push that builds all six archives and asserts them,
+  so the pipeline is no longer first exercised by tagging.
+  Wired but dormant, because both need certificates that must be bought: Apple
+  Developer ID + notarization (GoReleaser OSS, runs on the Linux runner — this
+  needs no Mac) and Windows Authenticode via `osslsigncode`. Both are gated on
+  their secrets, the job summary states which ran, and the repository variable
+  `REQUIRE_SIGNING=1` turns a skip into a failed release once the certificates
+  exist. **What remains is a purchase, not code**: an Apple Developer account
+  (99 USD/yr) and a Windows code-signing certificate. Neither signing path has
+  been executed end to end against a real certificate — the Authenticode script
+  was tested against a self-signed one, which signs and timestamps correctly and
+  fails chain validation exactly as it should.
 - Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions. Persisted jobs are done (records
   carry `format_version` and refuse a newer one); config, sessions, workflow
   TOML, and MCP definitions remain. Write it as a published contract with its

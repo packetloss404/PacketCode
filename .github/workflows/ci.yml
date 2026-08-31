@@ -131,8 +131,18 @@ jobs:
       - name: Smoke help
         run: ${{ matrix.binary }} --help
 
-  goreleaser-check:
+  # The release pipeline, exercised on every push rather than first exercised
+  # by tagging.
+  #
+  # `goreleaser check` validates the configuration file and nothing else. It
+  # cannot tell you that the build hooks run, that six archives come out, that
+  # the checksums match, or that the licence is inside them -- and those are
+  # what break. A tag is the worst moment to learn any of it, because the
+  # version number is already spent.
+  release-dry-run:
+    name: release dry run
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -144,3 +154,19 @@ jobs:
         with:
           version: ${{ env.GORELEASER_VERSION }}
           args: check
+      # No secrets and no OIDC token here, so the signing steps take their skip
+      # paths -- which is itself worth exercising, since that is the path every
+      # fork and every pull request takes.
+      - uses: goreleaser/goreleaser-action@v7.2.1
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --snapshot --clean --skip=publish
+      - run: ./scripts/check-release-artifacts.sh dist
+      - name: Installer signature logic
+        run: bash scripts/test-install-verify.sh
+      # Prove the built binary runs, not merely that it was produced. A
+      # cross-compile that emits a broken amd64 Linux binary passes every other
+      # check in this job.
+      - run: |
+          tar -xzf dist/packetcode-linux-amd64.tar.gz -C dist packetcode
+          ./dist/packetcode --version

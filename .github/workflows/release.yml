@@ -6,10 +6,19 @@ on:
 
 permissions:
   contents: write
+  # Sigstore keyless signing exchanges this token for a short-lived
+  # certificate. Without it cosign has nothing to present and the checksum file
+  # ships unsigned.
+  id-token: write
+  # Build provenance: a signed statement that these bytes came out of this
+  # workflow, at this commit. Separate from the checksum signature and worth
+  # both -- one says the file is ours, the other says how it was made.
+  attestations: write
 
 env:
   GO_VERSION: '1.26.3'
   GORELEASER_VERSION: v2.9.0
+  COSIGN_VERSION: v2.4.1
 
 jobs:
   tui-golden:
@@ -71,6 +80,7 @@ jobs:
   release:
     needs: [preflight, tui-golden]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -80,9 +90,98 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - run: go mod verify
       - run: go test -race -count=1 ./...
+
+      # Authenticode signing runs on this Linux runner, so the tool has to be
+      # here. Installed unconditionally: it costs seconds, and installing it
+      # only when a secret is set means the one release that first uses the
+      # certificate is also the first to exercise the install step.
+      - name: Install osslsigncode
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osslsigncode
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      # State the signing posture before doing anything, so the log says what
+      # this release was going to be rather than leaving it to be inferred from
+      # which steps were quiet.
+      - name: Report signing configuration
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          WINDOWS_SIGN_P12: ${{ secrets.WINDOWS_SIGN_P12 }}
+          REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
+        run: |
+          {
+            echo "### Signing configuration"
+            echo
+            echo "| artifact | signed |"
+            echo "| --- | --- |"
+            echo "| checksums.txt (Sigstore) | yes — keyless, always available in this workflow |"
+            echo "| macOS binaries (Developer ID + notarization) | ${MACOS_SIGN_P12:+yes}${MACOS_SIGN_P12:-no — MACOS_SIGN_P12 is not set} |"
+            echo "| Windows binaries (Authenticode) | ${WINDOWS_SIGN_P12:+yes}${WINDOWS_SIGN_P12:-no — WINDOWS_SIGN_P12 is not set} |"
+            echo
+            echo "REQUIRE_SIGNING=${REQUIRE_SIGNING:-0}. Set the repository variable to 1 once certificates exist, and a missing one fails the release instead of shipping unsigned."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: goreleaser/goreleaser-action@v7.2.1
         with:
           version: ${{ env.GORELEASER_VERSION }}
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Absent secrets arrive as empty strings, which is exactly what the
+          # gates in .goreleaser.yml and scripts/sign-*.sh test for.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          WINDOWS_SIGN_P12: ${{ secrets.WINDOWS_SIGN_P12 }}
+          WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+          WINDOWS_SIGN_TIMESTAMP: ${{ vars.WINDOWS_SIGN_TIMESTAMP }}
+          REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
+
+      # The same assertions CI runs against every snapshot, now against what
+      # was actually published. A release that produced five archives instead
+      # of six should not be discovered by a user on the sixth platform.
+      - name: Check published artifacts
+        run: ./scripts/check-release-artifacts.sh dist
+
+      # check-release-artifacts only *notes* a missing signature, because it
+      # also runs where no OIDC token exists. Here one always does, so absence
+      # is a failure -- and it is the failure most likely to go unnoticed, since
+      # an unsigned release looks exactly like a signed one until somebody tries
+      # to verify it.
+      - name: Require the checksum signature
+        run: |
+          for f in dist/checksums.txt.sig dist/checksums.txt.pem; do
+            if [ ! -s "$f" ]; then
+              echo "release: $f is missing or empty."
+              echo "This job grants id-token: write, so keyless signing was available"
+              echo "and should have produced it. Check the 'signing artifacts' output"
+              echo "from goreleaser above."
+              exit 1
+            fi
+          done
+          echo "checksums.txt is signed."
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2.2.3
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo
+            echo "### Verifying"
+            echo
+            echo '```bash'
+            echo "gh attestation verify packetcode-linux-amd64.tar.gz --repo ${GITHUB_REPOSITORY}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

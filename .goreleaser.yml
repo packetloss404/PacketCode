@@ -1,16 +1,42 @@
 version: 2
 
+# Release artifacts, and the evidence that they are the ones this repository
+# built.
+#
+# Three separate claims, because they fail separately:
+#
+#   checksums.txt  — these bytes are intact.
+#   cosign         — checksums.txt is the one this workflow produced, so a
+#                    substituted checksum file is caught. Without it the file
+#                    the installers verify against is exactly as forgeable as
+#                    the archive it vouches for, and the whole check is
+#                    circular.
+#   codesign       — the OS will run it without a warning that frightens people
+#                    into disabling the check for everything.
+#
+# Signing is gated on secrets being present rather than assumed, so a release
+# still completes on a repository that has not bought certificates yet. What it
+# must never do is complete *quietly* in that state: the release job prints what
+# was signed and what was skipped, and REQUIRE_SIGNING turns a skip into a
+# failure once the certificates exist. See docs/releases.md.
+
 before:
   hooks:
     - go mod verify
 
 builds:
-  - main: ./cmd/packetcode
+  - id: packetcode
+    main: ./cmd/packetcode
     binary: packetcode
     env:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+    # Stamp the binary from the commit rather than from the clock, so two
+    # builds of one tag are byte-identical and a third party can reproduce
+    # them. Without it every rebuild differs and "verify it yourself" is not
+    # something anyone can actually do.
+    mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
       - darwin
@@ -20,6 +46,39 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+    hooks:
+      post:
+        # Authenticode, and a no-op on every other platform and whenever the
+        # certificate is absent. The script decides; keeping that logic out of
+        # a template is what makes it testable outside a release.
+        - cmd: ./scripts/sign-windows.sh "{{ .Path }}" "{{ .Os }}"
+          output: true
+
+# Developer ID signing and Apple notarization, performed on the Linux release
+# runner -- this needs no macOS machine.
+#
+# Gated on the certificate being configured. envOrDefault, not .Env, because a
+# bare .Env reference on an unset variable fails the template before `enabled`
+# is ever consulted, which would break every release on a repository without
+# Apple credentials.
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids:
+        - packetcode
+      sign:
+        certificate: '{{ envOrDefault "MACOS_SIGN_P12" "" }}'
+        password: '{{ envOrDefault "MACOS_SIGN_PASSWORD" "" }}'
+      notarize:
+        issuer_id: '{{ envOrDefault "MACOS_NOTARY_ISSUER_ID" "" }}'
+        key_id: '{{ envOrDefault "MACOS_NOTARY_KEY_ID" "" }}'
+        key: '{{ envOrDefault "MACOS_NOTARY_KEY" "" }}'
+        # Wait for Apple's verdict rather than firing and forgetting. An
+        # unwaited submission means the release publishes before anyone knows
+        # whether the binary passes Gatekeeper, and the first report is a user
+        # who cannot open it.
+        wait: true
+        timeout: 30m
 
 archives:
   - formats:
@@ -29,9 +88,40 @@ archives:
       - goos: windows
         formats:
           - zip
+    # The licence travels with the binary. A downloaded archive is often the
+    # only copy someone has.
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
 
 checksum:
   name_template: "checksums.txt"
+  algorithm: sha256
+
+# Sign checksums.txt with Sigstore, keyless.
+#
+# No key to store, rotate or leak: cosign exchanges the workflow's GitHub OIDC
+# token for a short-lived certificate, and the signature is logged in the public
+# transparency log. What that buys is the missing half of the installers' check
+# -- they verify an archive against checksums.txt, and until now nothing
+# established that checksums.txt was ours.
+#
+# Gated so that a fork, or a local `goreleaser release --snapshot`, does not
+# fail for want of an OIDC token it was never going to have. That gate lives in
+# the script rather than here: `signs` has no `enabled` field, and a script is
+# the version that can be run -- and therefore tested -- without a release.
+signs:
+  - id: checksums
+    cmd: ./scripts/sign-checksums.sh
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - ${artifact}
+      - ${signature}
+      - ${certificate}
+    artifacts: checksum
+    output: true
 
 changelog:
   sort: asc
@@ -40,3 +130,27 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^ci:"
+
+release:
+  footer: |
+    ---
+
+    ## Verifying this release
+
+    Every archive is listed in `checksums.txt`, and `checksums.txt` is itself
+    signed with Sigstore — so a tampered checksum file is caught, not trusted.
+
+    ```bash
+    cosign verify-blob checksums.txt \
+      --signature checksums.txt.sig \
+      --certificate checksums.txt.pem \
+      --certificate-identity-regexp 'https://github.com/packetloss404/packetcode/\.github/workflows/release\.yml@refs/tags/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    sha256sum --check --ignore-missing checksums.txt
+    ```
+
+    `install.sh` and `install.ps1` run both checks for you when `cosign` is on
+    PATH, and say so plainly when it is not. Build provenance is attested
+    separately: `gh attestation verify <archive> --repo packetloss404/packetcode`.
+
+    See [docs/releases.md](https://github.com/packetloss404/packetcode/blob/main/docs/releases.md).
