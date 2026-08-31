@@ -57,11 +57,13 @@ copy its code or prompt text.
   the test guarded nothing. `isolateDoctorEnv` now clears the vendor variables
   too, not just the `PACKETCODE_` ones; `CODEX_HOME` had the same shape and was
   breaking two further doctor tests on any machine using Codex.
-- `TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
-  60s deadline, and it is not alone: a batch of `internal/jobs` and
-  `internal/mcp` tests fail together under CPU load and pass in isolation. They
-  cannot distinguish a slow machine from a regression, which is the one thing a
-  test has to do. Predates 2026-08-14.
+- ~~`TestManager_TranscriptReadsLiveSubSessionWhileRunning` is flaky against its
+  60s deadline, and it is not alone.~~ **Fixed 2026-08-26** in `73a4c35`;
+  the entry went unstruck until 2026-08-30. `internal/testwait` scales every
+  async deadline by `PACKETCODE_TEST_TIMEOUT_SCALE` (default x10) and logs a
+  slow pass rather than failing it, so a loaded machine and a regression are no
+  longer the same result. Wired into `internal/jobs`, `internal/mcp` and the
+  `internal/app` job tests.
 
 ## Review findings 2026-08-25 — verified, not yet fixed
 
@@ -421,27 +423,33 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   here twice over: the argument-scoped form is refused, and `Bash` is not a
   packetcode tool name. That is the correct outcome, and it is the case the
   implementation was built for even when the count said it could not happen.
-- Decide on `` !`command` `` dynamic context injection. **Measured: 0 of the 37
-  loaded skills use it**, one of the 28 in `~/.claude/plugins` does — the
-  original "1 of 37" was that plugin skill, counted against the wrong
-  population. Claude Code's own `/commit` is built on it, so it will arrive
-  eventually.
-  Not implementing is defensible and probably right: it runs shell text out of
-  a skill body before the model sees the result, and upstream ships
-  `disableSkillShellExecution` for exactly that concern. What is not defensible
-  is the current silence — the backticked command is passed through verbatim, so
-  the model is told ``PR diff: !`gh pr diff` `` and reads it as literal text.
-  The cheap half is worth doing on its own: detect the syntax and say it is not
-  executed, so the skill reads as disabled rather than as broken.
-- Support indexed `$0`/`$1` arguments and an `arguments:` frontmatter list.
-  **Measured: 0 of the 37 loaded skills use an indexed form**, and one of the 28
-  plugin skills does; 1 loaded skill uses plain `$ARGUMENTS`, which already
-  works. The original "8 of 28" was the `$ARGUMENTS` count from the plugin
-  population, not an indexed-argument count from anywhere.
-  So this is latent rather than live. A skill using `$1` today gets literal
-  placeholders *and* the arguments appended, so the model sees both and has to
-  guess — which is the same class of silent misdirection as the unexpanded
-  `${CLAUDE_SKILL_DIR}`, and cheap to fix the same way.
+- ~~Decide on `` !`command` `` dynamic context injection.~~ **Half shipped
+  2026-08-30.** Execution is still refused, and that stays the position: it runs
+  shell text out of a skill body before the model sees the result, and upstream
+  ships `disableSkillShellExecution` for the same concern. What was not
+  defensible was the silence — the backticked command was passed through
+  verbatim, so the model was told ``PR diff: !`gh pr diff` `` and read it as a
+  filled slot. `skills.BodyNotes` now detects the syntax and states, beneath the
+  block, that nothing ran and no output is present. Measured 0 of the 37 loaded
+  skills and 0 of their 672 resource files, so it costs the current population
+  nothing; the original "1 of 37" was a `~/.claude/plugins` skill counted
+  against the wrong population. Actually executing it remains open, and Claude
+  Code's own `/commit` is built on it, so it will come up again.
+- ~~Support indexed `$0`/`$1` arguments.~~ **Half shipped 2026-08-30**, same
+  shape as the entry above: substitution is not implemented, but an unfilled
+  `$1` is now reported rather than left to read as a value someone supplied.
+  Scoped by measurement, not by taste. A first version annotated 23 of the
+  author's installed files and every one was wrong — shell scripts whose `$1` is
+  a shell positional parameter, Hyperdrive docs whose `$1` is a SQL bind
+  parameter, capacity notes priced in dollars. So the check now runs on bodies
+  only (a resource is never expanded with arguments, so the note has nothing
+  true to say about one) and skips fenced and inline code. Re-measured at 0 of
+  37 bodies and 0 of 672 resources.
+  Still open: an `arguments:` frontmatter list, and substitution itself. 1
+  loaded skill uses plain `$ARGUMENTS`, which already works. One accepted
+  over-match remains and is asserted in the tests — a bare `$5` in prose is
+  indistinguishable from a placeholder, and upstream resolves that ambiguity by
+  substituting anyway.
 - Accept skills packetcode currently refuses. **Measured: 0 of the 37 loaded
   skills are refused today** — none lack a `description`, none exceed
   `MaxDescriptionBytes`, none exceed `MaxBodyBytes`. One of the 28 plugin skills

@@ -29,7 +29,18 @@ func (s Skill) Block() string {
 	}
 	b.WriteString(DefangMarkers(s.expandVars(s.Body)))
 	b.WriteString("\n</skill>")
+	appendNotes(&b, BodyNotes(s.Body))
 	return b.String()
+}
+
+// appendNotes writes what packetcode recognised in a body and did not act on,
+// beneath the closing marker. See the commentary in notes.go for why the
+// position is load-bearing rather than cosmetic.
+func appendNotes(b *strings.Builder, notes []string) {
+	for _, note := range notes {
+		b.WriteString("\n")
+		b.WriteString(note)
+	}
 }
 
 // SkillDirVar is the documented way a skill refers to files bundled beside it.
@@ -76,6 +87,11 @@ func (s Skill) ResourceBlock(rel string, content []byte) string {
 	}
 	b.WriteString(DefangMarkers(s.expandVars(string(content))))
 	b.WriteString("\n</skill_resource>")
+	// A resource gets the command check but not the placeholder one -- a
+	// dispatcher's material is exactly where a !`cmd` block lives, while a `$1`
+	// in one of these files is sh or SQL, never an argument slot. See
+	// ResourceNotes.
+	appendNotes(&b, ResourceNotes(string(content)))
 	return b.String()
 }
 
