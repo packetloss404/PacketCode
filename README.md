@@ -353,6 +353,14 @@ default_model = "qwen2.5-coder:14b"
 
 API keys may be stored in config or provided as `PACKETCODE_<SLUG>_API_KEY`. Environment variables win. See the [full configuration reference](docs/configuration.md).
 
+packetcode names any setting it did not understand — a `schema_version` from a
+newer build, or a key no setting matches — at startup and as the
+`config.compatibility` check in `packetcode doctor`. It never rewrites
+`config.toml`, so a newer file is reported rather than refused. What packetcode
+writes itself is governed differently: see the
+[compatibility contract](docs/compatibility.md) for every on-disk format, its
+version, and what happens when a build meets a file it was not built for.
+
 ## Context and Token Use
 
 The statusline context gauge shows current request occupancy, not cumulative billed tokens. Cumulative usage still drives cost. Automatic compaction includes system prompts and tool-schema estimates, preserves complete recent tool exchanges, and records compaction usage.

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/packetcode/packetcode/internal/compat"
 	"github.com/packetcode/packetcode/internal/config"
 )
 
@@ -19,7 +20,7 @@ const approvalsFile = "skill-approvals.json"
 // approvalFormatVersion is written into the file so a later format can be
 // recognised rather than guessed at. An unrecognised version is treated as
 // "nothing is approved", which fails closed.
-const approvalFormatVersion = 1
+const approvalFormatVersion = compat.SkillApprovalVersion
 
 // Approvals records which foreign project-scope skills a person has agreed to
 // load, per workspace.

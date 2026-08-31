@@ -15,6 +15,7 @@ package workflow
 import (
 	"time"
 
+	"github.com/packetcode/packetcode/internal/compat"
 	"github.com/packetcode/packetcode/internal/jobs"
 )
 
@@ -32,7 +33,7 @@ const (
 const (
 	// CurrentSchemaVersion is the only workflow TOML schema Packetcode accepts.
 	// A file with a newer version is refused rather than best-effort decoded.
-	CurrentSchemaVersion  = 1
+	CurrentSchemaVersion  = compat.WorkflowSchemaVersion
 	CurrentVerdictVersion = 1
 
 	// PassContractV1 names the structured verdict contract supported by the

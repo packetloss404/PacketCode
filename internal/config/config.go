@@ -9,13 +9,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/packetcode/packetcode/internal/compat"
 )
 
 type Config struct {
+	// SchemaVersion is optional and normally absent. A config written before
+	// versioning existed, or by hand, decodes as 0 and is treated as current
+	// -- refusing those would be refusing nearly every config in existence to
+	// guard against a case that has not happened yet.
+	//
+	// Its purpose is the other direction: a config touched by a newer build
+	// tells this one so, and this one says which settings it ignored instead
+	// of silently dropping them.
+	SchemaVersion   int                        `toml:"schema_version,omitempty"`
 	Default         DefaultConfig              `toml:"default"`
 	Providers       map[string]ProviderConfig  `toml:"providers"`
 	Behavior        BehaviorConfig             `toml:"behavior"`
@@ -34,6 +46,7 @@ type Config struct {
 	// file the user chose to keep them in.
 	dotEnv         *DotEnv
 	dotEnvProblems []string
+	compatProblems []string
 }
 
 // ACPConfig controls the optional Agent Client Protocol stdio server. Enabled
@@ -375,6 +388,24 @@ func (c *Config) DotEnvProblems() []string {
 	return append([]string(nil), c.dotEnvProblems...)
 }
 
+// CompatProblems returns what this build did not understand in the config
+// file: settings from a newer schema, and keys it decoded nothing from.
+//
+// Reported rather than fatal, which is the one place the compatibility
+// contract deliberately differs from the formats packetcode writes itself.
+// config.toml is a file a person typed. Refusing to start because they also
+// ran a newer build once, or because of a stray key, is a worse outcome than
+// the misreading it would prevent -- there is nothing here to corrupt, since
+// packetcode never rewrites this file. But ignoring a setting in silence is
+// how someone spends an afternoon wondering why an option does nothing, so
+// the ignoring is said out loud.
+func (c *Config) CompatProblems() []string {
+	if c == nil {
+		return nil
+	}
+	return append([]string(nil), c.compatProblems...)
+}
+
 // LoadFrom reads config from an explicit path. Exposed for testing and
 // for callers that want to point at a non-default file.
 func LoadFrom(path string) (*Config, error) {
@@ -387,9 +418,16 @@ func LoadFrom(path string) (*Config, error) {
 	}
 	cfg := Default()
 	if len(data) > 0 {
-		if err := toml.Unmarshal(data, cfg); err != nil {
+		// toml.Decode rather than toml.Unmarshal, for the MetaData: it is the
+		// only way to learn which keys in the file this build decoded nothing
+		// from. BurntSushi ignores unknown keys silently, which is the right
+		// behaviour -- an older build must not fail on a setting it has never
+		// heard of -- but silent is not the same as unreported.
+		md, err := toml.Decode(string(data), cfg)
+		if err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)
 		}
+		cfg.compatProblems = configCompatProblems(path, cfg.SchemaVersion, md.Undecoded())
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
@@ -418,6 +456,43 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// configCompatProblems describes what this build did not understand.
+//
+// The two cases are reported together because they are one question from the
+// user's chair -- "why did my setting do nothing?" -- and separately because
+// the answers differ: a newer schema means upgrade, an unknown key usually
+// means a typo.
+func configCompatProblems(path string, schemaVersion int, undecoded []toml.Key) []string {
+	var problems []string
+	if schemaVersion > compat.ConfigVersion {
+		problems = append(problems, fmt.Sprintf(
+			"%s declares schema_version %d but this build understands %d; "+
+				"settings added after %d are ignored",
+			path, schemaVersion, compat.ConfigVersion, compat.ConfigVersion))
+	}
+	if len(undecoded) == 0 {
+		return problems
+	}
+	keys := make([]string, 0, len(undecoded))
+	for _, k := range undecoded {
+		keys = append(keys, k.String())
+	}
+	sort.Strings(keys)
+	// Bounded. A config written against a much newer build could name dozens,
+	// and a startup warning that scrolls the terminal is one nobody reads.
+	const maxNamed = 5
+	shown, suffix := keys, ""
+	if len(shown) > maxNamed {
+		shown = shown[:maxNamed]
+		suffix = fmt.Sprintf(" and %d more", len(keys)-maxNamed)
+	}
+	problems = append(problems, fmt.Sprintf(
+		"%s: no setting matches %s%s; %s ignored (a newer build's option, or a typo)",
+		path, strings.Join(shown, ", "), suffix,
+		map[bool]string{true: "it was", false: "they were"}[len(keys) == 1]))
+	return problems
 }
 
 // lookupBoolEnv reads a boolean feature-gate variable.

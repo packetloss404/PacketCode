@@ -132,6 +132,12 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	for _, p := range cfg.DotEnvProblems() {
 		fmt.Fprintf(os.Stderr, "packetcode: .env %s\n", p)
 	}
+	// Settings this build did not understand. Same reasoning as the .env line
+	// above: the failure worth naming is the one where someone edited a file
+	// and packetcode behaved as though they had not.
+	for _, p := range cfg.CompatProblems() {
+		fmt.Fprintf(os.Stderr, "packetcode: config %s\n", p)
+	}
 	if permissionMode != "" {
 		profile, err := permissions.ParseProfile(permissionMode)
 		if err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/packetcode/packetcode/internal/atomicfile"
+	"github.com/packetcode/packetcode/internal/compat"
 	"github.com/packetcode/packetcode/internal/handoff"
 	"github.com/packetcode/packetcode/internal/provider"
 )
@@ -49,7 +50,10 @@ type Session struct {
 	Cost              CostInfo                   `json:"cost"`
 }
 
-const currentFormatVersion = 2
+// currentFormatVersion is defined by the compatibility contract rather than
+// here, so one file lists every on-disk version. See internal/compat and
+// docs/compatibility.md.
+const currentFormatVersion = compat.SessionVersion
 
 // CacheState is the persisted cache lineage for a conversation. The session
 // ID remains stable across resumes; only explicit transcript compaction
@@ -235,6 +239,20 @@ func (m *Manager) Load(id string) (*Session, error) {
 	}
 	if s.ID != id {
 		return nil, fmt.Errorf("decode session: id mismatch %q != %q", s.ID, id)
+	}
+	// Refuse a session written by a newer build, before anything can be saved
+	// over it.
+	//
+	// This was the most damaging gap in the whole contract. A newer session
+	// decoded cleanly here -- encoding/json discards fields it does not know --
+	// and migrateSession, seeing a version above its own, changed nothing and
+	// reported nothing. The session then loaded, looking entirely normal, and
+	// the next message saved it back through writeSessionFile: everything the
+	// newer build had written and this one could not see was gone, from a file
+	// the user never touched, with no error at any point.
+	if s.FormatVersion > currentFormatVersion {
+		return nil, fmt.Errorf("load session %s: %w", id,
+			compat.TooNew("session", s.FormatVersion, currentFormatVersion))
 	}
 	if migrateSession(&s, m.modelToolResultLimit) {
 		// Persist the additive projection/version upgrade without making an old
@@ -443,6 +461,15 @@ func (m *Manager) ListWithProblems() ([]Summary, []string, error) {
 			problems = append(problems, fmt.Sprintf("%s: %s", e.Name(), err))
 			continue
 		}
+		if s.FormatVersion > currentFormatVersion {
+			// Reported, not listed. Offering it would put a session in
+			// /resume that refuses to open, and the point of reporting
+			// problems here is that the user learns why a conversation they
+			// remember is not on the list.
+			problems = append(problems, fmt.Sprintf("%s: %s", e.Name(),
+				compat.TooNew("session", s.FormatVersion, currentFormatVersion)))
+			continue
+		}
 		if e.Name() != s.ID+".json" {
 			// A file whose name disagrees with the id inside it. Loading by
 			// either spelling would give a different answer, so neither is
@@ -604,6 +631,15 @@ func cloneMessages(messages []provider.Message) []provider.Message {
 func writeSessionFile(dir string, s *Session) error {
 	if err := validateSessionID(s.ID); err != nil {
 		return fmt.Errorf("save session: %w", err)
+	}
+	// Every write goes through here, so this is where "never save over a
+	// newer session" is actually guaranteed rather than merely intended.
+	// Checked against the in-memory version rather than by re-reading the
+	// file: a session saves on every message, and a read per save would cost
+	// real I/O to re-establish something Load already knows.
+	if s.FormatVersion > currentFormatVersion {
+		return fmt.Errorf("save session %s: %w", s.ID,
+			compat.TooNew("session", s.FormatVersion, currentFormatVersion))
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

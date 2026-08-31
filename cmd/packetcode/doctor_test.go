@@ -692,7 +692,11 @@ func TestDoctorJobRecordChecks(t *testing.T) {
 				"files left in place",
 				"1 readable",
 				"job_future.json",
-				"job record version 99 is newer than this build supports (1)",
+				// The wording is the compatibility contract's, shared by every
+				// format -- see internal/compat.TooNew. Asserted here because
+				// this message is the policy's entire user-facing surface.
+				"job format version 99 is newer than this build supports (1)",
+				"Upgrade packetcode, or move the file aside",
 			},
 			denyDetail: []string{"more not listed"},
 		},
