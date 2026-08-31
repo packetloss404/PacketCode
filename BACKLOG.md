@@ -385,11 +385,21 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   not discover. Mapping it to the skill directory would be inventing a meaning
   the ecosystem does not give it; leaving it literal is at least honest. Revisit
   only if plugin-bundle discovery is ever added.
-- Read `allowed-tools` from skill frontmatter; 10 of 37 set it. It pre-approves
-  tools for the invoking turn, so ignoring it costs approval prompts rather
-  than safety — feature loss in the safe direction. But it is the difference
-  between a skill that runs and one that interrogates the user at every step,
-  and it is one of the six fields in the Agent Skills spec proper.
+- ~~Decide whether to read `allowed-tools` from skill frontmatter.~~
+  **Done 2026-08-30, bounded.** The "10 of 37" in the original entry was wrong,
+  the same conflation as the `${CLAUDE_SKILL_DIR}` entry: re-measured, **none**
+  of the 37 top-level skills packetcode discovers set it. The ten were in
+  `~/.claude/plugins`, which packetcode does not load.
+  Built anyway, in the shape the corrected entry proposed, because the field is
+  ecosystem-standard and will arrive eventually. Honoured for trusted scopes
+  only — a repository must not pre-approve the tools it then asks the model to
+  use. Converts Ask to Allow and nothing else: `permissions.Policy` checks deny
+  floors before any other rule, so an explicit deny wins over a grant added
+  after it, structurally rather than by remembering to check. Released when the
+  turn ends, however it ends. A name that is not a registered tool grants
+  nothing and is reported, because Claude Code's tool names are not packetcode's
+  and granting the closest-looking one would be guessing about the one thing
+  that must not be guessed.
 - Decide on `` !`command` `` dynamic context injection; 1 of 37 uses it, and
   Claude Code's own `/commit` is built on it. Today the backticked command is
   passed through as literal text, so the model is told ``PR diff: !`gh pr

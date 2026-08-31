@@ -28,7 +28,18 @@ const skillSchema = `{
 // that matters.
 type SkillTool struct {
 	registry *skills.Registry
+	// onLoad, when set, is called with each skill whose body this tool serves.
+	//
+	// It exists for `allowed-tools`: the widening has to reach the policy the
+	// running turn is being decided against, and a tool has no route to that.
+	// The App wires it. Optional -- a nil hook means a skill body still loads,
+	// it just pre-approves nothing, which is the safe direction for a seam that
+	// might not be wired.
+	onLoad func(skills.Skill)
 }
+
+// SetOnLoad registers the callback invoked when a skill body is served.
+func (t *SkillTool) SetOnLoad(fn func(skills.Skill)) { t.onLoad = fn }
 
 // NewSkillTool builds the tool over an already-resolved registry. Resolution
 // happens once at startup rather than per call so the index in the system
@@ -113,6 +124,11 @@ func (t *SkillTool) Execute(_ context.Context, params json.RawMessage) (ToolResu
 }
 
 func (t *SkillTool) readBody(skill skills.Skill) (ToolResult, error) {
+	// Announced before the body is returned, so a grant is in force for the
+	// tool calls the body is about to prompt rather than one call too late.
+	if t.onLoad != nil {
+		t.onLoad(skill)
+	}
 	body := skill.Block()
 	resources, truncated := t.registry.Resources(skill.Name)
 

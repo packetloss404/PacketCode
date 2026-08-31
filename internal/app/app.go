@@ -286,9 +286,12 @@ type App struct {
 	// /loop state. loops holds active loops by id; activeLoopID names the loop
 	// that owns the currently-running self-paced turn (so agentDoneMsg can
 	// decide whether to re-run the body).
-	loops              map[string]*loopState
-	loopSeq            int
-	activeLoopID       string
+	loops        map[string]*loopState
+	loopSeq      int
+	activeLoopID string
+	// activeSkillGrant is the permission widening a skill asked for, held only
+	// for the turn that invoked it. See skillgrant.go.
+	activeSkillGrant   *skillGrant
 	lastAgentText      string // accumulated assistant text for the current turn (loop sentinel check)
 	statusSeq          int
 	statusLineInFlight int
@@ -493,6 +496,9 @@ func (a *App) SetSendFunc(fn func(tea.Msg)) {
 			a.sendMsg(approvalPendingMsg{})
 		}
 	})
+	// Wired here rather than at construction: the hook posts a message, and
+	// there is nowhere to post one until the bridge exists.
+	a.wireSkillGrants()
 }
 
 // Approver returns the App's uiApprover so the host can inject it as the
@@ -612,6 +618,11 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.cancelTurn()
 			a.cancelTurn = nil
 		}
+		// However the turn ended -- completed, cancelled, errored -- a widening
+		// it was given does not outlive it.
+		if note := a.releaseSkillGrant(); note != "" {
+			a.conversation.AppendSystem("skills: " + note)
+		}
 		// A self-paced loop that owns this turn decides whether to run again.
 		if a.activeLoopID != "" {
 			if cmd := a.onLoopTurnDone(); cmd != nil {
@@ -619,6 +630,16 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a.startNextQueuedInput()
+
+	case skillLoadedMsg:
+		// The model selected a skill mid-turn. Same containment as the typed
+		// path: trusted scopes only, deny floors intact, released when the turn
+		// ends. Applied here rather than in the tool because this is the
+		// goroutine that may touch App state.
+		if note := a.applySkillGrant(msg.skill); note != "" {
+			a.conversation.AppendSystem("skills: " + note)
+		}
+		return a, nil
 
 	case loopTickMsg:
 		ls, ok := a.loops[msg.id]
@@ -2225,6 +2246,16 @@ func (a *App) startCustomCommand(custom SlashCommand, original, cmd string) (tea
 	opt.text = custom.Expand(args)
 	if !custom.Skill {
 		opt.display = opt.text
+	}
+	if custom.Skill {
+		// A human typed this, which is the consent the widening rests on. The
+		// grant is applied before the turn starts so the first tool call in it
+		// is already covered, and released when the turn ends.
+		if s, ok := a.skillsRegistry().Lookup(custom.Name); ok {
+			if note := a.applySkillGrant(s); note != "" {
+				a.conversation.AppendSystem("skills: " + note)
+			}
+		}
 	}
 	if a.streaming {
 		a.queueTurn(opt)
