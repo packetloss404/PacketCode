@@ -6,6 +6,19 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- Skills now say what packetcode did not do with them. Two ecosystem syntaxes
+  reach the model as literal text: `` !`gh pr diff` `` dynamic command
+  injection, and positional `$1`/`$2` placeholders. Neither errors and neither
+  is visibly empty, so both read as filled slots — the model answers about a
+  diff it never saw. A note beneath the skill block now states that nothing ran,
+  or that a placeholder is unfilled and the user's words follow. Executing and
+  substituting are still refused; only the silence is fixed.
+  The notes sit outside the block, where a body cannot write: its own `<skill`
+  markers are defanged, so a repository cannot forge one. Placeholder detection
+  runs on bodies only and skips fenced and inline code — a resource file is
+  never expanded with arguments, and its `$1` is shell or SQL syntax. That
+  scoping came from measurement: the first version annotated 23 real files and
+  every one was a false positive.
 - `allowed-tools` in skill frontmatter pre-approves those tools for the turn
   that invokes the skill, so it does not stop to ask for each. Honoured only for
   builtin and user-scope skills, never a repository's; converts "ask" to "allow"

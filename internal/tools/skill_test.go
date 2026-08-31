@@ -207,3 +207,25 @@ func TestSkillTool_DefangsMarkersInResources(t *testing.T) {
 		t.Fatalf("the block must close exactly once, at the end:\n%s", res.Content)
 	}
 }
+
+// The note has to survive the path the model actually uses. Block() is where
+// it is produced, but the skill tool wraps that output with a resource listing,
+// and a note that were dropped or buried there would leave the model reading
+// backticked text as a result it had been handed.
+func TestSkillTool_ReportsCommandsItDidNotRun(t *testing.T) {
+	reg := skillRegistry(t, "prdiff",
+		"---\ndescription: review a PR\n---\nDiff to review: !`gh pr diff`\n")
+	res := runSkill(t, NewSkillTool(reg), `{"name":"prdiff"}`)
+
+	if res.IsError {
+		t.Fatalf("unexpected error result: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "packetcode note:") ||
+		!strings.Contains(res.Content, "does not execute") {
+		t.Fatalf("the tool did not say the command was not run:\n%s", res.Content)
+	}
+	// Outside the block, where a project body cannot forge one.
+	if strings.Index(res.Content, "packetcode note:") < strings.Index(res.Content, "</skill>") {
+		t.Fatalf("the note landed inside the labelled block:\n%s", res.Content)
+	}
+}

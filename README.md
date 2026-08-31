@@ -493,14 +493,30 @@ and confined to it, so this works for user-scope skills that sit outside the
 project root without widening what the file tools can reach.
 
 This is the layout used by the wider Agent Skills ecosystem, so skills
-published for other agents load here — with real gaps. `${CLAUDE_SKILL_DIR}`
-and `${CLAUDE_PLUGIN_ROOT}` are not substituted, so a skill that points at its
-own bundled scripts through them does not resolve; `allowed-tools` is ignored,
-which costs you approval prompts rather than safety; `` !`command` `` context
-injection is not run, so a body using it is sent literally; and only
-`$ARGUMENTS` is supported, not the indexed `$0`/`$1` forms. packetcode also
-refuses a skill with no `description`, which upstream loads. Published skills
-install and load; not all of them work unmodified.
+published for other agents load here. Some features are unimplemented, and
+where they are, packetcode says so rather than passing the text through as
+though it had worked:
+
+- `` !`command` `` context injection is **not executed**. Running shell text out
+  of a skill body before you see the result is a choice packetcode declines —
+  upstream ships a switch to disable it for the same reason. A body using it now
+  carries a note beneath it saying nothing ran, so the model does not read
+  ``PR diff: !`gh pr diff` `` as a diff it was handed.
+- Indexed `$1`/`$2` placeholders are **not substituted**, and are likewise
+  reported as unfilled. Plain `$ARGUMENTS` works. A skill's arguments always
+  land after the body rather than inside it, because a skill body is framed and
+  a project one is repository content.
+- `${CLAUDE_PLUGIN_ROOT}` is not substituted: it names a plugin bundle, and
+  packetcode has no plugin bundles.
+- `allowed-tools` narrowed to particular arguments — `Bash(git status:*)` — is
+  refused rather than widened to the bare tool, and the refusal is reported.
+  Claude Code's tool names are not packetcode's, so a name that matches no
+  registered tool grants nothing and says so instead of guessing.
+- packetcode refuses a skill with no `description`, which upstream loads by
+  falling back to the first paragraph.
+
+Published skills install and load; not all of them work unmodified, and the
+ones that do not should tell you why.
 
 `packetcode skills install` is still the way to add a published skill you do
 not already have locally:

@@ -198,3 +198,37 @@ func hasErrorMentioning(errs []string, substr string) bool {
 	}
 	return false
 }
+
+// The claim the placeholder note makes -- "anything the user typed appears
+// after this block" -- is only true if it is. A skill body is never a template
+// here: Expand refuses to substitute inside a framed body, so the arguments are
+// appended, and the note is what tells the model that is where to look.
+func TestSlashCommandExpand_PlaceholderNotePrecedesTheArguments(t *testing.T) {
+	project := t.TempDir()
+	writeInvocableSkill(t, skills.ProjectSkillsDir(project), "review",
+		"---\ndescription: Review a PR\n---\nReview pull request $1 carefully.\n")
+
+	reg := LoadSlashRegistry(project, skillRegistryFor(t, project))
+	cmd, ok := reg.Lookup("review")
+	if !ok {
+		t.Fatal("/review did not register")
+	}
+
+	got := cmd.Expand("1487")
+	note := strings.Index(got, "packetcode note:")
+	if note < 0 {
+		t.Fatalf("the placeholder was not reported:\n%s", got)
+	}
+	// The placeholder is still literal. Asserted so the note stays honest: if
+	// substitution is ever implemented, this test fails and the note must go.
+	if !strings.Contains(got, "Review pull request $1 carefully.") {
+		t.Fatalf("the body was substituted after all:\n%s", got)
+	}
+	args := strings.LastIndex(got, "1487")
+	if args < note {
+		t.Fatalf("the arguments did not land after the note:\n%s", got)
+	}
+	if strings.Index(got, "</skill>") > note {
+		t.Fatalf("the note landed inside the labelled block:\n%s", got)
+	}
+}
