@@ -6,6 +6,14 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- `packetcode --help` now lists the commands. It printed flags and nothing
+  else, so `doctor`, `skills`, `acp` and `sugar` were reachable only by reading
+  the source — a diagnostic command nobody can find is not much of a
+  diagnostic. `help`, `-h` and `--help` now exit 0 rather than 2, since asking
+  for help is not an error.
+  Dispatch and help read one table instead of two hand-maintained lists, which
+  is how they came to disagree; a command can no longer exist in one and be
+  missing from the other.
 - Cost estimates no longer bill cached input at the full input rate. Every
   provider serves cached tokens at a fraction of fresh ones and reports how
   many; packetcode recorded that number faithfully and then multiplied the
