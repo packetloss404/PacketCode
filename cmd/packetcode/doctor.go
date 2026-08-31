@@ -196,6 +196,7 @@ func buildDoctorReport() doctorReport {
 		}
 	}
 
+	addConfigCompatCheck(&r, cfg)
 	addProviderChecks(&r, cfg)
 	addStateDirCheck(&r, "state.sessions", "sessions dir", config.SessionsDir)
 	addStateDirCheck(&r, "state.backups", "backups dir", config.BackupsDir)
@@ -319,6 +320,26 @@ func doctorOverallStatus(checks []doctorCheck) string {
 		}
 	}
 	return status
+}
+
+// addConfigCompatCheck reports settings this build did not understand.
+//
+// Here as well as at startup, because doctor is the command people run when
+// something is not working and the TUI banner has already scrolled away -- and
+// "the option I set does nothing" is exactly the complaint that brings someone
+// here. Wiring this into run() alone would leave doctor confidently reporting
+// the config file as fine while a setting in it was being ignored.
+func addConfigCompatCheck(r *doctorReport, cfg *config.Config) {
+	problems := cfg.CompatProblems()
+	if len(problems) == 0 {
+		r.add("config.compatibility", "config", doctorOK,
+			"every config setting is understood by this build", "", "", "docs/compatibility.md")
+		return
+	}
+	r.add("config.compatibility", "config", doctorWarn,
+		fmt.Sprintf("%d config setting(s) ignored by this build", len(problems)),
+		strings.Join(problems, "; "),
+		"Upgrade packetcode, or remove the setting", "docs/compatibility.md")
 }
 
 func addStateDirCheck(r *doctorReport, id, message string, fn func() (string, error)) {

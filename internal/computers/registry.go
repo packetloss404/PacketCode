@@ -11,11 +11,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/compat"
 )
 
 // registryVersion is bumped when the on-disk shape changes incompatibly.
 // Readers refuse a newer version rather than silently misinterpreting it.
-const registryVersion = 1
+const registryVersion = compat.ComputerRegistryVersion
 
 // FileName is the registry file inside the computers directory.
 const FileName = "registry.json"

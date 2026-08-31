@@ -35,11 +35,27 @@ copy its code or prompt text.
   been executed end to end against a real certificate — the Authenticode script
   was tested against a self-signed one, which signs and timestamps correctly and
   fails chain validation exactly as it should.
-- Define compatibility and migration policy for config, sessions, persisted jobs, workflow TOML, and MCP definitions. Persisted jobs are done (records
-  carry `format_version` and refuse a newer one); config, sessions, workflow
-  TOML, and MCP definitions remain. Write it as a published contract with its
-  own changelog, and land it *before* any daemon work, since a daemon with
-  clients becomes the compatibility problem.
+- ~~Define compatibility and migration policy for config, sessions, persisted
+  jobs, workflow TOML, and MCP definitions.~~ **Shipped 2026-08-30** as
+  [docs/compatibility.md](docs/compatibility.md), with `internal/compat` as its
+  executable form and a doc test that fails when the two disagree — a published
+  contract that can drift from the code silently is a document, not a contract.
+  The policy was previously spelled six different ways by six packages, which is
+  why writing it down found bugs. Sessions carried a `format_version` and
+  enforced nothing: a newer session decoded cleanly, `migrateSession` saw a
+  version above its own and did nothing, and the next message saved it back with
+  every unknown field stripped — silent, permanent data loss in a file the user
+  never touched. Sessions now refuse a newer version at load, at listing, and at
+  the write chokepoint. Config had no version at all and ignored unrecognised
+  keys in silence; it now carries an optional `schema_version` and names what it
+  did not understand, at startup and in `doctor`.
+  MCP definitions turned out not to be a separate format — they live in
+  `config.toml` under `[mcp.<name>]` and are covered by its row.
+  Config is deliberately the one format that reports rather than refuses: it is
+  a file a person typed, packetcode never rewrites it, so there is nothing to
+  corrupt, and refusing to start over it would be a worse failure than the one
+  prevented.
+  This was the item flagged to land before any daemon work. It has.
 - ~~Surface unreadable job records.~~ **Shipped 2026-08-14** with PCMP10, which
   made it urgent: an older build meeting the new `abandoned` state rejects the
   record, so without this the job simply vanished from the UI. Startup now warns

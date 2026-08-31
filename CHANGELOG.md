@@ -6,6 +6,25 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Added
 
+- A published compatibility contract: [docs/compatibility.md](docs/compatibility.md),
+  backed by `internal/compat` and a test that fails when the document and the
+  code disagree. One rule: an older build must never silently misread a newer
+  file. Go's decoders discard fields they do not know, so a build that reads a
+  newer file and writes it back has not misread it — it has destroyed what it
+  could not see.
+- Sessions now refuse to load, list, or save over a session written by a newer
+  build. They carried a `format_version` and enforced nothing, so a newer
+  session loaded looking normal and the next message wrote it back with every
+  unknown field stripped — permanent loss, in a file nobody touched, with no
+  error anywhere.
+- `config.toml` accepts an optional `schema_version`, and packetcode now names
+  the settings it did not understand — a newer schema, or a key no setting
+  matches — at startup and as a `config.compatibility` check in `doctor`.
+  Unrecognised keys were previously ignored in silence, which is how someone
+  spends an afternoon wondering why an option does nothing. Config reports
+  rather than refuses: it is a file a person typed, packetcode never rewrites
+  it, and refusing to start over it would be the worse failure.
+
 - Release artifacts are signed, attested, and checked before they ship.
   `checksums.txt` now carries a Sigstore signature made with the release
   workflow's OIDC token — no key to store or rotate. That was the missing half

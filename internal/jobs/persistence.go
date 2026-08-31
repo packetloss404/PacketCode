@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/atomicfile"
+	"github.com/packetcode/packetcode/internal/compat"
 	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/tools"
 )
@@ -17,7 +18,7 @@ import (
 // incompatibly. Readers refuse a newer record rather than silently
 // misinterpreting it, matching computers.registryVersion. Records written
 // before versioning existed decode as 0 and remain readable.
-const jobFormatVersion = 1
+const jobFormatVersion = compat.JobVersion
 
 // UnreadableRecord names a job file that could not be loaded. Losing a job
 // quietly is the failure mode this exists to prevent: a job that was
@@ -295,10 +296,8 @@ func savePersistedSnapshot(jobsDir string, p persistedJob) error {
 	final := filepath.Join(jobsDir, p.ID+".json")
 	if existing, ok := readPersistedJob(final); ok {
 		if existing.FormatVersion > jobFormatVersion {
-			return fmt.Errorf(
-				"save job %s: on-disk record version %d is newer than this build supports (%d)",
-				p.ID, existing.FormatVersion, jobFormatVersion,
-			)
+			return fmt.Errorf("save job %s: %w", p.ID,
+				compat.TooNew("job", existing.FormatVersion, jobFormatVersion))
 		}
 		if p.Seq > 0 && existing.Seq > p.Seq {
 			return nil
@@ -343,9 +342,8 @@ func decodeRecordFile(path string) (persistedJob, State, *UnreadableRecord) {
 	}
 	if p.FormatVersion > jobFormatVersion {
 		return persistedJob{}, StateFailed, &UnreadableRecord{
-			Path: path,
-			Reason: fmt.Sprintf("job record version %d is newer than this build supports (%d)",
-				p.FormatVersion, jobFormatVersion),
+			Path:   path,
+			Reason: compat.TooNew("job", p.FormatVersion, jobFormatVersion).Error(),
 		}
 	}
 	state, known := parseKnownState(p.State)
