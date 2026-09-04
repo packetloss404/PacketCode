@@ -124,3 +124,21 @@ func TestReadFile_EmptyFileIsNotAnError(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 }
+
+func TestReadFile_RefusesDotEnv(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("PACKETCODE_OPENAI_API_KEY=sk-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFileTool(root)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"path":".env"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal, got %q", res.Content)
+	}
+	if strings.Contains(res.Content, "sk-secret") {
+		t.Fatalf("secret leaked: %q", res.Content)
+	}
+}

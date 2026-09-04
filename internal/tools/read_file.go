@@ -66,6 +66,16 @@ func (t *ReadFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolRe
 	if t.backendErr != nil {
 		return ToolResult{Content: fmt.Sprintf("read_file: %s", t.backendErr), IsError: true}, nil
 	}
+	if IsSecretFilePath(p.Path) {
+		return ToolResult{Content: secretFileRefusal("read_file", p.Path), IsError: true}, nil
+	}
+	// Checked again on the resolved path: the supplied name may be a symlink
+	// or an alias whose target is the secret file. Resolve reports the real
+	// path on both backends, and a resolution failure is the read error the
+	// ReadFile below would report anyway.
+	if resolved, err := t.Backend.Resolve(ctx, p.Path, false); err == nil && IsSecretFilePath(resolved) {
+		return ToolResult{Content: secretFileRefusal("read_file", p.Path), IsError: true}, nil
+	}
 	data, err := t.Backend.ReadFile(ctx, p.Path)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("read_file: %s", err), IsError: true}, nil

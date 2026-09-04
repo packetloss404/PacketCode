@@ -141,6 +141,9 @@ func (t *SearchCodebaseTool) searchWithBackend(ctx context.Context, pattern, glo
 			if entry.Mode&fs.ModeSymlink != 0 || entry.Size > 1024*1024 {
 				continue
 			}
+			if IsSecretFilePath(entry.Name) {
+				continue
+			}
 			if glob != "" {
 				matched, matchErr := matchSearchGlob(glob, rel, entry.Name)
 				if matchErr != nil || !matched {
@@ -204,6 +207,11 @@ func (t *SearchCodebaseTool) searchWithRipgrep(ctx context.Context, rg, pattern,
 	if glob != "" {
 		args = append(args, "--glob", glob)
 	}
+	// After the caller's glob, because ripgrep gives precedence to later globs:
+	// a file_glob of ".env" must not re-include the one file every engine here
+	// refuses. This over-excludes .env.example from ripgrep search only; the
+	// Go and backend engines apply the exact rule.
+	args = append(args, "--glob", "!.env", "--glob", "!.env.*")
 	args = append(args, "--", pattern, t.Root)
 
 	cmd := exec.CommandContext(runCtx, rg, args...)
@@ -302,6 +310,9 @@ func (t *SearchCodebaseTool) searchWithGo(ctx context.Context, pattern, glob str
 		// A symlink's target may be outside the root; the ripgrep and
 		// backend engines already refuse them, this one did not.
 		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if IsSecretFilePath(d.Name()) {
 			return nil
 		}
 		// Skip files larger than 1MB to avoid eating binaries.

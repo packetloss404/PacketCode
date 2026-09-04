@@ -69,3 +69,16 @@ func TestExpandFileMentions_SkipsBinary(t *testing.T) {
 		t.Fatalf("binary file should not be attached: %v", attached)
 	}
 }
+
+func TestExpandFileMentions_RefusesDotEnv(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, ".env"), []byte("PACKETCODE_OPENAI_API_KEY=sk-secret"), 0o600)
+	os.WriteFile(filepath.Join(root, ".env.example"), []byte("PACKETCODE_OPENAI_API_KEY="), 0o600)
+	expanded, attached := expandFileMentions("keys in @.env and @.env.example", root)
+	if len(attached) != 1 || attached[0] != ".env.example" {
+		t.Fatalf("attached = %v, want only .env.example", attached)
+	}
+	if strings.Contains(expanded, "sk-secret") {
+		t.Fatalf("secret leaked into prompt: %q", expanded)
+	}
+}

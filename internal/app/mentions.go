@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/packetcode/packetcode/internal/tools"
 )
 
 // @-file mentions: when a user writes @path/to/file anywhere in a prompt,
@@ -78,6 +80,12 @@ func expandFileMentions(prompt, root string) (expanded string, attached []string
 // project-relative path and contents. ok is false when the token doesn't point
 // at a readable regular text file inside root.
 func readMention(raw, root string) (rel, content string, ok bool) {
+	// A dotenv file is where this program reads provider keys from; it is not
+	// something to paste into a prompt. Same rule as read_file, and a project
+	// command file (repository content) can carry an @-mention too.
+	if tools.IsSecretFilePath(raw) {
+		return "", "", false
+	}
 	// Resolve ~ and relative paths against root.
 	p := raw
 	if strings.HasPrefix(p, "~/") {
