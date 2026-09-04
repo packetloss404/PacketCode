@@ -21,11 +21,13 @@ package cost
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/provider"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/atomicfile"
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 // Tally is the on-disk root document.
@@ -80,7 +82,11 @@ func Load(path string) (*Tally, error) {
 	return t, nil
 }
 
-// Save writes the tally atomically.
+// Save writes the tally atomically: temp file, fsync, rename, the same way
+// sessions, job records, and config.toml are written. The previous
+// temp-then-rename had no fsync, so a crash could publish a correctly named
+// empty tally -- which Load then refuses to decode, taking /cost and the
+// statusline down with it until the file is deleted by hand.
 func (t *Tally) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -89,25 +95,7 @@ func (t *Tally) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tally.*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return atomicfile.Write(path, data, 0o600, ".tally.*.json.tmp")
 }
 
 // PricingFunc returns USD per 1M tokens for (provider, model). Callers (the
