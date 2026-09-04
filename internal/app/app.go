@@ -162,6 +162,10 @@ type Deps struct {
 	Hooks             *hooks.Runner
 	Version           string // shown on the welcome splash; e.g. "v1" or "v0.1.0"
 	ResumeHydrate     bool   // render the current session transcript at startup
+	// AgentFactory lets the host provide an agent built from the same runtime
+	// definition used by non-TUI frontends. Optional for tests and embedders
+	// that still provide the individual dependencies above.
+	AgentFactory func(agent.Approver) *agent.Agent
 
 	// Factories maps provider slug → constructor. Used at runtime when
 	// the user sets or updates an API key through the provider picker,
@@ -205,8 +209,15 @@ type App struct {
 	agentDispatchFocused bool
 
 	// Agent + bridge.
-	agent            *agent.Agent
-	approver         *uiApprover
+	agent    *agent.Agent
+	approver *uiApprover
+	// approvalID is the approver envelope the visible modal was raised for,
+	// and approvalOrigin says whose work it blocks. Every decision routes
+	// through the id: without it, a keypress resolves "whatever is showing",
+	// which is a different request the moment a cancelled job's prompt is
+	// replaced. 0 means no approval is bound.
+	approvalID       uint64
+	approvalOrigin   approvalOrigin
 	permissionPolicy *permissions.Policy
 	permissionBase   *permissions.Policy
 	preTrustPolicy   *permissions.Policy
@@ -289,6 +300,10 @@ type App struct {
 	loops        map[string]*loopState
 	loopSeq      int
 	activeLoopID string
+	// turnFailed records that the current turn ended in an error or a
+	// cancellation. A self-paced loop reads it to stop rather than re-run:
+	// Ctrl+C could not end a loop, and a 401 became 25 back-to-back retries.
+	turnFailed bool
 	// activeSkillGrant is the permission widening a skill asked for, held only
 	// for the turn that invoked it. See skillgrant.go.
 	activeSkillGrant   *skillGrant
@@ -354,19 +369,25 @@ func New(deps Deps) (*App, error) {
 	approver := newUIApprover()
 	approver.SetPermissionPolicy(policy)
 
-	a := agent.New(agent.Config{
-		LoopDetection: agentLoopDetection(deps.Config),
-		Registry:      deps.Registry,
-		Tools:         deps.Tools,
-		Session:       deps.Sessions,
-		CostTracker:   deps.CostTracker,
-		Approver:      approver,
-		Policy:        policy,
-		SystemPrompt:  deps.SystemPrompt,
-		Hooks:         deps.Hooks,
-		SugarCache:    sugarCacheAgentConfig(deps.Config),
-		ConduitShadow: conduitShadowAgentConfig(deps.Config),
-	})
+	var a *agent.Agent
+	if deps.AgentFactory != nil {
+		a = deps.AgentFactory(approver)
+	}
+	if a == nil {
+		a = agent.New(agent.Config{
+			LoopDetection: agentLoopDetection(deps.Config),
+			Registry:      deps.Registry,
+			Tools:         deps.Tools,
+			Session:       deps.Sessions,
+			CostTracker:   deps.CostTracker,
+			Approver:      approver,
+			Policy:        policy,
+			SystemPrompt:  deps.SystemPrompt,
+			Hooks:         deps.Hooks,
+			SugarCache:    sugarCacheAgentConfig(deps.Config),
+			ConduitShadow: conduitShadowAgentConfig(deps.Config),
+		})
+	}
 
 	conv := conversation.New()
 	if deps.Version != "" {
@@ -468,10 +489,10 @@ func sugarCacheAgentConfig(cfg *config.Config) agent.SugarCacheConfig {
 		return agent.SugarCacheConfig{}
 	}
 	return agent.SugarCacheConfig{
-		Enabled:   cfg.Sugar.CacheMode != "off",
-		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
-		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
-		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
+		Enabled:   cfg.Sugar.EffectiveCacheMode() != "off",
+		Mode:      provider.SugarCacheMode(cfg.Sugar.EffectiveCacheMode()),
+		Retention: provider.SugarCacheRetention(cfg.Sugar.EffectiveCacheRetention()),
+		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.EffectivePrivacy()),
 	}
 }
 
@@ -623,9 +644,12 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if note := a.releaseSkillGrant(); note != "" {
 			a.conversation.AppendSystem("skills: " + note)
 		}
-		// A self-paced loop that owns this turn decides whether to run again.
+		// A self-paced loop that owns this turn decides whether to run again
+		// -- unless the turn did not finish on its own terms.
 		if a.activeLoopID != "" {
-			if cmd := a.onLoopTurnDone(); cmd != nil {
+			if a.turnFailed {
+				a.stopLoopAfterFailedTurn()
+			} else if cmd := a.onLoopTurnDone(); cmd != nil {
 				return a, cmd
 			}
 		}
@@ -646,22 +670,19 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok || ls.stopped || ls.mode != loopInterval {
 			return a, nil // loop stopped or gone → stop ticking
 		}
+		if a.streaming {
+			// The previous body is still running. Queueing another copy on
+			// every tick grew the queue without bound when the body outlasts
+			// the interval; skip this tick and try again on the next one.
+			return a, loopTick(ls.id, ls.interval)
+		}
 		return a, tea.Batch(a.runLoopBody(ls), loopTick(ls.id, ls.interval))
 
 	case compactDoneMsg:
 		return a.handleCompactDone(msg)
 
 	case approval.ResultMsg:
-		decision := agent.ApprovalDecision{Approved: false, Reason: "user rejected"}
-		switch msg.Result {
-		case approval.Approved:
-			if msg.Remember {
-				a.rememberApproval(msg.ToolCall)
-			}
-			decision = agent.ApprovalDecision{Approved: true}
-		}
-		a.approver.Resolve(decision)
-		a.showPendingApproval()
+		a.resolveApprovalResult(msg)
 		return a, nil
 
 	case mcpRestartedMsg:
@@ -769,6 +790,10 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.flushToolOutput()
 
 	case tickTopbarMsg:
+		// Cheap liveness sweep. The approver notifies when an envelope is
+		// abandoned, but an embedder without a Send bridge never receives that
+		// notify — the tick is the backstop that still closes a dead modal.
+		a.showPendingApproval()
 		a.refreshTopBar()
 		branchCmd := a.refreshGitBranch()
 		var statusCmd tea.Cmd
@@ -956,12 +981,15 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			a.spinner.Stop()
 			a.markOperationCancelling()
-			if a.approval.Visible() {
-				a.approval.Hide()
-				a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "cancelled"})
-				a.showPendingApproval()
+			// Ctrl+C cancels the user's own turn. A background job's approval
+			// is not part of that turn: rejecting it here would stop work the
+			// user never asked to stop, just because its prompt happened to be
+			// the one on screen.
+			if a.approval.Visible() && a.approvalOrigin == originForeground {
+				a.rejectVisibleApproval("cancelled")
 			}
 			a.clearQueuedInputs()
+			a.showPendingApproval()
 			return a, nil
 		}
 		if a.prompt.Visible() {
@@ -969,8 +997,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if a.approval.Visible() {
-			a.approval.Hide()
-			a.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "cancelled"})
+			// Nothing else is in flight, so Ctrl+C can only mean the prompt on
+			// screen. Unlike the streaming branch this is a deliberate answer
+			// to what is displayed, so it applies whatever the origin.
+			a.rejectVisibleApproval("cancelled")
 			a.showPendingApproval()
 			return a, nil
 		}
@@ -1467,17 +1497,77 @@ func (a *App) refreshGitBranch() tea.Cmd {
 	}
 }
 
+// showPendingApproval reconciles the modal with the approver queue. It is
+// called on every approvalPendingMsg and on the top bar tick, so an approval
+// that dies while it is displayed cannot hold the screen.
 func (a *App) showPendingApproval() {
 	if a.approval.Visible() {
-		a.approval.SetQueueDepth(a.approver.QueueDepth())
+		// approvalID == 0 means the modal was raised outside the approver
+		// (the --tui-fixture screens do this). There is no envelope to check
+		// liveness against, and reclaiming it would erase a screen that is
+		// doing exactly what it was asked to.
+		if a.approvalID == 0 || a.approver.IsLive(a.approvalID) {
+			a.approval.SetQueueDepth(a.approver.QueueDepth())
+			return
+		}
+		// The job behind this prompt was cancelled or timed out. Nobody is
+		// waiting for the answer any more, and leaving it up blocks the input
+		// and every other job's request behind a dead question.
+		a.hideApproval()
+	}
+	next, ok := a.approver.Next()
+	if !ok {
 		return
 	}
-	if req, ok := a.approver.Pending(); ok {
-		a.autocomplete.Close()
-		a.approval.Show(req.Tool, req.ToolCall)
-		a.approval.SetWidth(a.width)
-		a.approval.SetQueueDepth(a.approver.QueueDepth())
+	a.autocomplete.Close()
+	a.approvalID = next.id
+	a.approvalOrigin = next.origin
+	a.approval.Show(next.req.Tool, next.req.ToolCall)
+	a.approval.SetRequestID(next.id)
+	a.approval.SetWidth(a.width)
+	a.approval.SetQueueDepth(a.approver.QueueDepth())
+}
+
+// hideApproval drops the modal and the identity it was bound to together.
+// Clearing them separately is how a later decision finds a stale id to match.
+func (a *App) hideApproval() {
+	a.approval.Hide()
+	a.approvalID = 0
+	a.approvalOrigin = originForeground
+}
+
+// rejectVisibleApproval resolves the displayed envelope as rejected. The id is
+// captured before the modal is hidden so the rejection cannot be delivered to
+// a successor prompt.
+func (a *App) rejectVisibleApproval(reason string) {
+	id := a.approvalID
+	a.hideApproval()
+	a.approver.ResolveID(id, agent.ApprovalDecision{Approved: false, Reason: reason})
+}
+
+// resolveApprovalResult applies the user's answer to the envelope that answer
+// was made about, and to no other.
+func (a *App) resolveApprovalResult(msg approval.ResultMsg) {
+	decision := agent.ApprovalDecision{Approved: false, Reason: "user rejected"}
+	if msg.Result == approval.Approved {
+		decision = agent.ApprovalDecision{Approved: true}
 	}
+	if msg.RequestID != a.approvalID {
+		// The prompt the user answered is no longer the bound one. Drop the
+		// decision rather than apply it to whatever took its place.
+		a.showPendingApproval()
+		return
+	}
+	resolved := a.approver.ResolveID(msg.RequestID, decision)
+	a.approvalID = 0
+	a.approvalOrigin = originForeground
+	// "Don't ask again" installs a standing session rule. It must only follow
+	// a decision that actually reached a waiting caller: remembering on behalf
+	// of an abandoned prompt grants authority nobody asked for.
+	if resolved && msg.Result == approval.Approved && msg.Remember {
+		a.rememberApproval(msg.ToolCall)
+	}
+	a.showPendingApproval()
 }
 
 func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
@@ -1582,6 +1672,7 @@ func (a *App) startTurnResolved(opt turnOptions) (tea.Model, tea.Cmd) {
 	}
 
 	a.streaming = true
+	a.turnFailed = false
 	a.lastAgentText = ""
 	a.setOperation("thinking")
 
@@ -1788,6 +1879,7 @@ func (a *App) handleAgentEvent(ev agent.AgentEvent) (tea.Model, tea.Cmd) {
 		} else {
 			a.conversation.AppendError(ev.Error.Error())
 		}
+		a.turnFailed = true
 		if a.cancelTurn != nil {
 			a.cancelTurn()
 			a.cancelTurn = nil

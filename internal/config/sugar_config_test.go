@@ -34,10 +34,14 @@ capsule_max_bytes = 4096
 
 	cfg, err := LoadFrom(path)
 	require.NoError(t, err)
-	assert.Equal(t, "off", cfg.Sugar.CacheMode)
-	assert.Equal(t, "1h", cfg.Sugar.CacheRetention)
-	assert.Equal(t, "zdr_required", cfg.Sugar.Privacy)
-	assert.True(t, cfg.Conduit.ShadowEnabled)
+	assert.Equal(t, "off", cfg.Sugar.EffectiveCacheMode())
+	assert.Equal(t, "1h", cfg.Sugar.EffectiveCacheRetention())
+	assert.Equal(t, "zdr_required", cfg.Sugar.EffectivePrivacy())
+	assert.True(t, cfg.Conduit.ShadowIsEnabled())
+	// The stored fields keep what the file said: an environment override is
+	// in force for this process, not a setting to be written back.
+	assert.Equal(t, "auto", cfg.Sugar.CacheMode)
+	assert.False(t, cfg.Conduit.ShadowEnabled)
 	assert.Equal(t, 900, cfg.Conduit.TimeoutMS)
 	assert.Equal(t, 4096, cfg.Conduit.CapsuleMaxBytes)
 }
@@ -285,9 +289,42 @@ func TestConduitShadowEnvAppliesWhileSugarIsOff(t *testing.T) {
 	if cfg.SugarIsEnabled() {
 		t.Fatal("Sugar should be disabled by the environment")
 	}
-	if !cfg.Conduit.ShadowEnabled {
+	if !cfg.Conduit.ShadowIsEnabled() {
 		t.Fatal("PACKETCODE_CONDUIT_SHADOW must apply even while Sugar is off")
 	}
+}
+
+// An environment override exported for one experiment must not become the
+// stored setting the next time something saves the config. /provider,
+// /effort, and the API-key picker all call Save(); before this test, one of
+// them was enough to make PACKETCODE_CONDUIT_SHADOW=true permanent.
+func TestSaveDoesNotPersistEnvironmentOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+[sugar]
+enabled = true
+cache_mode = "auto"
+privacy = "standard"
+
+[conduit]
+shadow_enabled = false
+`), 0o600))
+	t.Setenv("PACKETCODE_SUGAR_CACHE_MODE", "off")
+	t.Setenv("PACKETCODE_CONDUIT_SHADOW", "true")
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Equal(t, "off", cfg.Sugar.EffectiveCacheMode())
+	require.True(t, cfg.Conduit.ShadowIsEnabled())
+	require.NoError(t, cfg.SaveTo(path))
+
+	t.Setenv("PACKETCODE_SUGAR_CACHE_MODE", "")
+	os.Unsetenv("PACKETCODE_SUGAR_CACHE_MODE")
+	os.Unsetenv("PACKETCODE_CONDUIT_SHADOW")
+	reloaded, err := LoadFrom(path)
+	require.NoError(t, err)
+	assert.Equal(t, "auto", reloaded.Sugar.EffectiveCacheMode(), "cache_mode override leaked into config.toml")
+	assert.False(t, reloaded.Conduit.ShadowIsEnabled(), "shadow override leaked into config.toml")
 }
 
 // An exported-but-empty variable is how a shell spells "not set". Failing

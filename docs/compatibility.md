@@ -20,6 +20,10 @@ it — it has destroyed everything it could not see, permanently, in a file the
 user never touched, with no error at any point. Refusing is the only outcome
 that leaves the data intact.
 
+Refusing, or not writing it back through a decoder at all. `config.toml` takes
+the second route, which is why it alone can report and continue; see
+[Saving `config.toml`](#saving-configtoml).
+
 The reverse direction is not symmetrical. A newer build reading an older file
 knows exactly what it is looking at and migrates it forward.
 
@@ -52,12 +56,47 @@ step misread is a command run wrong.
 
 **Report and continue** applies only to `config.toml`, and only because it is a
 file a person typed. Refusing to start because they once ran a newer build is a
-worse outcome than the misreading it would prevent, and there is nothing to
-corrupt: packetcode never rewrites this file. But an ignored setting is how
-someone spends an afternoon wondering why an option does nothing, so anything
-not understood is named on stderr at startup — both a newer `schema_version` and
-any key no setting matched, since from the user's chair those are one question
-with two answers ("upgrade" and "you have a typo").
+worse outcome than the misreading it would prevent, and nothing is destroyed by
+continuing: saving edits this file in place rather than re-encoding it, so a
+setting this build has no field for is left exactly where it was found. But an
+ignored setting is how someone spends an afternoon wondering why an option does
+nothing, so anything not understood is named on stderr at startup — both a newer
+`schema_version` and any key no setting matched, since from the user's chair
+those are one question with two answers ("upgrade" and "you have a typo").
+
+### Saving `config.toml`
+
+Saving is surgical. packetcode works out which individual settings it means to
+change and rewrites only those, in place, by editing the text of the file.
+Comments, key order, spacing, and every key this build has no field for come out
+byte-identical, and a save that would change nothing writes nothing at all.
+
+This is what makes "report and continue" safe rather than merely tolerable. An
+older build that opens a config written by a newer one names the settings it did
+not understand and then leaves them alone — `schema_version` included, which is
+never lowered and never added to a file that did not already declare it. Setting
+an API key on the older build no longer costs you the options you set on the
+newer one.
+
+The editor is deliberately narrow, and refuses by name what it cannot express
+rather than approximating it:
+
+- A key inside a `[[array of tables]]` — `[[permissions.rules]]` and the
+  `[[hooks.*]]` blocks — occurs once per element, so there is no single value to
+  replace. Changing one from inside packetcode is refused; edit the file.
+- A path that names a table rather than a setting.
+- A file that no longer parses, and a value with no TOML literal.
+
+Every patch is re-parsed before it is committed and compared against the
+original: the result must differ in exactly the settings that were asked for and
+in nothing else, or the write is refused and the file is left as it was. A
+patcher that quietly mangles a config would be a worse failure than the
+rewriting it replaced, so the check is not optional and the refusal is loud.
+
+One case still writes a whole file: a `config.toml` that does not exist yet, or
+that holds nothing but whitespace. There is nothing to preserve, and a first run
+deserves a complete, readable config rather than the two keys setup happened to
+set.
 
 ## When to bump a version
 
@@ -120,6 +159,11 @@ version decode as 0 and are treated as version 1.
 config decodes as 0 and is treated as current, because refusing every config
 written before this field existed would guard a case that has not happened yet
 at the cost of every case that has.
+
+The format is unchanged by how the file is written, so this stays version 1 —
+but the writing changed on 2026-09-03, from a whole-struct re-encode to the
+in-place edit described in [Saving `config.toml`](#saving-configtoml). Existing
+files need nothing done to them; they simply stop losing keys and comments.
 
 ## What is not covered
 

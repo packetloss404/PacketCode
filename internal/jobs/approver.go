@@ -18,7 +18,9 @@ import (
 //   - When AllowWrite=true, requests are forwarded to the parent approver
 //     (typically the main session's uiApprover) with the tool name
 //     prefixed by "[job:<id>]" so the user can tell where the prompt
-//     originated.
+//     originated. The prefix is a label; the job id is also handed to the
+//     parent as data via jobApprovalPrompter, because the parent uses origin
+//     to decide what a foreground Ctrl+C is allowed to reject.
 type jobApprover struct {
 	parent     agent.Approver
 	jobID      string
@@ -54,10 +56,26 @@ func (j *jobApprover) Approve(ctx context.Context, req agent.ApprovalRequest) ag
 	}
 	annotated := req
 	annotated.ToolCall.Name = fmt.Sprintf("[job:%s] %s", j.jobID, req.ToolCall.Name)
+	// Preferred: the parent records which job asked. Recovering that by
+	// parsing the "[job:<id>] " display prefix back out of the tool name is
+	// fragile — the prefix exists to be read by a human, and a request whose
+	// origin is misread is one a foreground Ctrl+C will cancel by mistake.
+	if prompter, ok := j.parent.(jobApprovalPrompter); ok {
+		return prompter.PromptJobApproval(ctx, j.jobID, annotated)
+	}
 	if prompter, ok := j.parent.(agent.ApprovalPrompter); ok {
 		return prompter.PromptApproval(ctx, annotated)
 	}
 	return j.parent.Approve(ctx, annotated)
+}
+
+// jobApprovalPrompter is implemented by parent approvers that can record the
+// originating job alongside the request. Declared here rather than in
+// internal/agent because it is this package's requirement of its parent, and
+// Go interface satisfaction is structural: the main session's approver
+// implements it without either package importing the other.
+type jobApprovalPrompter interface {
+	PromptJobApproval(ctx context.Context, jobID string, req agent.ApprovalRequest) agent.ApprovalDecision
 }
 
 func cloneParams(params json.RawMessage) json.RawMessage {

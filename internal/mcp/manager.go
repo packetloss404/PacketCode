@@ -172,11 +172,11 @@ func (m *Manager) Restart(ctx context.Context, name string) (StartupReport, *Cli
 	m.mu.Unlock()
 
 	if previous != nil {
-		if err := previous.Close(2 * time.Second); err != nil {
-			report := startupReportFor(*server, "failed", nil, fmt.Errorf("close previous process: %w", err))
-			m.replaceReport(report)
-			return report, nil, previous, fmt.Errorf("mcp restart %s: %w", name, err)
-		}
+		// A close error here means the old process would not exit on its
+		// own and was killed, or exited non-zero -- the unhealthy server a
+		// restart exists to replace. It is gone either way, so the error is
+		// not a reason to leave the user with no server at all.
+		_ = previous.Close(2 * time.Second)
 	}
 
 	client, err := NewClient(ctx, *server, m.cfg.LogDir, m.cfg.ClientInfo)

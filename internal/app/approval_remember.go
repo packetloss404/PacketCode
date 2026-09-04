@@ -11,6 +11,11 @@ import (
 // rememberApproval installs a session permission rule from the approval
 // prompt's "always allow" choice. Shell programs are remembered exactly:
 // inferring a prefix can authorize additional commands through shell syntax.
+//
+// Callers must have confirmed that the decision reached a waiting approver
+// envelope (see resolveApprovalResult). A standing rule is authority the user
+// granted for a specific request; installing one on behalf of a prompt whose
+// job had already gone away grants it for a request nobody made.
 func (a *App) rememberApproval(call provider.ToolCall) {
 	call.Name = stripJobApprovalPrefix(call.Name)
 	base := a.currentPermissionPolicy()

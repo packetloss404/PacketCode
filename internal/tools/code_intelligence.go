@@ -804,8 +804,17 @@ func diagnosticsForFile(rootAbs, path string) []codeDiagnostic {
 	if fileTooLarge(path, maxCodeIntelFileBytes) {
 		return nil
 	}
+	return goSourceDiagnostics(relativeSlash(rootAbs, path), path, nil)
+}
+
+// goSourceDiagnostics parses one Go file and converts the parser's error list
+// into diagnostics reported under displayPath. src follows go/parser's rule: a
+// string or []byte is parsed in place, and nil reads filename from disk. The
+// in-memory form is what post-edit diagnostics use, so an edit can be checked
+// without a second read of the file it just wrote.
+func goSourceDiagnostics(displayPath, filename string, src any) []codeDiagnostic {
 	fset := token.NewFileSet()
-	_, err := parser.ParseFile(fset, path, nil, parser.AllErrors|parser.SkipObjectResolution)
+	_, err := parser.ParseFile(fset, filename, src, parser.AllErrors|parser.SkipObjectResolution)
 	if err == nil {
 		return nil
 	}
@@ -813,7 +822,7 @@ func diagnosticsForFile(rootAbs, path string) []codeDiagnostic {
 		out := make([]codeDiagnostic, 0, len(list))
 		for _, item := range list {
 			out = append(out, codeDiagnostic{
-				Path:     relativeSlash(rootAbs, path),
+				Path:     displayPath,
 				Line:     item.Pos.Line,
 				Column:   item.Pos.Column,
 				Severity: "error",
@@ -824,7 +833,7 @@ func diagnosticsForFile(rootAbs, path string) []codeDiagnostic {
 	}
 	pos := fset.Position(token.NoPos)
 	return []codeDiagnostic{{
-		Path:     relativeSlash(rootAbs, path),
+		Path:     displayPath,
 		Line:     pos.Line,
 		Column:   pos.Column,
 		Severity: "error",

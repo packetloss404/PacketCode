@@ -9,6 +9,7 @@ package approval
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/ui/terminaltext"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,6 +35,11 @@ const (
 type ResultMsg struct {
 	Result   Result
 	ToolCall provider.ToolCall
+	// RequestID identifies the approver envelope this prompt was raised for.
+	// The App refuses a decision whose id is no longer the displayed one, so a
+	// prompt that was replaced between the keypress and the message cannot
+	// have the user's answer applied to its successor.
+	RequestID uint64
 	// Remember is set when the user chose "always allow" — the App adds a
 	// session permission rule so this tool (or command) isn't asked again.
 	Remember bool
@@ -43,6 +49,7 @@ type Model struct {
 	visible    bool
 	tool       tools.Tool
 	toolCall   provider.ToolCall
+	requestID  uint64
 	width      int
 	result     Result
 	queueDepth int
@@ -56,11 +63,21 @@ func New() Model { return Model{} }
 func (m *Model) Show(tool tools.Tool, call provider.ToolCall) {
 	m.tool = tool
 	m.toolCall = call
+	// Cleared, not carried over: a stale id would let this prompt's answer
+	// resolve the envelope the previous one belonged to.
+	m.requestID = 0
 	m.visible = true
 	m.result = Pending
 	m.queueDepth = 1
 	m.cursor = 0
 }
+
+// SetRequestID binds the visible prompt to the approver envelope it was
+// raised for. Call it immediately after Show.
+func (m *Model) SetRequestID(id uint64) { m.requestID = id }
+
+// RequestID reports the envelope the visible prompt belongs to.
+func (m Model) RequestID() uint64 { return m.requestID }
 
 func (m *Model) Hide()         { m.visible = false }
 func (m *Model) Visible() bool { return m.visible }
@@ -112,7 +129,7 @@ func (m Model) resolveCursor() (Model, tea.Cmd) {
 func (m Model) resolve(result Result, remember bool) (Model, tea.Cmd) {
 	m.result = result
 	m.visible = false
-	return m, emit(ResultMsg{Result: result, ToolCall: m.toolCall, Remember: remember})
+	return m, emit(ResultMsg{Result: result, ToolCall: m.toolCall, RequestID: m.requestID, Remember: remember})
 }
 
 func emit(msg ResultMsg) tea.Cmd {
@@ -129,8 +146,12 @@ func (m Model) View() string {
 	}
 	displayName := m.tool.Name()
 	if m.toolCall.Name != "" && m.toolCall.Name != displayName {
-		displayName = m.toolCall.Name
+		displayName = terminaltext.Clean(m.toolCall.Name)
 	}
+	// The arguments are the model's text. Rendered raw, an ESC[2K in a
+	// proposed command would erase the part of the line the user is being
+	// asked to approve; an OSC 52 in file content would reach the clipboard.
+	arguments := terminaltext.Clean(m.toolCall.Arguments)
 	source, action := splitApprovalDisplay(displayName)
 	action = approvalActionLabel(action)
 	headerText := action
@@ -145,11 +166,11 @@ func (m Model) View() string {
 	if r, ok := renderers[m.tool.Name()]; ok {
 		body = r(RenderContext{
 			Tool:      m.tool,
-			Arguments: m.toolCall.Arguments,
+			Arguments: arguments,
 			Width:     width - 8,
 		})
 	} else {
-		body = summariseParams(m.toolCall.Arguments)
+		body = summariseParams(arguments)
 	}
 	choices := []string{
 		"1. Yes",

@@ -79,10 +79,16 @@ func (a *App) cyclePermissionMode() {
 	} else {
 		a.applyPermMode(nextPermMode(a.currentPermMode()))
 	}
-	if a.approver != nil && a.approver.ResolveActiveByPolicy() {
-		a.approval.Hide()
-		a.showPendingApproval()
+	if a.approver == nil {
+		return
 	}
+	// Bound to the id the modal is showing: a mode change is a decision like
+	// any other, and must not settle an envelope that replaced the one the
+	// user is looking at.
+	if a.approver.ResolveActiveByPolicy(a.approvalID) {
+		a.hideApproval()
+	}
+	a.showPendingApproval()
 }
 
 // applyPermMode transitions to target, reusing the same primitives as the

@@ -80,11 +80,33 @@ packetcode --version
 packetcode doctor
 packetcode doctor --json
 packetcode doctor --check providers,permissions
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode skills list
+packetcode acp
+packetcode sugar login
 ```
 
 Supported command-line permission names are `ask`, `accept-edits`, `auto`, `read-only`, and `bypass`. `doctor --check` accepts a section or exact check ID, can be repeated, and can contain comma-separated values.
 
-There is no non-interactive “prompt as a positional argument” mode in the shipped CLI. The only public subcommand is `doctor`; other work happens in the TUI.
+The public command families are `run`, `doctor`, `skills`, `acp`, and `sugar`.
+`packetcode run [--provider NAME] [--model MODEL] [--permission-mode MODE]
+[--resume ID] [--json] <prompt...>` executes one non-interactive turn through
+the runtime shared with the TUI and ACP paths. The prompt is positional; stdin,
+`--trust`, `--computer`, and ephemeral-session modes are intentionally absent.
+An unavailable approval fails closed with exit 3, cancellation exits 130, and
+plain stdout contains only the sanitized final response. JSON is one
+`schema_version: 1` document with outcome, session/provider/model identity,
+output, total elapsed milliseconds, per-run input/output/cache usage, and an
+error on failure. Use `--help` for the exact command-local flags.
+
+The foreground and ACP registries include root-scoped file/search/code-
+intelligence tools, `execute_command`, a bounded HTTP(S) `fetch`, per-session
+`todo_write`, and skill retrieval. Fetch validates the post-DNS destination on every
+connection and redirect, blocks private/loopback targets by default, disables
+ambient proxies, caps headers/body/time, and frames returned content as
+untrusted evidence. It is not a download or general web-search surface, and is
+intentionally unavailable to background agents whose URL choices are not being
+watched directly.
 
 ## 4. Provider Strategy
 
@@ -225,6 +247,10 @@ Use agents for independent investigations with clear deliverables. A good fan-ou
 /spawn review docs against the current CLI and list mismatches
 /spawn --computer production inspect the deployed service
 ```
+
+Each job owns a bounded `todo_write` list. Agent View shows completed/total
+items and the current in-progress (or next pending) item, and persists the list
+with the job record so an abandoned run retains that evidence.
 
 `/spawn` flags must precede the prompt. Extra jobs queue when the concurrency cap is full.
 
@@ -417,6 +443,11 @@ when the model never returns a valid stop decision. Interval loops run
 immediately and then on the interval. A tick during foreground activity is
 queued; loops do not overlap the active foreground turn.
 
+The 25-turn scheduler ceiling is not the only loop guard. Foreground,
+background, and ACP runs also share a bounded no-progress detector that stops
+repeated tool calls with identical executed arguments and identical results,
+and names the repeated call in the error. A changing result is progress.
+
 **Limits:** explicit pipeline stages beyond ordered phases/steps are not
 shipped. Verification and retries are process-local orchestration, and a loop
 is process-local scheduling—not a durable daemon.
@@ -430,6 +461,10 @@ Three counters answer different questions:
 | Context occupancy | Estimated/current tokens in the next model-facing request. Can fall after compaction. |
 | Session input/output totals | Cumulative provider-reported usage for that session. |
 | Cost tally | Cumulative estimated USD from provider/model pricing and session totals. |
+
+Where providers report them, cache creation/read counts flow through session
+usage, `/cost`, background jobs, and native/custom statusline snapshots. They
+are subsets of input tokens, not addends; the uncached input is the remainder.
 
 The request estimate includes the system prompt, transcript, tool-call arguments/results, tool schemas, and pending additions such as expanded `@file` context. Provider-reported usage replaces the estimate when available. Unknown model context windows produce no meaningful percentage.
 
@@ -494,6 +529,17 @@ atomically bound environment-sourced target-only credentials, labelled/
 redacted/capped tool-role output, per-call approval, and manual reconnect. A
 transport-independent validator pins these decisions,
 but the current config still accepts only stdio commands.
+
+### ACP server surface
+
+`packetcode acp` runs the same engine over local stdio. In addition to the ACP
+session lifecycle and prompt stream, versioned `_packetcode/*` extensions expose
+provider/model overrides, saved-session list/load/rename, usage, permission
+mode, configured MCP tools, project file search, Markdown prompt-command
+discovery/expansion, and explicit session close. ACP agents receive the same
+skill index/tool path as the TUI runtime. User-invocable skills are not yet
+listed in `_packetcode/commands/list`; that catalogue currently contains
+Markdown prompt commands only.
 
 ## 12. Hooks and Statusline
 
@@ -577,6 +623,10 @@ Know which protections are policy, containment, or display hardening:
 - Read tools bound output and avoid binary content where appropriate.
 - Permission policy gates tool invocation; it does not sandbox an allowed process.
 - `execute_command`, hooks, statusline commands, and MCP servers run with your OS account's authority.
+- Cancelled local commands report the teardown mechanism, confirmation state,
+  and surviving PIDs. POSIX process groups and Windows Job Objects provide that
+  evidence; SSH can only signal the channel leader and is reported as
+  unconfirmed.
 - Read-only agents use policy denial, while write agents add git-worktree isolation.
 - A worktree isolates repository files but not network access, credentials, or arbitrary paths available to an allowed shell command.
 - Custom model endpoints receive conversation content, system instructions, tool schemas, and tool results.
@@ -686,6 +736,7 @@ Ask agents for conclusions, evidence paths, commands run, and unresolved risks�
 
 | Area | Shipped | Not yet shipped |
 | --- | --- | --- |
+| Automation | `packetcode run` one-turn execution, session resume, fail-closed approval, versioned JSON with total elapsed time and usage. | Optional provider/tool/approval phase timing for benchmark attribution. |
 | Agents | Bounded concurrent jobs, nested depth, persistence, cancellation, live transcripts, result lifecycle. | Resuming active execution after restart; arbitrary clarification questions. |
 | Write isolation | Dedicated worktree and branch from committed `HEAD`. | Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning. |
 | Workflows | Versioned schema, offline validation, sequential phases, single/parallel steps, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets. | Explicit pipeline stages and a broader versioned example library. |

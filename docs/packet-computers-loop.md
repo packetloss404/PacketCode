@@ -2,6 +2,13 @@
 
 Created: 2026-07-31
 
+> **Ledger supersession note (2026-08-31).** Preserve milestone rows and their
+> original evidence, but do not read the PCMP10 process-evidence note below as
+> current. Local teardown now reports mechanism, confirmation, and surviving
+> PIDs, with POSIX process groups and Windows Job Objects covered. The remaining
+> gap is SSH: signalling the channel leader cannot confirm that detached remote
+> descendants stopped. See [BACKLOG.md](../BACKLOG.md).
+
 Product source: [`../PACKETCOMPUTERS.md`](../PACKETCOMPUTERS.md) — research,
 product definition, and the full six-phase arc. This file is the bounded
 implementation ledger for **Phase 1 only** (BYO local/SSH computers reached by a

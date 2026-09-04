@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/provider"
 	"io"
 	"os"
 	"time"
@@ -21,15 +22,9 @@ import (
 	"github.com/packetcode/packetcode/internal/app"
 	"github.com/packetcode/packetcode/internal/computers"
 	"github.com/packetcode/packetcode/internal/config"
-	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/git"
-	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/jobs"
-	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/permissions"
-	"github.com/packetcode/packetcode/internal/provider"
-	"github.com/packetcode/packetcode/internal/session"
-	"github.com/packetcode/packetcode/internal/skills"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 	"github.com/packetcode/packetcode/internal/workflow"
@@ -79,6 +74,9 @@ func main() {
 		return
 	}
 	flag.Parse()
+	if rejectTopLevelFlagsBeforeSubcommand(flag.CommandLine, flag.Args(), os.Stderr) {
+		os.Exit(2)
+	}
 
 	if *versionFlag {
 		fmt.Printf("packetcode %s (%s)\n", version, commit)
@@ -157,15 +155,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 
 	factories := providerFactoriesFromConfig(cfg)
 
-	activeSlug := cfg.Default.Provider
-	activeModel := cfg.Default.Model
-	if providerOverride != "" {
-		activeSlug = providerOverride
-	}
-	if modelOverride != "" {
-		activeModel = modelOverride
-	}
-
 	// First-run: no saved default provider yet → walk through setup.
 	// An explicit --provider is a session override, so respect it before
 	// deciding whether onboarding is needed. If that override is not
@@ -180,14 +169,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		cfg, err = config.Load()
 		if err != nil {
 			return err
-		}
-		activeSlug = cfg.Default.Provider
-		activeModel = cfg.Default.Model
-		if providerOverride != "" {
-			activeSlug = providerOverride
-		}
-		if modelOverride != "" {
-			activeModel = modelOverride
 		}
 	}
 
@@ -207,35 +188,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return fmt.Errorf("permissions: %w", err)
 	}
 
-	// Build the provider registry. Only register providers the user has
-	// actually configured — listing every provider would clutter the
-	// switcher with non-functional options.
-	reg := provider.NewRegistry()
-
-	// Apply the configured retry policy before any provider streams a
-	// request. Default to 3 attempts when unset.
-	retryAttempts := cfg.Behavior.ProviderMaxRetries
-	if retryAttempts <= 0 {
-		retryAttempts = 3
-	}
-	provider.SetConfiguredRetry(provider.RetryConfigForAttempts(retryAttempts))
-
-	// Apply the configured per-call stall timeout. A provider stream that
-	// goes silent for longer than this is aborted as a retryable error.
-	// Default to 60s when unset.
-	stall := cfg.Behavior.ProviderStallTimeout
-	if stall <= 0 {
-		stall = 60
-	}
-	provider.SetConfiguredStallTimeout(time.Duration(stall) * time.Second)
-
-	for slug, factory := range factories {
-		key := cfg.GetProviderKey(slug)
-		if providerRequiresAPIKey(cfg, slug) && key == "" {
-			continue
-		}
-		reg.Register(factory(key))
-	}
 	// Resolve the working directory to the git repo root if we're in one.
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -275,139 +227,58 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		defer backend.Close()
 	}
 
-	// Tool registry. write_file and patch_file get a backup manager
-	// scoped to the active session — wired below once we know the ID.
-	toolReg := tools.NewRegistry()
-	// One store per session. The list is conversation state, so a background
-	// job must not be able to overwrite what the foreground is tracking.
-	toolReg.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
-	// One registry shared by the prompt index and the tool, so the list the
-	// model is told about and the bodies it can load cannot disagree.
-	skillRegistry := skills.Load(root)
-	toolReg.Register(tools.NewSkillTool(skillRegistry))
-	toolReg.Register(tools.NewFetchTool())
-	if runtimeBackend != nil {
-		toolReg.Register(tools.NewReadFileToolWithBackend(runtimeBackend))
-		toolReg.Register(tools.NewSearchCodebaseToolWithBackend(runtimeBackend))
-		toolReg.Register(tools.NewListDirectoryToolWithBackend(runtimeBackend))
-		toolReg.Register(tools.NewExecuteCommandToolWithBackend(runtimeBackend))
-	} else {
-		toolReg.Register(tools.NewReadFileTool(root))
-		toolReg.Register(tools.NewSearchCodebaseTool(root))
-		toolReg.Register(tools.NewListDirectoryTool(root))
-		toolReg.Register(tools.NewListSymbolsTool(root))
-		toolReg.Register(tools.NewFindDefinitionTool(root))
-		toolReg.Register(tools.NewFindReferencesTool(root))
-		toolReg.Register(tools.NewGetDiagnosticsTool(root))
-		toolReg.Register(tools.NewExecuteCommandTool(root))
-	}
-
-	// Sessions.
 	sessionsDir, err := config.SessionsDir()
 	if err != nil {
 		return err
 	}
-	sessions := session.NewManager(sessionsDir)
-	if resumeID != "" {
-		resolvedID, err := sessions.ResolveID(resumeID)
-		if err != nil {
-			return fmt.Errorf("resume %s: %w", resumeID, err)
-		}
-		loaded, err := sessions.Load(resolvedID)
-		if err != nil {
-			return fmt.Errorf("resume %s: %w", resumeID, err)
-		}
-		computerID := ""
-		workspaceIdentity := ""
-		if activeComputer != nil {
-			computerID = activeComputer.ID
-			workspaceIdentity = computerWorkspaceIdentity(*activeComputer)
-		}
-		if err := session.ValidateWorkspace(loaded, computerID, root, workspaceIdentity); err != nil {
-			return fmt.Errorf("resume %s: %w", resumeID, err)
-		}
-		if providerOverride == "" && loaded.Provider != "" {
-			activeSlug = loaded.Provider
-		}
-		if modelOverride == "" && loaded.Model != "" {
-			activeModel = loaded.Model
-		}
-	}
-	if activeSlug == "sugar" && !cfg.SugarIsEnabled() && !cfg.SugarUsesCustomProvider() {
-		return fmt.Errorf("Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
-	}
-	if _, ok := reg.Get(activeSlug); !ok {
-		return fmt.Errorf("active provider %q is not configured; run packetcode without --provider to set one up", activeSlug)
-	}
-	if activeModel == "" {
-		// Fall back to the provider's configured default model.
-		activeModel = cfg.Providers[activeSlug].DefaultModel
-	}
-	if err := reg.SetActive(activeSlug, activeModel); err != nil {
-		return err
-	}
-	if resumeID == "" {
-		if _, err := sessions.New(activeSlug, activeModel); err != nil {
-			return fmt.Errorf("create session: %w", err)
-		}
-		if activeComputer != nil {
-			if err := sessions.BindWorkspace(activeComputer.ID, root, computerWorkspaceIdentity(*activeComputer)); err != nil {
-				return fmt.Errorf("bind remote session: %w", err)
-			}
-		}
-	}
-
-	// Backup manager keyed by session ID.
 	backupsDir, err := config.BackupsDir()
 	if err != nil {
 		return err
 	}
-	bk := session.NewBackupManager(backupsDir, sessions.Current().ID)
-	if runtimeBackend != nil {
-		toolReg.Register(tools.NewWriteFileToolWithBackend(runtimeBackend))
-		toolReg.Register(tools.NewPatchFileToolWithBackend(runtimeBackend))
-	} else {
-		toolReg.Register(tools.NewWriteFileTool(root, bk))
-		toolReg.Register(tools.NewPatchFileTool(root, bk))
+	computerID := ""
+	workspaceIdentity := ""
+	remotePrompt := ""
+	if activeComputer != nil {
+		computerID = activeComputer.ID
+		workspaceIdentity = computerWorkspaceIdentity(*activeComputer)
+		remotePrompt = fmt.Sprintf(
+			"\n\n# Active Packet Computer\nAll foreground workspace file and shell tools operate on SSH computer %q inside %s. Paths are relative to that remote root. Background agents and workflows inherit this computer unless explicitly targeted from a local session; every remote job gets its own SSH connection, and write jobs require an isolated remote Git worktree. Remote code-intelligence tools, local hooks, and /undo are unavailable. Remote execution lasts only while this PacketCode process and its SSH connections remain alive; it does not reconnect after restart.",
+			activeComputer.Name, root)
 	}
-
-	var hookRunner *hooks.Runner
-	if runtimeBackend == nil {
-		hookRunner = hooks.New(cfg.Hooks, root)
-	}
-
-	// Cost tracker — pricing closure delegates to whichever provider is
-	// active *now* (post hot-switch), not the one when a token was
-	// recorded.
-	tallyPath, err := config.CostTallyPath()
-	if err != nil {
-		return err
-	}
-	tracker, err := cost.NewTracker(tallyPath, func(slug, modelID string) (float64, float64) {
-		if p, ok := reg.Get(slug); ok {
-			return p.Pricing(modelID)
-		}
-		return 0, 0
+	runtime, err := buildPacketRuntime(context.Background(), packetRuntimeConfig{
+		Config:               cfg,
+		Root:                 root,
+		ProviderOverride:     providerOverride,
+		ModelOverride:        modelOverride,
+		ResumeID:             resumeID,
+		PermissionPolicy:     permissionPolicy,
+		SessionsDir:          sessionsDir,
+		BackupsDir:           backupsDir,
+		RegisterAllProviders: true,
+		EnableCostTracker:    true,
+		Backend:              runtimeBackend,
+		ComputerID:           computerID,
+		WorkspaceIdentity:    workspaceIdentity,
+		MCPClientName:        "packetcode",
+		DeferMCPTools:        true,
+		SystemPrompt:         systemPrompt,
+		SystemPromptSuffix:   remotePrompt,
+		Diagnostics:          os.Stderr,
+		DiagnosticPrefix:     "packetcode: ",
 	})
 	if err != nil {
 		return err
 	}
-
-	// MCP servers — spawn external tool processes declared in
-	// ~/.packetcode/config.toml. Failures are logged but never block
-	// startup. We spawn here (after theme + tool registry bootstrap,
-	// before jobs.NewManager) so tools are discovered in time to land
-	// in toolReg before the first Agent turn.
-	mcpLogDir, _ := config.HomeDir()
-	mcpMgr := mcp.NewManager(mcp.Config{
-		Servers:    mcpServerConfigsFrom(cfg),
-		LogDir:     mcpLogDir,
-		ClientInfo: mcp.ClientInfo{Name: "packetcode", Version: welcomeVersion()},
-	})
-	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
-	mcpReports := mcpMgr.Start(startupCtx)
-	cancelStartup()
-	for _, r := range mcpReports {
+	defer runtime.Close()
+	reg := runtime.Registry
+	toolReg := runtime.Tools
+	sessions := runtime.Sessions
+	bk := runtime.Backups
+	skillRegistry := runtime.Skills
+	hookRunner := runtime.Hooks
+	tracker := runtime.CostTracker
+	mcpMgr := runtime.MCP
+	for _, r := range runtime.MCPReports {
 		switch r.Status {
 		case "running":
 			fmt.Fprintf(os.Stderr, "packetcode: mcp %s: %d tools, pid %d\n", r.Name, r.ToolCount, r.PID)
@@ -415,7 +286,6 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 			fmt.Fprintf(os.Stderr, "packetcode: mcp %s: failed — %s\n", r.Name, r.Err)
 		}
 	}
-	defer mcpMgr.Shutdown(2 * time.Second)
 
 	// Background agents remain coordinated locally, but each remote job owns
 	// an independent pinned SSH/SFTP backend. This preserves workflow fan-out
@@ -517,6 +387,12 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 			}
 			return 0, 0
 		},
+		CacheRatesFor: func(slug, modelID string) (float64, float64) {
+			if p, ok := reg.Get(slug); ok {
+				return provider.CacheMultipliersFor(p, modelID)
+			}
+			return provider.CacheReadMultiplier, provider.CacheWriteMultiplier
+		},
 		SystemPromptFor: func(parentDepth int) string {
 			// The index goes to sub-agents too: they are told to load a skill
 			// and now actually have the tool, so without the names they would
@@ -560,7 +436,10 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	jobsMgr.SetCollectToolFactory(func(parentJobID string, parentDepth int) tools.Tool {
 		return tools.NewCollectAgentResultsTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth)
 	})
-	defer jobsMgr.Shutdown(5 * time.Second)
+	runtime.AddCleanup(func() error {
+		jobsMgr.Shutdown(5 * time.Second)
+		return nil
+	})
 
 	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))
 	toolReg.Register(tools.NewCollectAgentResultsTool(jobsMgr.AsToolsSpawner(), "", 0))
@@ -570,44 +449,9 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 
 	// Register MCP tools AFTER every native tool + spawn_agent so the
 	// Agent's initial tool enumeration (on its first turn) sees them.
-	for _, r := range mcp.RegisterTools(toolReg, mcpMgr.Clients()) {
-		if r.Status == "skipped" {
-			fmt.Fprintf(os.Stderr, "packetcode: mcp %s.%s skipped alias %s — %s\n", r.Server, r.Tool, r.Alias, r.Err)
-		}
-	}
-
-	activeSystemPrompt := systemPrompt
-	// The index costs roughly twenty tokens per skill the model never uses,
-	// which is the entire trade: without it the bodies exist but nothing
-	// knows to ask for them.
-	if block := skillRegistry.IndexBlock(); block != "" {
-		activeSystemPrompt += "\n\n" + block
-	}
-	// Reported rather than swallowed, like the MCP skip lines above: a skill
-	// that failed to load is a file the user wrote and expects to work.
-	for _, skillErr := range skillRegistry.Errors() {
-		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillErr)
-	}
-	// Warnings too, for the same reason. A skill displaced by a narrower scope,
-	// or an invocation flag whose value did not parse, leaves a session that
-	// behaves differently from the file the user is looking at -- and the
-	// unparsed-flag case leaves the permissive default in place, so this line
-	// is the only thing standing between "the model must not run this" and the
-	// model running it.
-	for _, skillWarn := range skillRegistry.Warnings() {
-		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillWarn)
-	}
+	runtime.RegisterMCPTools(os.Stderr, "packetcode: ")
 	appBackups := bk
-	computerID := ""
-	workspaceIdentity := ""
 	if activeComputer != nil {
-		computerID = activeComputer.ID
-		workspaceIdentity = computerWorkspaceIdentity(*activeComputer)
-		activeSystemPrompt += fmt.Sprintf(
-			"\n\n# Active Packet Computer\nAll foreground workspace file and shell tools operate on SSH computer %q inside %s. Paths are relative to that remote root. Background agents and workflows inherit this computer unless explicitly targeted from a local session; every remote job gets its own SSH connection, and write jobs require an isolated remote Git worktree. Remote code-intelligence tools, local hooks, and /undo are unavailable. Remote execution lasts only while this PacketCode process and its SSH connections remain alive; it does not reconnect after restart.",
-			activeComputer.Name,
-			root,
-		)
 		appBackups = nil
 	}
 
@@ -629,11 +473,12 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		RemoteWorkspace:   runtimeBackend != nil,
 		ComputerID:        computerID,
 		WorkspaceIdentity: workspaceIdentity,
-		SystemPrompt:      activeSystemPrompt,
+		SystemPrompt:      runtime.SystemPrompt,
 		Hooks:             hookRunner,
 		Version:           welcomeVersion(),
-		Factories:         factories,
+		Factories:         runtime.Factories,
 		ResumeHydrate:     resumeID != "",
+		AgentFactory:      runtime.NewAgent,
 	})
 	if err != nil {
 		return err

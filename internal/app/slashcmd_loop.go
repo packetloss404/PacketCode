@@ -194,6 +194,19 @@ func (a *App) onLoopTurnDone() tea.Cmd {
 	return a.runLoopBody(ls)
 }
 
+// stopLoopAfterFailedTurn ends the self-paced loop that owned a turn which
+// was cancelled or errored. Re-running would either ignore a Ctrl+C or hammer
+// a provider that just refused.
+func (a *App) stopLoopAfterFailedTurn() {
+	id := a.activeLoopID
+	a.activeLoopID = ""
+	ls, ok := a.loops[id]
+	if !ok || ls.stopped {
+		return
+	}
+	a.finishLoop(ls, "turn was cancelled or failed; not re-running")
+}
+
 func parseLoopDecision(text string) (stop bool, reason string, ok bool) {
 	open := strings.LastIndex(text, loopDecisionOpen)
 	if open < 0 {

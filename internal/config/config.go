@@ -8,7 +8,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,6 +86,36 @@ type SugarConfig struct {
 	CacheRetention  string `toml:"cache_retention"`
 	Privacy         string `toml:"privacy"`
 	enabledOverride *bool
+	// Environment overrides for the three envelope fields. Kept out of the
+	// stored fields so a save cannot persist them; see ConduitConfig.
+	cacheModeOverride      *string
+	cacheRetentionOverride *string
+	privacyOverride        *string
+}
+
+// EffectiveCacheMode is CacheMode with the environment override applied.
+func (c SugarConfig) EffectiveCacheMode() string {
+	if c.cacheModeOverride != nil {
+		return *c.cacheModeOverride
+	}
+	return c.CacheMode
+}
+
+// EffectiveCacheRetention is CacheRetention with the environment override
+// applied.
+func (c SugarConfig) EffectiveCacheRetention() string {
+	if c.cacheRetentionOverride != nil {
+		return *c.cacheRetentionOverride
+	}
+	return c.CacheRetention
+}
+
+// EffectivePrivacy is Privacy with the environment override applied.
+func (c SugarConfig) EffectivePrivacy() string {
+	if c.privacyOverride != nil {
+		return *c.privacyOverride
+	}
+	return c.Privacy
 }
 
 // SugarExplicitlyDisabled reports whether the user or environment selected a
@@ -138,6 +167,20 @@ type ConduitConfig struct {
 	ShadowEnabled   bool `toml:"shadow_enabled"`
 	TimeoutMS       int  `toml:"timeout_ms"`
 	CapsuleMaxBytes int  `toml:"capsule_max_bytes"`
+	// shadowOverride carries PACKETCODE_CONDUIT_SHADOW. Unexported for the
+	// same reason as enabledOverride: a save compares stored fields against
+	// the file, and an environment variable exported for one experiment must
+	// not become the stored setting the next time /provider or /effort runs.
+	shadowOverride *bool
+}
+
+// ShadowIsEnabled resolves the Conduit shadow gate with the environment
+// override applied.
+func (c ConduitConfig) ShadowIsEnabled() bool {
+	if c.shadowOverride != nil {
+		return *c.shadowOverride
+	}
+	return c.ShadowEnabled
 }
 
 // ConduitIsEnabled resolves the child setting together with its Sugar parent
@@ -151,7 +194,7 @@ type ConduitConfig struct {
 // only meant a user who turned Sugar off silently lost a setting they had
 // explicitly asked for, and got no way to describe "shadow on" independently.
 func (c *Config) ConduitIsEnabled() bool {
-	return c != nil && c.Conduit.ShadowEnabled
+	return c != nil && c.Conduit.ShadowIsEnabled()
 }
 
 // MCPServerConfig is the per-server entry for [mcp.<name>] in the user's
@@ -302,6 +345,15 @@ type BehaviorConfig struct {
 	LoopDetectionDisabled  bool `toml:"loop_detection_disabled"`
 	LoopDetectionWindow    int  `toml:"loop_detection_window"`
 	LoopDetectionThreshold int  `toml:"loop_detection_threshold"`
+
+	// PostEditDiagnosticsDisabled suppresses the syntax diagnostics appended
+	// to a successful write_file/patch_file result. On by default: an edit
+	// that broke the file is something the model should learn from the tool
+	// that made it, not two turns later. The switch exists because the
+	// analysis is a heuristic appended to someone else's tool output, and an
+	// operator who finds it noisy must be able to silence it without a
+	// rebuild.
+	PostEditDiagnosticsDisabled bool `toml:"post_edit_diagnostics_disabled"`
 }
 
 // PermissionConfig controls the approval policy applied to tool calls.
@@ -395,10 +447,11 @@ func (c *Config) DotEnvProblems() []string {
 // contract deliberately differs from the formats packetcode writes itself.
 // config.toml is a file a person typed. Refusing to start because they also
 // ran a newer build once, or because of a stray key, is a worse outcome than
-// the misreading it would prevent -- there is nothing here to corrupt, since
-// packetcode never rewrites this file. But ignoring a setting in silence is
-// how someone spends an afternoon wondering why an option does nothing, so
-// the ignoring is said out loud.
+// the misreading it would prevent -- and there is nothing here to corrupt,
+// because saving edits this file in place (see save.go): a key no setting
+// matched is left exactly where it was rather than re-encoded away. But
+// ignoring a setting in silence is how someone spends an afternoon wondering
+// why an option does nothing, so the ignoring is said out loud.
 func (c *Config) CompatProblems() []string {
 	if c == nil {
 		return nil
@@ -546,7 +599,7 @@ func applyIntegrationEnvironment(cfg *Config) error {
 		return err
 	}
 	if shadow != nil {
-		cfg.Conduit.ShadowEnabled = *shadow
+		cfg.Conduit.shadowOverride = shadow
 	}
 	if !cfg.SugarIsEnabled() {
 		// Sugar owns the cache envelope and the privacy setting, so those stay
@@ -556,13 +609,16 @@ func applyIntegrationEnvironment(cfg *Config) error {
 		return nil
 	}
 	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_CACHE_MODE"); ok {
-		cfg.Sugar.CacheMode = strings.TrimSpace(value)
+		trimmed := strings.TrimSpace(value)
+		cfg.Sugar.cacheModeOverride = &trimmed
 	}
 	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_CACHE_RETENTION"); ok {
-		cfg.Sugar.CacheRetention = strings.TrimSpace(value)
+		trimmed := strings.TrimSpace(value)
+		cfg.Sugar.cacheRetentionOverride = &trimmed
 	}
 	if value, ok := os.LookupEnv("PACKETCODE_SUGAR_PRIVACY"); ok {
-		cfg.Sugar.Privacy = strings.TrimSpace(value)
+		trimmed := strings.TrimSpace(value)
+		cfg.Sugar.privacyOverride = &trimmed
 	}
 	return nil
 }
@@ -580,78 +636,22 @@ func validateSugarAndConduit(cfg *Config) error {
 	if !cfg.SugarIsEnabled() {
 		return nil
 	}
-	switch cfg.Sugar.CacheMode {
+	switch cfg.Sugar.EffectiveCacheMode() {
 	case "auto", "off":
 	default:
 		return fmt.Errorf("sugar.cache_mode must be auto or off")
 	}
-	switch cfg.Sugar.CacheRetention {
+	switch cfg.Sugar.EffectiveCacheRetention() {
 	case "provider_default", "5m", "30m", "1h":
 	default:
 		return fmt.Errorf("sugar.cache_retention must be provider_default, 5m, 30m, or 1h")
 	}
-	switch cfg.Sugar.Privacy {
+	switch cfg.Sugar.EffectivePrivacy() {
 	case "standard", "zdr_required":
 	default:
 		return fmt.Errorf("sugar.privacy must be standard or zdr_required")
 	}
 	return nil
-}
-
-// Save writes the config to ~/.packetcode/config.toml atomically with 0600 perms.
-// Atomic = write to temp file in the same directory, then rename.
-func (c *Config) Save() error {
-	path, err := ConfigPath()
-	if err != nil {
-		return fmt.Errorf("resolve config path: %w", err)
-	}
-	return c.SaveTo(path)
-}
-
-// SaveTo writes the config to an explicit path. Same atomic semantics as Save.
-func (c *Config) SaveTo(path string) error {
-	if err := EnsureDir(filepath.Dir(path)); err != nil {
-		return err
-	}
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
-		return fmt.Errorf("encode config: %w", err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.*.toml.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp config: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.WriteString(buf.String()); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("write temp config: %w", err)
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("chmod temp config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close temp config: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename temp config: %w", err)
-	}
-	return nil
-}
-
-// SetProviderKey records an API key for the named provider and persists.
-func (c *Config) SetProviderKey(slug, apiKey string) error {
-	if c.Providers == nil {
-		c.Providers = map[string]ProviderConfig{}
-	}
-	p := c.Providers[slug]
-	p.APIKey = apiKey
-	c.Providers[slug] = p
-	return c.Save()
 }
 
 // KeySource says where a provider key came from.

@@ -6,6 +6,14 @@ A keyboard-first, multi-provider coding agent for the terminal, with a Claude Co
 
 packetcode keeps the conversation, tools, approvals, background agents, and workflows in one terminal interface. It can inspect and edit the current project, execute commands, delegate work, connect to MCP tools, and use hosted or local models without routing through OpenCode.
 
+The native foreground/ACP tool set also includes a bounded HTTP(S) `fetch` for untrusted web
+evidence, a per-session `todo_write` plan, and a no-progress loop detector. A
+fetch is not a download or web-search API: it blocks private/loopback targets by
+default, caps redirects/headers/body/time, disables ambient proxies, and labels
+the returned content as untrusted before it reaches the model.
+Background agents intentionally do not receive `fetch`; their plans and loop
+guard remain independent per job.
+
 ## Interface
 
 <p align="center">
@@ -109,6 +117,33 @@ existing Sugar configuration remains compatible. None of these gates deletes
 saved configuration, credentials, registries, or sessions. PacketCode has no
 runtime dependency on PacketADE or Syndicate and remains a standalone terminal
 agent when every optional integration is disabled.
+
+The executable has five public command families in addition to the default TUI:
+
+| Command | Purpose |
+| --- | --- |
+| `packetcode run` | Run one non-interactive agent turn for scripts, CI, and benchmarks. |
+| `packetcode doctor` | Read-only diagnostics, with focused checks and JSON output. |
+| `packetcode skills` | List, validate, install, and remove Agent Skills. |
+| `packetcode acp` | Run the local stdio Agent Client Protocol server. |
+| `packetcode sugar` | Sign in to or manage the optional Sugar integration. |
+
+Run `packetcode --help` or `<command> --help` for the current flags. Headless
+execution takes the prompt as positional arguments:
+
+```text
+packetcode run --provider codex --model gpt-5.6-sol "review the current diff"
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode run --resume <session-id> "continue with the next step"
+```
+
+`run` uses the same provider/session/tool/policy runtime as the TUI and ACP
+server. It does not read prompts from stdin and has no `--trust`, `--computer`,
+or ephemeral-session shortcut. If policy needs an interactive approval it fails
+closed with exit 3; cancellation exits 130. Plain stdout contains only the
+sanitized final response. `--json` emits one `schema_version: 1` object with
+`ok`, `session_id`, `provider`, `model`, `output`, `elapsed_ms`, `usage`, and an
+`error` on failure.
 
 To connect the built-in Sugar provider and pull its live Conduit/direct-model catalog:
 
@@ -244,6 +279,8 @@ revokes remembered/session rules and restores the startup policy. See
 `/spawn <prompt>` starts a read-only background agent. `/spawn --write <prompt>` creates an isolated git worktree before allowing writes or commands. Use `--computer <name>` from a local session; remote sessions inherit their active computer. Write jobs never edit the foreground checkout directly.
 
 `/agents` opens the full-screen Agent workspace. It groups agents by needs-input, working, and completed states; supports task entry directly from the bottom prompt; and exposes peek, transcript, cancel, inject, and ignore actions. Results are not silently added to foreground context.
+Each job owns a bounded `todo_write` plan; Agent View shows its completed/total
+count and current item, and the plan persists with abandoned-job evidence.
 
 `/workflows` orchestrates sequential phases and parallel fan-out over the same bounded jobs manager. A built-in review is available immediately:
 
@@ -274,6 +311,10 @@ Self-paced loops stop on a versioned `packetcode-loop-decision` block or the
 legacy `LOOP_DONE` sentinel, and always stop after 25 iterations. Interval
 loops run immediately, then on the requested interval; they queue rather than
 overlap an active foreground turn.
+
+Separately, every agent run has a bounded no-progress detector for repeated
+tool calls with identical executed arguments and identical results. It stops
+that run with the repeated call named; changing output still counts as progress.
 
 See [Background agents](docs/feature-background-agents.md) and [Agent View](docs/feature-agent-view.md).
 
@@ -363,7 +404,7 @@ version, and what happens when a build meets a file it was not built for.
 
 ## Context and Token Use
 
-The statusline context gauge shows current request occupancy, not cumulative billed tokens. Cumulative usage still drives cost. Automatic compaction includes system prompts and tool-schema estimates, preserves complete recent tool exchanges, and records compaction usage.
+The statusline context gauge shows current request occupancy, not cumulative billed tokens. Cumulative usage still drives cost. `/cost`, background-job usage, and statusline JSON report cache creation/read tokens separately where providers supply them; those figures are subsets of input, not extra tokens. Automatic compaction includes system prompts and tool-schema estimates, preserves complete recent tool exchanges, and records compaction usage.
 
 To reduce repeated context:
 

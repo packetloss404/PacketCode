@@ -372,6 +372,25 @@ type streamChunk struct {
 		// is reported as a subset and never added to the input total.
 		CachedContentTokenCount int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata,omitempty"`
+	// PromptFeedback is set, with no candidates, when the prompt itself was
+	// blocked. Without reading it the turn ended as an empty success.
+	PromptFeedback *struct {
+		BlockReason string `json:"blockReason"`
+	} `json:"promptFeedback,omitempty"`
+}
+
+// isBlockedFinish reports the finish reasons under which the candidate is not
+// the model's answer: a filter fired, or the output cap cut it off. Each of
+// these used to fall through to EventDone, so a safety block rendered as a
+// finished turn with nothing in it and a truncated answer as a complete one.
+func isBlockedFinish(reason string) bool {
+	switch reason {
+	case "SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII",
+		"IMAGE_SAFETY", "LANGUAGE", "MAX_TOKENS":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
@@ -473,7 +492,19 @@ func parseGeminiSSE(ctx, sctx context.Context, guard *provider.StallGuard, body 
 			return
 		}
 
+		if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" {
+			if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini blocked the prompt: %s", chunk.PromptFeedback.BlockReason)}) {
+				return
+			}
+			return
+		}
 		for _, cand := range chunk.Candidates {
+			if isBlockedFinish(cand.FinishReason) {
+				if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini stopped with finishReason %s", cand.FinishReason)}) {
+					return
+				}
+				return
+			}
 			if isMalformedFunctionCallFinish(cand.FinishReason) {
 				if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("gemini returned %s", cand.FinishReason)}) {
 					return

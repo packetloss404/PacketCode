@@ -3,6 +3,12 @@
 Source: [`anomalyco/opencode`](https://github.com/anomalyco/opencode) — "The open source coding agent."
 Reviewed: 2026-08-14, against `HEAD` (tree read at commit `4643e65`).
 
+> **Point-in-time research.** Packetcode implementation-status statements in
+> this document describe the 2026-08-14 tree. Several cited gaps have since
+> shipped; use [BACKLOG.md](../../BACKLOG.md) for current work and the
+> [adoption plan](upstream-adoption-plan.md) for its supersession note. The
+> clean-room evidence below is intentionally unchanged.
+
 **Status of this document.** This is a clean-room specification. It records
 *what opencode does and why*, in enough detail that packetcode can implement the
 same capability from this document alone, without opencode's source open. Nothing

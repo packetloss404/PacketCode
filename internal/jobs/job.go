@@ -288,6 +288,26 @@ type Snapshot struct {
 	ResubmitOf, ResubmittedAs                                string
 }
 
+// AwaitingApproval, AwaitingAnswer and Blocked split the one "this job is
+// waiting on a human" bit into the two things it can actually mean.
+//
+// The stored fields cannot be read directly for this. Every writer that sets
+// NeedsInput today also sets NeedsApproval, so NeedsInput alone has never
+// distinguished "a tool call needs approving" from "the agent asked you
+// something" — and the second is the signal the background-question feature
+// needs a place for. AwaitingAnswer is deliberately the *residue*: it becomes
+// true the moment a writer sets NeedsInput without NeedsApproval, and stays
+// false until one does, so no caller has to be updated when that happens.
+func (s Snapshot) AwaitingApproval() bool { return s.NeedsApproval }
+
+// AwaitingAnswer reports a job blocked on something other than a tool
+// approval — a question for the user.
+func (s Snapshot) AwaitingAnswer() bool { return s.NeedsInput && !s.NeedsApproval }
+
+// Blocked reports whether the job is waiting on a human at all. Callers that
+// group or count "needs input" want this, not either field on its own.
+func (s Snapshot) Blocked() bool { return s.NeedsInput || s.NeedsApproval }
+
 // snapshotOf builds a Snapshot from a Job. Caller must hold the Manager's
 // read lock (or otherwise know the Job is not being mutated).
 func snapshotOf(j *Job) Snapshot {

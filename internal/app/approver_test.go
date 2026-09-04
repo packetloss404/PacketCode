@@ -9,6 +9,7 @@ import (
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -32,9 +33,9 @@ func TestUIApproverRoutesDecisionToVisibleRequest(t *testing.T) {
 		dec1 <- u.Approve(ctx, approvalReq("first"))
 	}()
 
-	req := waitPendingApproval(t, u)
-	if req.ToolCall.ID != "first" {
-		t.Fatalf("first pending id = %q, want first", req.ToolCall.ID)
+	first := waitPendingApproval(t, u)
+	if first.req.ToolCall.ID != "first" {
+		t.Fatalf("first pending id = %q, want first", first.req.ToolCall.ID)
 	}
 
 	dec2 := make(chan agent.ApprovalDecision, 1)
@@ -42,23 +43,37 @@ func TestUIApproverRoutesDecisionToVisibleRequest(t *testing.T) {
 		dec2 <- u.Approve(ctx, approvalReq("second"))
 	}()
 
-	if _, ok := u.Pending(); ok {
+	if _, ok := u.Next(); ok {
 		t.Fatalf("second request surfaced while first approval was active")
 	}
-	u.Resolve(agent.ApprovalDecision{Approved: true, Reason: "first decision"})
+	if !u.ResolveID(first.id, agent.ApprovalDecision{Approved: true, Reason: "first decision"}) {
+		t.Fatal("resolving the displayed envelope reported no delivery")
+	}
 	got1 := waitDecision(t, dec1)
 	if !got1.Approved || got1.Reason != "first decision" {
 		t.Fatalf("first decision = %+v", got1)
 	}
 
-	req = waitPendingApproval(t, u)
-	if req.ToolCall.ID != "second" {
-		t.Fatalf("second pending id = %q, want second", req.ToolCall.ID)
+	second := waitPendingApproval(t, u)
+	if second.req.ToolCall.ID != "second" {
+		t.Fatalf("second pending id = %q, want second", second.req.ToolCall.ID)
 	}
-	u.Resolve(agent.ApprovalDecision{Approved: false, Reason: "second decision"})
+	// The first envelope's id must be inert now: a late decision carrying it
+	// is exactly the "answer landed on the wrong request" failure.
+	if u.ResolveID(first.id, agent.ApprovalDecision{Approved: true, Reason: "stale"}) {
+		t.Fatal("a stale envelope id resolved the request that replaced it")
+	}
+	if !u.ResolveID(second.id, agent.ApprovalDecision{Approved: false, Reason: "second decision"}) {
+		t.Fatal("resolving the second envelope reported no delivery")
+	}
 	got2 := waitDecision(t, dec2)
 	if got2.Approved || got2.Reason != "second decision" {
 		t.Fatalf("second decision = %+v", got2)
+	}
+	select {
+	case dec := <-dec1:
+		t.Fatalf("first caller received a second decision %+v", dec)
+	default:
 	}
 }
 
@@ -77,11 +92,11 @@ func TestUIApproverNotifiesInsteadOfRequiringIdlePolling(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("approval did not notify the UI")
 	}
-	req := waitPendingApproval(t, u)
-	if req.ToolCall.ID != "event-driven" {
-		t.Fatalf("pending id = %q, want event-driven", req.ToolCall.ID)
+	next := waitPendingApproval(t, u)
+	if next.req.ToolCall.ID != "event-driven" {
+		t.Fatalf("pending id = %q, want event-driven", next.req.ToolCall.ID)
 	}
-	u.Resolve(agent.ApprovalDecision{Approved: true})
+	u.ResolveID(next.id, agent.ApprovalDecision{Approved: true})
 	if got := waitDecision(t, decisions); !got.Approved {
 		t.Fatalf("decision = %+v, want approved", got)
 	}
@@ -94,7 +109,7 @@ func TestUIApproverPermissionPolicyAllowAndDeny(t *testing.T) {
 	if denied.Approved || denied.Reason == "" {
 		t.Fatalf("denied decision = %+v", denied)
 	}
-	if _, ok := u.Pending(); ok {
+	if _, ok := u.Next(); ok {
 		t.Fatalf("denied policy request should not reach approval queue")
 	}
 
@@ -103,7 +118,7 @@ func TestUIApproverPermissionPolicyAllowAndDeny(t *testing.T) {
 	if !allowed.Approved || string(allowed.EditedParams) != `{}` {
 		t.Fatalf("allowed decision = %+v", allowed)
 	}
-	if _, ok := u.Pending(); ok {
+	if _, ok := u.Next(); ok {
 		t.Fatalf("allowed policy request should not reach approval queue")
 	}
 }
@@ -118,14 +133,17 @@ func TestUIApproverExplicitPromptIgnoresLivePolicyAndAutoTrust(t *testing.T) {
 		decisions <- u.PromptApproval(context.Background(), approvalReq("snapshot-ask"))
 	}()
 
-	req := waitPendingApproval(t, u)
-	if req.ToolCall.ID != "snapshot-ask" {
-		t.Fatalf("pending id = %q, want snapshot-ask", req.ToolCall.ID)
+	next := waitPendingApproval(t, u)
+	if next.req.ToolCall.ID != "snapshot-ask" {
+		t.Fatalf("pending id = %q, want snapshot-ask", next.req.ToolCall.ID)
 	}
-	if u.ResolveActiveByPolicy() {
+	if next.origin != originBackground {
+		t.Fatalf("PromptApproval origin = %v, want background", next.origin)
+	}
+	if u.ResolveActiveByPolicy(next.id) {
 		t.Fatal("live policy must not resolve an explicit snapshot-bound prompt")
 	}
-	u.Resolve(agent.ApprovalDecision{Approved: false, Reason: "explicit rejection"})
+	u.ResolveID(next.id, agent.ApprovalDecision{Approved: false, Reason: "explicit rejection"})
 	if got := waitDecision(t, decisions); got.Approved || got.Reason != "explicit rejection" {
 		t.Fatalf("decision = %+v, want explicit rejection", got)
 	}
@@ -146,7 +164,7 @@ func TestUIApproverExplicitPromptHonorsLiveDeny(t *testing.T) {
 	}
 
 	u.SetPermissionPolicy(permissions.DefaultPolicy().WithRule("test_tool", permissions.ActionDeny))
-	if _, ok := u.Pending(); ok {
+	if _, ok := u.Next(); ok {
 		t.Fatal("live deny should resolve the snapshot-bound prompt without displaying it")
 	}
 	if got := waitDecision(t, decisions); got.Approved || got.Reason == "" {
@@ -166,17 +184,17 @@ func approvalReq(id string) agent.ApprovalRequest {
 	}
 }
 
-func waitPendingApproval(t *testing.T, u *uiApprover) agent.ApprovalRequest {
+func waitPendingApproval(t *testing.T, u *uiApprover) pendingApproval {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if req, ok := u.Pending(); ok {
-			return req
+	var out pendingApproval
+	testwait.For(t, time.Second, "approval reached the queue", func() bool {
+		next, ok := u.Next()
+		if ok {
+			out = next
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for pending approval")
-	return agent.ApprovalRequest{}
+		return ok
+	})
+	return out
 }
 
 func waitDecision(t *testing.T, ch <-chan agent.ApprovalDecision) agent.ApprovalDecision {

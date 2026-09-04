@@ -625,7 +625,7 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 					CacheReadInputTokens: ev.Response.Usage.InputTokensDetails.CachedTokens,
 				}
 			}
-			ch <- done
+			sink.Send(done)
 			return
 
 		case "response.failed", "response.incomplete":

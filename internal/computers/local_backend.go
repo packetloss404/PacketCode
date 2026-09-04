@@ -2,6 +2,7 @@ package computers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -244,9 +245,21 @@ func (b *LocalBackend) Execute(ctx context.Context, command, cwd string, output 
 	cmd.Stdout = output
 	cmd.Stderr = output
 	teardown := procrun.ConfigureTreeCancelRecorder(cmd)
+	// After ConfigureTreeCancelRecorder, which replaces SysProcAttr: os/exec
+	// re-quotes the /C argument for cmd.exe, which then passes the escaped
+	// quotes through literally, so `echo "hi"` printed \"hi\" and the
+	// PowerShell form the tool description recommends ran nothing at all.
+	applyShellCommandLine(cmd, command)
 	runErr := cmd.Run()
 	if runErr == nil {
 		return ExecResult{ExitCode: 0}, nil
+	}
+	// The shell exited but a child it left behind still holds the output
+	// pipe -- `./server & echo started`, the usual way to launch something
+	// in the background. The command succeeded; report its real status
+	// rather than an exit code of -1 and "WaitDelay expired".
+	if errors.Is(runErr, exec.ErrWaitDelay) && cmd.ProcessState != nil {
+		return ExecResult{ExitCode: cmd.ProcessState.ExitCode()}, nil
 	}
 	// The cancellation check must come FIRST. Killing the tree makes the child
 	// exit non-zero, so cmd.Run reports an *exec.ExitError even though the

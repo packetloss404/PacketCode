@@ -306,3 +306,68 @@ func assertDecision(t *testing.T, p *Policy, req Request, want Decision) {
 		t.Fatalf("Decide(%+v) = %+v, want %s", req, got, want)
 	}
 }
+
+// A session or skill allow for execute_command must not switch the deny
+// floor off. The floor could not prove that `sh -c 'git push'` is not a push,
+// and an allow rule does not make it any more knowable.
+func TestPolicy_AllowRuleDoesNotDisableDenyFloorEscalation(t *testing.T) {
+	for name, p := range map[string]*Policy{
+		"tool allow":   denyPushPolicy().WithRule("execute_command", DecisionAllow),
+		"prefix allow": denyPushPolicy().WithCommandPrefixRule([]string{"sh"}, DecisionAllow),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertCommandDecision(t, p, "sh -c 'git push origin main'", DecisionAsk)
+			assertCommandDecision(t, p, "git push origin main", DecisionDeny)
+			assertCommandDecision(t, p, "git status", DecisionAllow)
+		})
+	}
+}
+
+// Quoting is how a shell spells a word, not a different word. A deny prefix
+// has to see `"git" push` as `git push`, and anything it cannot resolve --
+// an escape, a variable, an option between the prefix words -- as a reason
+// to ask rather than a reason to allow.
+func TestPolicy_DenyFloorSeesThroughQuotingAndOptions(t *testing.T) {
+	p := denyPushPolicy()
+
+	for _, command := range []string{
+		`"git" push origin main`,
+		`git "push" origin main`,
+		`'git' push`,
+		`gi""t push`,
+		`git --no-pager push`,
+	} {
+		assertCommandDecision(t, p, command, DecisionDeny)
+	}
+	for _, command := range []string{
+		`git -C . push`,
+		`git -c core.x=y push`,
+		`\git push`,
+		`$GIT push`,
+		`git $VERB origin`,
+		`pwsh -Command "git push"`,
+		`cmd /c git push`,
+	} {
+		assertCommandDecision(t, p, command, DecisionAsk)
+	}
+	// Escalation is monotonic, so an interpreter invocation that also exposes
+	// the denied words through quoting may land on deny rather than ask. What
+	// it must never do is run.
+	for _, command := range []string{
+		`python -c "import os; os.system('git push')"`,
+		`node -e "require('child_process').execSync('git push')"`,
+	} {
+		params, _ := json.Marshal(map[string]any{"command": command})
+		got := p.Decide(Request{ToolName: "execute_command", RequiresApproval: true, Params: params})
+		if got.Decision == DecisionAllow {
+			t.Fatalf("Decide(%q) allowed an interpreter that may push", command)
+		}
+	}
+	for _, command := range []string{
+		`git status --short`,
+		`git -C . status`,
+		`echo "git push"`,
+	} {
+		assertCommandDecision(t, p, command, DecisionAllow)
+	}
+}

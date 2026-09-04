@@ -58,6 +58,9 @@ type Config struct {
 	// pair. Used when applying per-stream usage updates to the
 	// per-job session record.
 	PricingFor cost.PricingFunc
+	// CacheRatesFor looks up the cache read/write multipliers for a
+	// (provider, model). Optional; the provider package defaults apply.
+	CacheRatesFor cost.CacheRateFunc
 
 	// SystemPromptFor builds the per-job system prompt given the
 	// parent's depth. Returning "" yields no system prompt.
@@ -140,6 +143,17 @@ type SpawnRequest struct {
 	SystemPrompt string
 	AllowWrite   bool
 	Computer     string // optional registered computer name/id selector
+
+	// VerifyWorktreeOf names an earlier job whose isolated worktree becomes
+	// this job's root, so a read-only verifier can inspect the candidate
+	// change instead of the project tree the work agent never touched.
+	//
+	// It is a job id and not a path on purpose: the Manager answers it from
+	// the worktrees it created itself, so no caller can nominate a root. It
+	// is refused outright alongside AllowWrite, and an id with no recorded
+	// worktree is not an error — the job simply keeps the ordinary root,
+	// which is where a read-only work agent ran anyway.
+	VerifyWorktreeOf string
 }
 
 // SpawnError discriminates programmatic Spawn failures so the caller
@@ -200,13 +214,22 @@ type Result struct {
 type Manager struct {
 	cfg Config
 
-	mu             sync.RWMutex
-	jobs           map[string]*Job
-	cancel         map[string]context.CancelFunc
-	results        []Result
-	subscribers    []func(Snapshot)
-	liveSessions   map[string]*session.Manager
-	pathLocks      pathLockMap
+	mu           sync.RWMutex
+	jobs         map[string]*Job
+	cancel       map[string]context.CancelFunc
+	results      []Result
+	subscribers  []func(Snapshot)
+	liveSessions map[string]*session.Manager
+	pathLocks    pathLockMap
+	// worktreeRoots records the root of every worktree this Manager created,
+	// keyed by the job it was created for. It is the only source a verifier
+	// root is resolved from — see resolveVerifyRoot.
+	worktreeRoots map[string]worktreeBinding
+	// verifyRoots holds the resolved read-only root a spawned job will run
+	// in, keyed by that job's id. Job itself is the persisted record and a
+	// verifier root is deliberately per-process: a job is never resumed, so
+	// there is nothing for a reloaded root to mean.
+	verifyRoots    map[string]worktreeBinding
 	persistMu      sync.Mutex
 	persistSeq     map[string]int64
 	persistPending map[string]persistedJob
@@ -261,6 +284,8 @@ func NewManager(cfg Config) (*Manager, int, error) {
 		cancel:         map[string]context.CancelFunc{},
 		liveSessions:   map[string]*session.Manager{},
 		pathLocks:      pathLockMap{},
+		worktreeRoots:  map[string]worktreeBinding{},
+		verifyRoots:    map[string]worktreeBinding{},
 		persistSeq:     map[string]int64{},
 		persistPending: map[string]persistedJob{},
 		persistTimers:  map[string]*time.Timer{},
@@ -987,6 +1012,11 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 		return Snapshot{}, perr
 	}
 
+	verifyRoot, hasVerifyRoot, perr := m.resolveVerifyRoot(req, workspace)
+	if perr != nil {
+		return Snapshot{}, perr
+	}
+
 	provSlug, modelID, perr := m.resolveProviderModel(req)
 	if perr != nil {
 		return Snapshot{}, perr
@@ -1040,12 +1070,21 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 	// acquired the semaphore).
 	jobCtx, cancel := context.WithCancel(m.baseCtx)
 	m.jobs[id] = job
+	if hasVerifyRoot {
+		m.verifyRoots[id] = verifyRoot
+	}
 	m.cancel[id] = cancel
 	m.totalSpawned++
 	m.terminalCh[id] = make(chan struct{})
 	snap := snapshotOf(job)
 	persisted := toPersisted(job)
 	subscribers := snapshotCallbacks(m.subscribers)
+	// Counted while the lock that guards m.closed is still held. Shutdown
+	// sets closed under the same lock and then calls wg.Wait, so ordering
+	// Add before Unlock is what guarantees Wait sees this worker; an Add
+	// after Shutdown's Wait returned would start a worker under a dead base
+	// context that nothing waits for or flushes.
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	// Lifecycle transitions are sparse and recovery-critical, so persist the
@@ -1054,7 +1093,6 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 
 	m.fanOut(snap, subscribers)
 
-	m.wg.Add(1)
 	go m.runJob(job, req, jobCtx)
 
 	return snap, nil

@@ -123,13 +123,18 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 // Called when the turn ends, however it ends: completion, cancellation, or
 // error. A grant that survived a cancelled turn would be the worst version of
 // this feature — authority the user never saw used, still in force.
+//
+// The rules revert to the pre-grant snapshot, but the profile is the one in
+// force now: the user may have cycled to plan mode mid-turn, and restoring
+// the snapshot's profile would leave the plan flag set over a policy that is
+// no longer read-only.
 func (a *App) releaseSkillGrant() string {
 	grant := a.activeSkillGrant
 	if grant == nil {
 		return ""
 	}
 	a.activeSkillGrant = nil
-	a.setPermissionPolicy(grant.previous)
+	a.setPermissionPolicy(grant.previous.WithProfile(a.currentPermissionPolicy().Profile()))
 	return fmt.Sprintf("%s's pre-approval of %s has ended with the turn",
 		grant.skill, strings.Join(grant.tools, ", "))
 }

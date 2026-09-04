@@ -342,7 +342,7 @@ func (e *Engine) runStep(
 			workEvidence = "(the work agents returned no evidence)"
 		}
 		verifierResult, verifierID, verifierErr := e.runVerifier(
-			ctx, run, st, inputs, steps, workEvidence, attemptNumber,
+			ctx, run, st, inputs, steps, workEvidence, workspaceForVerifier(attempt.Agents), attemptNumber,
 			spawned, maxAgents,
 			func(id string) {
 				sr.Attempts[len(sr.Attempts)-1].VerifierJobID = id
@@ -505,6 +505,7 @@ func (e *Engine) runVerifier(
 	st Step,
 	inputs, steps map[string]string,
 	workSummary string,
+	workspace verifierWorkspace,
 	attemptNumber int,
 	spawned *int,
 	maxAgents int,
@@ -523,7 +524,8 @@ func (e *Engine) runVerifier(
 	if err != nil {
 		return jobs.Result{}, "", fmt.Errorf("step %q: render verifier prompt: %w", st.Name, err)
 	}
-	prompt += fmt.Sprintf("\n\nCompleted work for attempt %d:\n%s\n\n%s", attemptNumber, workSummary, verifierContractInstruction(st.Verify.PassContract))
+	prompt += fmt.Sprintf("\n\nCompleted work for attempt %d:\n%s\n\n%s%s",
+		attemptNumber, workSummary, workspace.Framing, verifierContractInstruction(st.Verify.PassContract))
 	snap, spawnErr := e.jobs.Spawn(jobs.SpawnRequest{
 		Prompt:       prompt,
 		Provider:     st.Verify.Provider,
@@ -531,6 +533,11 @@ func (e *Engine) runVerifier(
 		Computer:     run.Computer,
 		SystemPrompt: st.Verify.SystemPrompt,
 		AllowWrite:   false,
+		// The verifier reads the candidate change in the work agent's own
+		// worktree. Without this its tools are confined to the project root,
+		// where the change does not exist, so the only thing it could check
+		// is whether the work agent's summary sounds convincing.
+		VerifyWorktreeOf: workspace.WorktreeJobID,
 	})
 	if spawnErr != nil {
 		return jobs.Result{}, "", fmt.Errorf("step %q: verifier spawn failed: %s", st.Name, spawnErr.Error())

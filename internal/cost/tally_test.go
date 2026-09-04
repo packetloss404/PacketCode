@@ -101,16 +101,25 @@ func TestTracker_SessionCostsForIDs(t *testing.T) {
 	assert.InDelta(t, 0.0, tr.SessionCostsForIDs(nil), 1e-9)
 }
 
-// TestTracker_CacheCountsAreNotPriced pins the pricing invariant: cached
-// tokens are already inside Input, so priced() must derive cost from Input
-// alone. Charging for the subsets again would overstate every cached
-// session.
-func TestTracker_CacheCountsAreNotPriced(t *testing.T) {
+// TestTracker_CacheCountsAreDiscounted pins the pricing invariant: cached
+// tokens are already inside Input, so they are never added on top -- and
+// they are billed at the cache rate, not the fresh one. The old formula
+// charged the whole cache-inclusive Input at full price, which is how /cost
+// came to disagree with the session's own total by ~6x on a cache-heavy run.
+func TestTracker_CacheCountsAreDiscounted(t *testing.T) {
 	tr, _ := NewTracker(filepath.Join(t.TempDir(), "tally.json"), fixedPricing)
 	require.NoError(t, tr.RecordUsageWithCache("s1", "anthropic", "claude", 1_000_000, 500_000, 200_000, 700_000))
 
-	// Same $6.00 as the cache-free case: 1M * $2/M + 0.5M * $8/M.
-	assert.InDelta(t, 6.00, tr.SessionCost("s1"), 1e-9)
+	// 100k fresh * $2/M = 0.20; 700k reads * $2/M * 0.1 = 0.14;
+	// 200k writes * $2/M * 1.0 = 0.40; 500k out * $8/M = 4.00.
+	assert.InDelta(t, 4.74, tr.SessionCost("s1"), 1e-9)
+
+	// A provider-specific rate lookup takes precedence over the defaults.
+	tr.SetCacheRates(func(string, string) (float64, float64) { return 0.5, 2.0 })
+	// 0.20 + 700k*2*0.5/M (0.70) + 200k*2*2.0/M (0.80) + 4.00.
+	assert.InDelta(t, 5.70, tr.SessionCost("s1"), 1e-9)
+	tr.SetCacheRates(nil)
+	assert.InDelta(t, 4.74, tr.SessionCost("s1"), 1e-9)
 
 	e := tr.Breakdown()
 	require.Len(t, e, 1)

@@ -127,10 +127,37 @@ func TestSubcommands_ShippedCommandsAreAllPresent(t *testing.T) {
 	for _, c := range subcommands() {
 		have[c.name] = true
 	}
-	for _, want := range []string{"doctor", "skills", "acp", "sugar"} {
+	for _, want := range []string{"run", "doctor", "skills", "acp", "sugar"} {
 		if !have[want] {
 			t.Errorf("`packetcode %s` is gone from the command table; if that was "+
 				"deliberate, remove it here too", want)
 		}
+	}
+}
+
+func TestRejectTopLevelFlagsBeforeSubcommand(t *testing.T) {
+	fs := flag.NewFlagSet("packetcode", flag.ContinueOnError)
+	registerFlags(fs)
+	if err := fs.Parse([]string{"--permission-mode", "read-only", "run", "inspect"}); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	if !rejectTopLevelFlagsBeforeSubcommand(fs, fs.Args(), &stderr) {
+		t.Fatal("permission flag before run was silently accepted")
+	}
+	for _, want := range []string{"packetcode run", "--permission-mode", "after run"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("diagnostic %q does not contain %q", stderr.String(), want)
+		}
+	}
+
+	clean := flag.NewFlagSet("packetcode", flag.ContinueOnError)
+	registerFlags(clean)
+	if err := clean.Parse([]string{"run", "--permission-mode", "read-only", "inspect"}); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	if rejectTopLevelFlagsBeforeSubcommand(clean, clean.Args(), &stderr) {
+		t.Fatalf("command-local flags were rejected: %s", stderr.String())
 	}
 }

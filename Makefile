@@ -45,6 +45,7 @@ install-test:
 
 smoke: build
 	./$(BINARY) --version
+	./$(BINARY) run --help
 
 tui-snapshots: build
 	sh scripts/tui_snapshot_suite.sh packetcode

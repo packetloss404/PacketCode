@@ -48,6 +48,13 @@ func (m *Manager) openRemoteBackend(ctx context.Context, ws Workspace) (computer
 // There is deliberately no fallback to the primary remote checkout.
 func (m *Manager) prepareRemoteBackend(ctx context.Context, j *Job) (computers.RuntimeBackend, error) {
 	ws := workspaceOfJob(j, m.cfg.Root)
+	if binding, ok := m.verifyRootFor(j.ID); ok && !j.AllowWrite {
+		// Read-only verifier: open the work job's remote worktree rather than
+		// the registered checkout, which does not contain the change. Spawn
+		// already refused a binding from another computer, and the path is
+		// this Manager's own record of a worktree it created here.
+		ws.WorkingDir = binding.Root
+	}
 	backend, err := m.openRemoteBackend(ctx, ws)
 	if err != nil {
 		return nil, err
@@ -66,6 +73,7 @@ func (m *Manager) prepareRemoteBackend(ctx context.Context, j *Job) (computers.R
 		return nil, err
 	}
 	m.setWorktree(j, created)
+	m.recordWorktreeRoot(j, created.Root)
 	_ = backend.Close()
 
 	worktreeWS := ws

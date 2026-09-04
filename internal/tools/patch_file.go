@@ -37,6 +37,11 @@ type PatchFileTool struct {
 	Backups    BackupManager
 	Backend    computers.RuntimeBackend
 	backendErr error
+
+	// DiagnosticsDisabled suppresses the post-edit diagnostics block. The zero
+	// value keeps them on so a tool built by struct literal behaves like one
+	// built by the constructors.
+	DiagnosticsDisabled bool
 }
 
 func NewPatchFileTool(root string, backups BackupManager) *PatchFileTool {
@@ -367,16 +372,45 @@ func (t *PatchFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 			len(p.Patches)-normalizedCount, normalizedCount)
 	}
 
+	metadata := map[string]any{
+		"path":               p.Path,
+		"patch_count":        len(p.Patches),
+		"original_size":      len(original),
+		"updated_size":       len(updated),
+		"normalized_matches": normalizedCount,
+	}
+	// The diagnostics block goes BEFORE the diff, not after it: the TUI renders
+	// everything from the first "--- " onward through the diff parser, which
+	// would swallow trailing text into the hunk it is drawing. Everything ahead
+	// of the diff is passed through as a preamble.
+	diagnostics := ""
+	if t.postEditDiagnosticsEnabled(p.Path) {
+		// The pre-edit bytes are already in hand here, so distinguishing
+		// introduced errors from pre-existing ones costs nothing extra.
+		if report := postEditDiagnostics(p.Path, []byte(updated), original); report.Block != "" {
+			// Appended, never substituted, and IsError stays false: the patch
+			// did apply.
+			diagnostics = report.Block + "\n\n"
+			metadata["diagnostics"] = report.Introduced
+			metadata["pre_existing_diagnostics"] = report.PreExisting
+		}
+	}
+
 	return ToolResult{
-		Content: fmt.Sprintf("Applied %d patch(es) to %s (%s).\n\n%s", len(p.Patches), p.Path, matchNote, diff),
-		Metadata: map[string]any{
-			"path":               p.Path,
-			"patch_count":        len(p.Patches),
-			"original_size":      len(original),
-			"updated_size":       len(updated),
-			"normalized_matches": normalizedCount,
-		},
+		Content:  fmt.Sprintf("Applied %d patch(es) to %s (%s).\n\n%s%s", len(p.Patches), p.Path, matchNote, diagnostics, diff),
+		Metadata: metadata,
 	}, nil
+}
+
+// postEditDiagnosticsEnabled reports whether this patch should be analysed.
+// Remote backends are skipped: the analysis is local and in-process, and a file
+// on a Packet Computer belongs to that machine's toolchain and build context,
+// not this one's.
+func (t *PatchFileTool) postEditDiagnosticsEnabled(path string) bool {
+	if t.DiagnosticsDisabled || t.Backend == nil || t.Backend.Kind() != computers.KindLocal {
+		return false
+	}
+	return postEditDiagnosticsSupported(path)
 }
 
 // PreviewPatchDiff computes the unified diff a Execute call would

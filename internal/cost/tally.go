@@ -21,6 +21,7 @@ package cost
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/provider"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,8 +42,8 @@ type SessionCost struct {
 	Output int `json:"output"`
 	// CacheCreation and CacheRead are the cached-input subsets of Input, not
 	// additions to it — every provider that reports them counts them inside
-	// its prompt total. priced() therefore ignores them; they exist so /cost
-	// and the statusline can show cache effectiveness. Omitted when zero so
+	// its prompt total. priced() bills them at the cache rates rather than
+	// the fresh input rate, and never adds them on top. Omitted when zero so
 	// tallies written before cache plumbing keep their original shape, and
 	// so absent fields decode to zero rather than to a wrong number.
 	CacheCreation int    `json:"cache_creation,omitempty"`
@@ -109,19 +110,34 @@ func (t *Tally) Save(path string) error {
 	return nil
 }
 
-// PricingFunc returns USD per 1M tokens for (provider, model). The cost
-// package doesn't import the provider package directly to avoid coupling,
-// so callers (the agent or app shell) supply this lookup.
+// PricingFunc returns USD per 1M tokens for (provider, model). Callers (the
+// agent or app shell) supply this lookup so the tally can be re-priced
+// against whichever provider is active now.
 type PricingFunc func(providerSlug, modelID string) (inputPer1M, outputPer1M float64)
+
+// CacheRateFunc returns the multipliers on the input rate for tokens served
+// from (read) and written into (write) the provider's prompt cache. Optional:
+// a tracker without one uses the provider package defaults, which are right
+// for OpenAI and for Anthropic reads.
+type CacheRateFunc func(providerSlug, modelID string) (readMultiplier, writeMultiplier float64)
 
 // Tracker is a thread-safe wrapper around a Tally tied to a single
 // session. It implements the high-water-mark logic and is the type the
 // agent loop and status line both consume.
 type Tracker struct {
-	path    string
-	pricing PricingFunc
-	mu      sync.Mutex
-	tally   *Tally
+	path       string
+	pricing    PricingFunc
+	cacheRates CacheRateFunc
+	mu         sync.Mutex
+	tally      *Tally
+}
+
+// SetCacheRates installs the cache-multiplier lookup used when pricing
+// cached input. Safe to call before any usage is recorded.
+func (t *Tracker) SetCacheRates(fn CacheRateFunc) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cacheRates = fn
 }
 
 func NewTracker(path string, pricing PricingFunc) (*Tracker, error) {
@@ -280,5 +296,14 @@ func (t *Tracker) priced(sc SessionCost) float64 {
 		return 0
 	}
 	in, out := t.pricing(sc.Provider, sc.Model)
-	return float64(sc.Input)*in/1_000_000 + float64(sc.Output)*out/1_000_000
+	// Cached input is a subset of Input billed at a fraction of the fresh
+	// rate. The session and job tallies were corrected to use
+	// provider.EstimateCost; this tally carried the old formula, so /cost and
+	// the statusline showed a different dollar figure from the session for
+	// the same tokens -- roughly 6x on a cache-heavy run.
+	read, write := provider.CacheReadMultiplier, provider.CacheWriteMultiplier
+	if t.cacheRates != nil {
+		read, write = t.cacheRates(sc.Provider, sc.Model)
+	}
+	return provider.EstimateCost(sc.Input, sc.Output, sc.CacheRead, sc.CacheCreation, in, out, read, write)
 }
