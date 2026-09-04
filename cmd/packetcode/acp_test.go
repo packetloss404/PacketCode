@@ -221,10 +221,15 @@ func TestPacketACPFactoryPermissionCeiling(t *testing.T) {
 }
 
 func TestServerPermissionCeilingDefaults(t *testing.T) {
-	// Default config: the local user is the operator; no restriction.
+	// Default config runs the "balanced" (ask) policy, so the ceiling is ask.
 	cfg := config.Default()
+	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
+
+	// An empty profile is what permissions.New treats as "balanced": the
+	// ceiling must match the policy, not exceed it.
 	cfg.Permissions.Profile = ""
-	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
+	assert.Equal(t, []string{"ask", "read-only"}, allowedPermissionModes(serverPermissionCeiling(cfg)))
 	assert.Equal(t, acp.PermissionModes, allowedPermissionModes(permissions.ProfileFull))
 
 	// Explicit ask profile caps at ask.
@@ -236,10 +241,11 @@ func TestServerPermissionCeilingDefaults(t *testing.T) {
 	cfg.Behavior.TrustMode = true
 	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
 
-	// Custom profiles have unknown shape: unrestricted.
+	// A custom profile is ask plus the operator's rules, so its ceiling is
+	// ask: a client cannot request auto or bypass on top of it.
 	cfg.Behavior.TrustMode = false
 	cfg.Permissions.Profile = "my-custom-profile"
-	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
 }
 
 // TestPacketACPFactoryMCPServersFallback pins the absent-vs-empty decision at

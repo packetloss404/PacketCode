@@ -47,17 +47,26 @@ var profileRank = map[permissions.Profile]int{
 
 // serverPermissionCeiling derives the escalation ceiling from the effective
 // startup configuration (after any --permission-mode flag was applied — the
-// flag writes cfg.Permissions.Profile). An EXPLICITLY configured profile caps
-// what clients may request; a default (empty) profile leaves them
-// unrestricted, because on a default setup the ACP client's local user is the
-// operator and per-session modes are their consent mechanism. Custom profiles
-// have unknown permissiveness and also leave clients unrestricted.
+// flag writes cfg.Permissions.Profile).
+//
+// The ceiling is the profile the server-wide policy actually runs under, so a
+// client can narrow its session but never widen it past what the operator
+// started with. Two cases used to answer "unrestricted" instead:
+//
+//   - An empty profile. permissions.New treats "" as "balanced" (ask), so the
+//     policy was ask while the ceiling said full -- and config.Default() sets
+//     "balanced" explicitly, so the only way to reach "" was to write
+//     profile = "" by hand.
+//   - A custom profile. Its base is ask with the operator's rules layered on
+//     (permissions.configProfile), so ask is the exact ceiling, not a guess.
+//
+// Both now resolve through ParseProfile the way the policy itself does, and
+// fall back to ask. Trust mode remains the one explicit way to raise the
+// ceiling to full, because it already raises the policy to full.
 func serverPermissionCeiling(cfg *config.Config) permissions.Profile {
-	ceiling := permissions.ProfileFull
-	if cfg.Permissions.Profile != "" {
-		if profile, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
-			ceiling = profile
-		}
+	ceiling := permissions.ProfileAsk
+	if profile, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
+		ceiling = profile
 	}
 	if cfg.Behavior.TrustMode {
 		ceiling = permissions.ProfileFull
