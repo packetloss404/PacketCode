@@ -36,7 +36,8 @@ func TestProvider_PricingAndContext(t *testing.T) {
 
 func TestProvider_ListModels_FiltersAndStripsPrefix(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Contains(t, r.URL.RawQuery, "key=k")
+		assert.Equal(t, "k", r.Header.Get("x-goog-api-key"))
+		assert.NotContains(t, r.URL.RawQuery, "key=")
 		_, _ = w.Write([]byte(`{
 			"models":[
 				{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro","inputTokenLimit":2000000,"supportedGenerationMethods":["generateContent","streamGenerateContent"]},
@@ -158,7 +159,8 @@ func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/models/gemini-2.5-pro:streamGenerateContent", r.URL.Path)
 		assert.Contains(t, r.URL.RawQuery, "alt=sse")
-		assert.Contains(t, r.URL.RawQuery, "key=k")
+		assert.Equal(t, "k", r.Header.Get("x-goog-api-key"))
+		assert.NotContains(t, r.URL.RawQuery, "key=")
 
 		body, _ := io.ReadAll(r.Body)
 		var parsed wireRequest
@@ -202,7 +204,8 @@ func TestProvider_ChatCompletion_StreamsTextAndUsage(t *testing.T) {
 func TestProvider_ChatCompletion_EscapesModelPathAndKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/models/gemini%2Ftest%20model:streamGenerateContent", r.URL.EscapedPath())
-		assert.Contains(t, r.URL.RawQuery, "key=a%2Bb%2Fc")
+		assert.Equal(t, "a+b/c", r.Header.Get("x-goog-api-key"))
+		assert.NotContains(t, r.URL.RawQuery, "key=")
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"STOP\"}]}\n\n"))
 	}))
@@ -441,9 +444,10 @@ func TestProvider_ChatCompletion_ErrorStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "400")
 }
 
-// Gemini authenticates with a ?key= query parameter, so net/http's *url.Error
-// carries the API key in its message. Every transport-error path must redact
-// it before it reaches the UI or a log.
+// The API key travels in the x-goog-api-key header, never in the URL, so a
+// *url.Error from net/http -- which prints the full request URL -- must not
+// carry it. Every transport-error path is checked for the secret; the
+// redactAPIKey scrubber stays as defence in depth and is tested separately.
 func TestProvider_TransportErrors_RedactAPIKey(t *testing.T) {
 	const secret = "AIza-super-secret-gemini-key"
 
@@ -459,21 +463,18 @@ func TestProvider_TransportErrors_RedactAPIKey(t *testing.T) {
 		err := p.ValidateKey(context.Background(), secret)
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), secret)
-		assert.Contains(t, err.Error(), "[REDACTED]")
 	})
 
 	t.Run("ListModels", func(t *testing.T) {
 		_, err := p.ListModels(context.Background())
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), secret)
-		assert.Contains(t, err.Error(), "[REDACTED]")
 	})
 
 	t.Run("ChatCompletion", func(t *testing.T) {
 		_, err := p.ChatCompletion(context.Background(), provider.ChatRequest{Model: "gemini-2.5-pro"})
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), secret)
-		assert.Contains(t, err.Error(), "[REDACTED]")
 	})
 }
 

@@ -65,11 +65,11 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	endpoint := p.baseURL + "/models?key=" + url.QueryEscape(apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return err
 	}
+	setAPIKeyHeader(req, apiKey)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("validate key: %w", redactAPIKey(err, apiKey))
@@ -85,12 +85,12 @@ func (p *Provider) ValidateKey(ctx context.Context, apiKey string) error {
 // redactAPIKey strips the API key out of an error's message while preserving
 // the error chain for errors.Is/As.
 //
-// Gemini authenticates with a ?key=<secret> query parameter rather than a
-// header, and net/http wraps every transport failure in *url.Error, whose
-// Error() prints the full request URL — query string included. Without this,
-// a single "connection refused" or DNS failure writes the user's API key into
-// the TUI, into whatever captures stderr, and into any bug report pasted from
-// it. url.Error's own redaction only covers userinfo passwords.
+// Gemini used to be authenticated with a ?key=<secret> query parameter, and
+// net/http wraps every transport failure in *url.Error, whose Error() prints
+// the full request URL — query string included. The key now travels in the
+// x-goog-api-key header instead, so no request URL carries it; this scrubber
+// stays as defence in depth for any path that still formats a URL built from
+// the key. url.Error's own redaction only covers userinfo passwords.
 func redactAPIKey(err error, apiKey string) error {
 	if err == nil || apiKey == "" {
 		return err
@@ -118,6 +118,20 @@ type redactedError struct {
 func (e *redactedError) Error() string { return e.message }
 func (e *redactedError) Unwrap() error { return e.cause }
 
+// apiKeyHeader is the header Gemini accepts in place of the ?key= query
+// parameter. The key used to travel in the URL, which put it in every place a
+// URL is copied without anyone deciding to copy a secret: *url.Error text (see
+// redactAPIKey, kept as a second line of defence), proxy and gateway access
+// logs, and any request URL a wrapper chooses to print. A header is sent over
+// the same TLS connection and lands in none of those.
+const apiKeyHeader = "x-goog-api-key"
+
+func setAPIKeyHeader(req *http.Request, apiKey string) {
+	if apiKey != "" {
+		req.Header.Set(apiKeyHeader, apiKey)
+	}
+}
+
 // modelsResponse is the Gemini /models response payload.
 type modelsResponse struct {
 	Models []struct {
@@ -129,11 +143,11 @@ type modelsResponse struct {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]provider.Model, error) {
-	endpoint := p.baseURL + "/models?key=" + url.QueryEscape(p.apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return nil, err
 	}
+	setAPIKeyHeader(req, p.apiKey)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("list models: %w", redactAPIKey(err, p.apiKey))
@@ -403,8 +417,8 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 		return nil, fmt.Errorf("marshal gemini request: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s",
-		p.baseURL, url.PathEscape(req.Model), url.QueryEscape(p.apiKey))
+	endpoint := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse",
+		p.baseURL, url.PathEscape(req.Model))
 
 	// Build the stall guard BEFORE issuing the request and bind the streaming
 	// request/body to the derived context (sctx) so a stall closes the
@@ -417,6 +431,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req provider.ChatRequest)
 		if err != nil {
 			return nil, err
 		}
+		setAPIKeyHeader(httpReq, p.apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
 		return httpReq, nil
