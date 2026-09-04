@@ -12,7 +12,15 @@ packetcode --permission-mode auto               # also: ask, accept-edits, read-
 packetcode --trust                              # bypass (deny rules still apply)
 packetcode doctor --check providers             # also: permissions, mcp
 packetcode doctor --json
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode skills list                          # manage Agent Skills
+packetcode acp                                  # local stdio protocol server
+packetcode sugar login                          # optional Sugar integration
 ```
+
+Headless form: `packetcode run [--provider NAME] [--model MODEL]
+[--permission-mode MODE] [--resume ID] [--json] <prompt...>`. Approval-required
+runs exit 3; cancellation exits 130. Plain stdout is the final response only.
 
 ## Type these in packetcode
 

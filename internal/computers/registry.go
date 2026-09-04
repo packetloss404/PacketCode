@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,8 +24,8 @@ const registryVersion = compat.ComputerRegistryVersion
 const FileName = "registry.json"
 
 type registryFile struct {
-	Version   int        `json:"version"`
-	Computers []Computer `json:"computers"`
+	Version   int               `json:"version"`
+	Computers []json.RawMessage `json:"computers"`
 }
 
 // Registry is the durable set of Packet Computers, backed by
@@ -36,6 +37,20 @@ type Registry struct {
 	mu   sync.RWMutex
 	dir  string
 	byID map[string]Computer
+	// unreadable holds rows this build could not decode or validate,
+	// verbatim. They are written back on save so that editing one computer
+	// on an older build does not silently delete a record a newer build
+	// wrote -- the same rule the compat contract applies to every other
+	// on-disk format.
+	unreadable []json.RawMessage
+}
+
+// Unreadable reports how many stored rows this build skipped. They are
+// preserved on disk; they are simply not listed.
+func (r *Registry) Unreadable() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.unreadable)
 }
 
 // Load reads the registry from dir, creating an empty one if the file does
@@ -64,11 +79,18 @@ func Load(dir string) (*Registry, error) {
 		)
 	}
 	now := time.Now().UTC()
-	for _, c := range f.Computers {
+	for _, raw := range f.Computers {
+		var c Computer
+		if err := json.Unmarshal(raw, &c); err != nil {
+			r.unreadable = append(r.unreadable, raw)
+			continue
+		}
 		norm, nerr := c.normalize(now)
 		if nerr != nil {
 			// Skip an unusable row rather than failing the whole registry;
-			// one bad record must not hide the others.
+			// one bad record must not hide the others. Kept verbatim so a
+			// later save writes it back rather than dropping it.
+			r.unreadable = append(r.unreadable, raw)
 			continue
 		}
 		// Preserve stored timestamps: normalize stamps UpdatedAt as a write
@@ -204,16 +226,27 @@ func (r *Registry) Remove(name string) (bool, error) {
 // matching how sessions and jobs persist.
 func (r *Registry) save() error {
 	r.mu.RLock()
-	f := registryFile{Version: registryVersion, Computers: make([]Computer, 0, len(r.byID))}
+	computers := make([]Computer, 0, len(r.byID))
 	for _, c := range r.byID {
-		f.Computers = append(f.Computers, c)
+		computers = append(computers, c)
 	}
+	unreadable := append([]json.RawMessage(nil), r.unreadable...)
 	dir := r.dir
 	r.mu.RUnlock()
 
-	sort.Slice(f.Computers, func(i, j int) bool {
-		return strings.ToLower(f.Computers[i].Name) < strings.ToLower(f.Computers[j].Name)
+	sort.Slice(computers, func(i, j int) bool {
+		return strings.ToLower(computers[i].Name) < strings.ToLower(computers[j].Name)
 	})
+
+	f := registryFile{Version: registryVersion, Computers: make([]json.RawMessage, 0, len(computers)+len(unreadable))}
+	for _, c := range computers {
+		row, err := json.Marshal(c)
+		if err != nil {
+			return fmt.Errorf("computers: marshal %s: %w", c.Name, err)
+		}
+		f.Computers = append(f.Computers, row)
+	}
+	f.Computers = append(f.Computers, unreadable...)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("computers: ensure dir: %w", err)
@@ -222,23 +255,8 @@ func (r *Registry) save() error {
 	if err != nil {
 		return fmt.Errorf("computers: marshal registry: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".registry.*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("computers: create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("computers: write temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("computers: close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, FileName)); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("computers: rename: %w", err)
+	if err := atomicfile.Write(filepath.Join(dir, FileName), data, 0o600, ".registry.*.json.tmp"); err != nil {
+		return fmt.Errorf("computers: %w", err)
 	}
 	return nil
 }

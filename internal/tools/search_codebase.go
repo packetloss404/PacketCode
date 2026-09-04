@@ -299,6 +299,11 @@ func (t *SearchCodebaseTool) searchWithGo(ctx context.Context, pattern, glob str
 				return nil
 			}
 		}
+		// A symlink's target may be outside the root; the ripgrep and
+		// backend engines already refuse them, this one did not.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		// Skip files larger than 1MB to avoid eating binaries.
 		info, infoErr := d.Info()
 		if infoErr != nil || info.Size() > 1024*1024 {

@@ -12,6 +12,7 @@ import (
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -112,8 +113,7 @@ func TestCyclePermissionMode_ReevaluatesVisibleApproval(t *testing.T) {
 	decisionCh := make(chan agent.ApprovalDecision, 1)
 	go func() { decisionCh <- r.app.approver.Approve(ctx, req) }()
 
-	waitPendingApproval(t, r.app.approver)
-	r.app.approval.Show(tool, call)
+	showApprovalWhenPending(t, r.app)
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}) // manual -> accept edits; shell still asks
 	if !r.app.approval.Visible() {
 		t.Fatal("accept-edits should keep a shell approval visible")
@@ -143,8 +143,7 @@ func TestCyclePermissionMode_AdvancesToNextQueuedApproval(t *testing.T) {
 			Tool: writeTool, ToolCall: writeCall, Params: json.RawMessage(writeCall.Arguments),
 		})
 	}()
-	waitPendingApproval(t, r.app.approver)
-	r.app.approval.Show(writeTool, writeCall)
+	showApprovalWhenPending(t, r.app)
 
 	shellTool := tools.NewExecuteCommandTool(r.tmp)
 	shellCall := provider.ToolCall{ID: "shell-2", Name: shellTool.Name(), Arguments: `{"command":"go test ./..."}`}
@@ -154,13 +153,9 @@ func TestCyclePermissionMode_AdvancesToNextQueuedApproval(t *testing.T) {
 			Tool: shellTool, ToolCall: shellCall, Params: json.RawMessage(shellCall.Arguments),
 		})
 	}()
-	deadline := time.Now().Add(time.Second)
-	for len(r.app.approver.pendingCh) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(r.app.approver.pendingCh) == 0 {
-		t.Fatal("second approval did not reach the queue")
-	}
+	testwait.For(t, time.Second, "second approval reached the queue", func() bool {
+		return r.app.approver.QueueDepth() == 2
+	})
 
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}) // manual -> accept edits
 	if decision := waitDecision(t, writeDecision); !decision.Approved {
@@ -173,7 +168,7 @@ func TestCyclePermissionMode_AdvancesToNextQueuedApproval(t *testing.T) {
 		t.Fatalf("next approval was not the queued shell command:\n%s", view)
 	}
 
-	r.app.approver.Resolve(agent.ApprovalDecision{Approved: false, Reason: "test cleanup"})
+	r.app.approver.ResolveID(r.app.approvalID, agent.ApprovalDecision{Approved: false, Reason: "test cleanup"})
 	if decision := waitDecision(t, shellDecision); decision.Approved {
 		t.Fatalf("shell cleanup decision = %+v, want rejected", decision)
 	}

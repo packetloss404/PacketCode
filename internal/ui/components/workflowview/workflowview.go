@@ -613,10 +613,12 @@ func providerLabel(provider, model string) string {
 }
 
 func jobMessage(j jobspkg.Snapshot) string {
-	if j.NeedsApproval {
+	// Through the same accessors Agent View uses, so the two panes cannot
+	// drift on what "needs input" means once a job can ask a question.
+	if j.AwaitingApproval() {
 		return "needs approval: " + nonEmpty(j.LastMessage, j.Prompt)
 	}
-	if j.NeedsInput {
+	if j.AwaitingAnswer() {
 		return "needs input: " + nonEmpty(j.LastMessage, j.Prompt)
 	}
 	if strings.EqualFold(strings.TrimSpace(j.LastMessage), "started") && j.Prompt != "" {

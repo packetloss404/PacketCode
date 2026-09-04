@@ -564,3 +564,67 @@ func TestProvider_ChatCompletion_NoCachedContentStaysZero(t *testing.T) {
 	assert.Equal(t, 7, usage.InputTokens)
 	assert.Equal(t, 0, usage.CacheReadInputTokens)
 }
+
+// A safety block used to end as EventDone with no parts: a finished turn
+// with nothing in it and no explanation. It is an error, like every other
+// finish reason under which the candidate is not the model's answer.
+func TestProvider_ChatCompletion_SafetyFinishErrors(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY","index":0}]}`,
+		``,
+	}, "\n\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hello"}},
+	})
+	require.NoError(t, err)
+
+	var gotErr error
+	var done bool
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventError:
+			gotErr = ev.Error
+		case provider.EventDone:
+			done = true
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "SAFETY")
+	assert.False(t, done)
+}
+
+// A prompt-level block arrives with promptFeedback and no candidates at all.
+func TestProvider_ChatCompletion_PromptBlockErrors(t *testing.T) {
+	stream := "data: {\"promptFeedback\":{\"blockReason\":\"PROHIBITED_CONTENT\"}}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "k")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    "gemini-2.5-pro",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hello"}},
+	})
+	require.NoError(t, err)
+
+	var gotErr error
+	for ev := range ch {
+		if ev.Type == provider.EventError {
+			gotErr = ev.Error
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "PROHIBITED_CONTENT")
+}

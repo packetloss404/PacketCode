@@ -35,9 +35,21 @@ packetcode --permission-mode auto
 packetcode --trust
 packetcode doctor
 packetcode doctor --json
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode skills list
+packetcode acp
+packetcode sugar login
 ```
 
 `--provider` requires an already-configured provider, except keyless Codex/Ollama. Use `Ctrl+P`, `/provider`, or `/provider add <slug>` to add a hosted provider key.
+The default invocation opens the TUI; `run`, `doctor`, `skills`, `acp`, and
+`sugar` are the other public command families.
+
+`packetcode run [--provider NAME] [--model MODEL] [--permission-mode MODE]
+[--resume ID] [--json] <prompt...>` runs one headless turn. It does not read a
+prompt from stdin. Approval requests fail closed with exit 3; cancellation exits
+130. Plain stdout contains only the final response, while JSON returns one
+versioned object with identity, output, elapsed time, usage, and any error.
 
 ## Everyday Keys
 

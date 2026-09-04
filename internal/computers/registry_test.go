@@ -319,3 +319,35 @@ func TestReachable(t *testing.T) {
 	assert.False(t, Computer{Kind: KindManaged}.Reachable(),
 		"managed computers cannot be reached until provisioning exists")
 }
+
+// A row this build cannot read is a row a newer build wrote, or one a
+// person edited by hand. Either way, editing a different computer must not
+// delete it from disk -- that would be silent data loss in a file the user
+// did not touch, the failure the compat contract exists to prevent.
+func TestSave_PreservesRowsThisBuildCannotRead(t *testing.T) {
+	dir := t.TempDir()
+	newerRow := `{"id":"pc_future","name":"future","kind":"hologram","future_field":{"nested":true}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, FileName), []byte(`{"version":1,"computers":[`+newerRow+`]}`), 0o600))
+
+	r, err := Load(dir)
+	require.NoError(t, err)
+	assert.Empty(t, r.List(), "an unreadable row is not listed")
+	assert.Equal(t, 1, r.Unreadable())
+
+	_, err = r.Upsert(Computer{
+		Name: "laptop", Kind: KindSSH, SSHHost: "laptop.local", SSHUser: "ian", SSHPort: 22,
+		ProjectRoots: []string{"/home/ian/src"},
+	})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"pc_future"`)
+	assert.Contains(t, string(data), `"future_field"`)
+	assert.Contains(t, string(data), `"laptop"`)
+
+	reloaded, err := Load(dir)
+	require.NoError(t, err)
+	require.Len(t, reloaded.List(), 1)
+	assert.Equal(t, 1, reloaded.Unreadable())
+}

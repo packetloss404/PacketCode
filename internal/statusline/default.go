@@ -37,11 +37,9 @@ func RenderDefaultWidth(s Snapshot, width int) string {
 	}
 
 	selected := map[int]bool{0: true}
-	critical := make([]int, 0, 2)
 	for i := 1; i < len(segments); i++ {
 		if segments[i].priority >= 80 {
 			selected[i] = true
-			critical = append(critical, i)
 		}
 	}
 

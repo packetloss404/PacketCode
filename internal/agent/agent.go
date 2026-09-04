@@ -91,6 +91,17 @@ type Agent struct {
 	sugarCache    SugarCacheConfig
 	conduitShadow ConduitShadowConfig
 	loopDetection LoopDetectionConfig
+	toolOutput    ToolOutputStore
+}
+
+// ToolOutputStore bounds what a single tool result contributes to model
+// context. *toolout.Store implements it; the agent keeps the dependency as an
+// interface so the loop is testable without touching disk.
+type ToolOutputStore interface {
+	// Capture returns the model-facing text for a tool result and whether it
+	// was replaced by a bounded excerpt. Implementations must return content
+	// unchanged (and false) when it is already within the limit.
+	Capture(toolName, content string) (string, bool)
 }
 
 // Config bundles the agent's required dependencies.
@@ -107,6 +118,10 @@ type Config struct {
 	SugarCache    SugarCacheConfig
 	ConduitShadow ConduitShadowConfig
 	LoopDetection LoopDetectionConfig // zero value enables detection with the defaults
+	// ToolOutput bounds oversized tool results at the one chokepoint every
+	// native, MCP, and skill result passes through. Nil leaves results
+	// untouched, which is the pre-existing behavior.
+	ToolOutput ToolOutputStore
 }
 
 // New constructs an Agent. Approver defaults to AutoReject if omitted —
@@ -140,6 +155,7 @@ func New(cfg Config) *Agent {
 		sugarCache:    cfg.SugarCache,
 		conduitShadow: cfg.ConduitShadow,
 		loopDetection: cfg.LoopDetection,
+		toolOutput:    cfg.ToolOutput,
 	}
 }
 
@@ -551,13 +567,33 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 	}
 	events <- AgentEvent{Type: EventToolCallExecuted, ToolCall: executedCall, ToolResult: res}
 	shadow.toolResult(ctx, executedCall, res)
+	// This is the one place every tool result — native, MCP, or skill —
+	// becomes a message, so it is the only place a cap holds for all of them.
+	// Per-tool caps drift and MCP has none; capping here also means the UI and
+	// the session file keep the full Content while only the model-facing
+	// projection is bounded.
+	modelContent := ""
+	if excerpt, capped := a.captureToolOutput(call.Name, res.Content); capped {
+		modelContent = excerpt
+	}
 	return toolObservation{name: call.Name, arguments: executedCall.Arguments, content: res.Content},
 		a.session.AddMessage(provider.Message{
-			Role:       provider.RoleTool,
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Content:    res.Content,
+			Role:         provider.RoleTool,
+			ToolCallID:   call.ID,
+			Name:         call.Name,
+			Content:      res.Content,
+			ModelContent: modelContent,
 		})
+}
+
+// captureToolOutput spills oversized output and returns the bounded excerpt the
+// model should see. With no store configured the result passes through
+// untouched and the session layer's projection remains the only bound.
+func (a *Agent) captureToolOutput(toolName, content string) (string, bool) {
+	if a.toolOutput == nil {
+		return content, false
+	}
+	return a.toolOutput.Capture(toolName, content)
 }
 
 // rejected records a refusal as the tool-role message the LLM sees and reports

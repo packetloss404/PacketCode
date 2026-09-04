@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/toolout"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -71,7 +72,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	}
 
 	m.markRunning(j)
-	jobRoot := m.cfg.Root
+	var jobRoot string
 	if j.ComputerID != "" {
 		var backendErr error
 		runtimeBackend, backendErr = m.prepareRemoteBackend(jobCtx, j)
@@ -111,6 +112,20 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 		jobRoot = worktree.Root
 		if jobRoot == "" {
 			jobRoot = m.cfg.Root
+		}
+		if binding, ok := m.verifyRootFor(j.ID); ok && !j.AllowWrite {
+			// A verifier rooted at the project tree can only re-read code the
+			// work agent never touched, so a "pass" would attest to nothing
+			// but the work agent's own summary. Point it at the candidate
+			// worktree instead, re-validating first: this job may have been
+			// queued for a while, and a root that no longer checks out must
+			// fail the verifier rather than quietly verify the wrong tree.
+			if err := m.validateLocalVerifyRoot(binding.Root); err != nil {
+				m.markTerminal(j, StateFailed, "", "verifier root unusable: "+err.Error(), "",
+					j.InputTokens, j.OutputTokens, j.CostUSD, nil, nil)
+				return
+			}
+			jobRoot = binding.Root
 		}
 	}
 
@@ -172,6 +187,18 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 	// share one store: that is what lets Agent View show a background agent's
 	// plan while it works, instead of only after it finishes.
 	extraTools = append(extraTools, tools.NewTodoWriteTool(j.todos))
+	// One spill store per job, for the same reason the todo store is per job:
+	// a background agent must not be able to read -- or evict -- the output
+	// the foreground session captured. A store that will not open is left nil,
+	// which the agent and the tool both read as "no spilling"; a job that
+	// cannot spill is worse off than one that can, but not a job that should
+	// refuse to run.
+	var outputStore *toolout.Store
+	if store, storeErr := toolout.OpenDefault(toolout.Options{}); storeErr == nil {
+		outputStore = store
+		defer store.Close()
+	}
+	extraTools = append(extraTools, tools.NewReadToolOutputTool(outputStore))
 	toolReg := m.buildJobToolRegistryForBackend(j.Depth, j.AllowWrite, j.ID, backups, extraTools, runtimeBackend, jobRoot)
 
 	systemPrompt := req.SystemPrompt
@@ -201,6 +228,7 @@ func (m *Manager) runJob(j *Job, req SpawnRequest, jobCtx context.Context) {
 		TokenBudget:   m.cfg.TokenBudget,
 		SugarCache:    m.cfg.SugarCache,
 		ConduitShadow: m.cfg.ConduitShadow,
+		ToolOutput:    jobToolOutput(outputStore),
 	})
 
 	events := a.Run(jobCtx, j.Prompt)
@@ -383,12 +411,13 @@ func (m *Manager) applyUsage(j *Job, usage provider.Usage) {
 		// carried an independent copy of the same wrong formula, so fixing one
 		// would have left background agents still overstating.
 		//
-		// PricingFor yields only the two headline rates and there is no
-		// provider handle here, so the package defaults apply. They are right
-		// for OpenAI and for Anthropic reads.
+		read, write := provider.CacheReadMultiplier, provider.CacheWriteMultiplier
+		if m.cfg.CacheRatesFor != nil {
+			read, write = m.cfg.CacheRatesFor(j.Provider, j.Model)
+		}
 		j.CostUSD = provider.EstimateCost(
 			j.InputTokens, j.OutputTokens, j.CacheReadTokens, j.CacheCreationTokens,
-			in, out, provider.CacheReadMultiplier, provider.CacheWriteMultiplier)
+			in, out, read, write)
 	}
 	m.stampSnapshotLocked(j, time.Now().UTC(), "", "", j.NeedsInput, j.NeedsApproval)
 	subs := snapshotCallbacks(m.subscribers)
@@ -459,4 +488,14 @@ func summarise(text string) string {
 	}
 	out := strings.TrimRight(t[:cut], " \t\n")
 	return out + "…"
+}
+
+// jobToolOutput converts the job's spill store to the agent's interface
+// without handing it a non-nil interface wrapping a nil pointer, which is how
+// a "no store configured" check silently stops working.
+func jobToolOutput(store *toolout.Store) agent.ToolOutputStore {
+	if store == nil {
+		return nil
+	}
+	return store
 }

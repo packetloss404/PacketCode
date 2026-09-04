@@ -25,7 +25,7 @@ Jobs are grouped into Needs Input, Working, Completed, Failed, and Cancelled. Ro
 | `x` | Ignore a completed result. |
 | Esc | Clear draft or return to chat. |
 
-Live snapshots use monotonic sequence numbers so stale asynchronous updates do not overwrite newer activity.
+Live snapshots use monotonic sequence numbers so stale asynchronous updates do not overwrite newer activity. Each job owns a bounded `todo_write` list; its row shows completed/total items and the current in-progress (or next pending) item. The list persists with the job record, so an abandoned run retains the plan it was working through.
 
 ## Result Lifecycle
 

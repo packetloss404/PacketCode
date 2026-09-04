@@ -322,3 +322,59 @@ func TestProvider_MessageDeltaKeepsCacheInsideInputTokens(t *testing.T) {
 		t.Fatalf("OutputTokens = %d, want 4 (the delta's value)", got.OutputTokens)
 	}
 }
+
+// A reply cut off by max_tokens is not a finished reply. Before stop_reason
+// was read, a tool call truncated mid-JSON surfaced as "arguments are invalid
+// JSON" and truncated prose was persisted as complete.
+func TestProvider_ChatCompletion_MaxTokensStopIsAnError(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"write_file","input":{}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"big.go\",\"content\":\"package"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":8192}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	p := NewWithBaseURL(server.URL, "sk-ant-test")
+	ch, err := p.ChatCompletion(context.Background(), provider.ChatRequest{
+		Model:    DefaultModel,
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "write a big file"}},
+	})
+	require.NoError(t, err)
+
+	var gotErr error
+	var done bool
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventError:
+			gotErr = ev.Error
+		case provider.EventDone:
+			done = true
+		}
+	}
+	require.Error(t, gotErr)
+	assert.Contains(t, gotErr.Error(), "max_tokens")
+	assert.Contains(t, gotErr.Error(), "tool call")
+	assert.False(t, done, "a truncated reply must not also be reported as done")
+}
+
+// end_turn is the normal case and must stay silent.
+func TestStopReasonError_EndTurnIsNotAnError(t *testing.T) {
+	assert.NoError(t, stopReasonError("end_turn", false))
+	assert.NoError(t, stopReasonError("tool_use", true))
+	assert.NoError(t, stopReasonError("", false))
+	assert.Error(t, stopReasonError("refusal", false))
+}

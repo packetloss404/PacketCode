@@ -1,10 +1,13 @@
 # Packetcode Maintainer Handoff
 
-Updated: 2026-08-01
+Updated: 2026-08-31
 
-Handoff baseline: PCH5 was published to `main` at `2a9e32d` (`Close remote MCP
-trust design gate`); this handoff also records the bounded TUI evidence and
-interaction pass. Use the current `git log` below for the post-publication tip.
+Audit baseline: `main` and `origin/main` began at `d646094` (`Merge
+fix/help-lists-commands: help names what dispatch runs`), version
+`v0.5.1-127-gd646094`. This handoff also describes the integrated headless-run
+and shared-runtime work after that baseline; use the current log for its final
+commit identity. This is a capability/priority handoff, not a substitute for
+Git.
 
 This file is the quickest way to resume Packetcode work without reconstructing
 the repository's recent history. Read it together with [README.md](README.md),
@@ -23,6 +26,12 @@ Code-inspired Bubble Tea TUI. It supports multiple hosted and local providers,
 OpenAI Codex subscription authentication, permission-gated native tools,
 foreground sessions, background agents, isolated write worktrees, workflows,
 loops, MCP servers, hooks, themes, and native/custom statuslines.
+
+The executable exposes `run`, `doctor`, `skills`, `acp`, and `sugar` command
+families. `run` is the headless one-turn path for automation and benchmarks; it
+removes the requirement for a benchmark client to speak ACP and therefore
+provides a direct engine baseline without protocol lifecycle/permission round
+trips.
 
 The current `main` branch includes the recent interaction-polish and
 hardening pass:
@@ -87,6 +96,44 @@ The 2026-08-01 pass added:
   later deny can still revoke them. Mode transitions advance queued approvals,
   `/trust off` is a no-op when already off and otherwise preserves session
   rules, and remembered background rules use the unannotated tool name.
+
+The August 14–31 passes materially changed the product and supersede the old
+"Bubble Tea v2 next" recommendation:
+
+- Cached-input counts now flow through providers, sessions, `/cost`, jobs, and
+  statusline JSON, and cost estimation discounts cache reads instead of billing
+  all input at the fresh-token rate.
+- The shared agent loop has bounded no-progress detection, a bounded HTTP(S)
+  `fetch` tool with post-DNS SSRF enforcement and untrusted-evidence framing,
+  and per-session `todo_write`; background plans persist and appear in Agent
+  View.
+- Skills grew from five builtins into user/project/foreign discovery,
+  user/model invocation controls, resource loading, bounded trusted
+  `allowed-tools`, CLI management, and explicit notes for unsupported dynamic
+  syntax.
+- Local command teardown now reports structured kill evidence. POSIX
+  process-group release and Windows Job Objects are covered; MCP process release
+  uses the same containment primitives, while SSH teardown is still explicitly
+  unconfirmed.
+- ACP gained saved-session, model, usage, permission, MCP, project-file, and
+  Markdown prompt-command extensions plus explicit close. Skills reach ACP
+  agents through the shared index/tool path, though user-invocable skills are
+  not yet in its command catalogue.
+- Release archives are signed/attested and dry-run in CI; on-disk formats have
+  an executable compatibility contract; config reports unknown/newer fields;
+  and session/job publication is fsync-backed.
+- `packetcode --help` now names all five command families and shares one command
+  table with dispatch. Help requests exit successfully.
+- `packetcode run` executes one non-interactive turn through runtime
+  construction shared with the TUI and ACP. It supports provider/model,
+  permission-mode, session resume, and versioned JSON; unavailable approval
+  fails closed with exit 3 and cancellation exits 130. Plain stdout is only the
+  sanitized final response.
+- The controlled [`run` versus ACP benchmark](docs/benchmarks/run-vs-acp-2026-09-01.md)
+  matched output, provider/tool calls, token counts, and zero approvals. Median
+  end-to-end time was 4.152 s for `run` and 4.027 s for ACP; provider variance
+  exceeded the 3% path difference. ACP setup was about 79 ms, so there is no
+  measured protocol or permission penalty to optimize.
 
 ## Start Here
 
@@ -169,10 +216,15 @@ material changes.
 
 ## Architecture Map
 
-The primary runtime wiring is in `cmd/packetcode/main.go`. Important packages:
+The TUI entry wiring is in `cmd/packetcode/main.go`, ACP in
+`cmd/packetcode/acp.go`, and headless execution in
+`cmd/packetcode/run_command.go`. Their provider/session/tool/policy/MCP setup is
+centralized in `cmd/packetcode/runtime.go`; TUI-only remote computer, jobs,
+workflows, and presentation layers remain above it. Important packages:
 
 | Area | Location | Responsibility |
 | --- | --- | --- |
+| Shared runtime | `cmd/packetcode/runtime.go` | Provider/session/tool/policy/MCP construction shared by TUI, ACP, and headless run. |
 | TUI orchestration | `internal/app` | Bubble Tea state, input routing, slash commands, provider/model switching, sessions, approvals, jobs, and workflows. |
 | Foreground agent | `internal/agent` | Provider/tool loop, approvals, cancellation, context estimation, and compaction. |
 | Providers | `internal/provider` | Provider contract, registry, model metadata, streaming events, Codex auth/Responses behavior, and hosted/local adapters. |
@@ -184,6 +236,7 @@ The primary runtime wiring is in `cmd/packetcode/main.go`. Important packages:
 | Persistence | `internal/session`, `internal/config`, `internal/cost` | Sessions, backups, user paths/configuration, and usage/cost tallies. |
 | TUI components | `internal/ui/components` | Conversation, input, topbar, approvals, pickers, Agent View, workflow view, and transcripts. |
 | Display safety | `internal/ui/terminaltext` | Stateful sanitization of untrusted terminal text. |
+| Tool output spill | `internal/toolout` | Per-session store that caps oversized tool results at the agent chokepoint and serves the remainder through opaque handles. |
 
 The foreground App owns visible state. Provider streams, background jobs, and
 workflow updates enter it through Bubble Tea messages. Finalized messages are
@@ -201,6 +254,7 @@ User state is under `~/.packetcode/`:
 | `jobs/` | Persisted job snapshots and artifact metadata. |
 | `worktrees/` | Isolated checkouts for write-capable jobs. |
 | `commands/` | User prompt commands. |
+| `skills/` | User Agent Skills in packetcode's native layout. |
 | `workflows/` | User workflow definitions. |
 | `theme.toml` | Optional semantic colors. |
 | `cost-tally.json` | Persisted usage and cost data. |
@@ -278,23 +332,18 @@ For documentation changes, check:
 The authoritative queue is [BACKLOG.md](BACKLOG.md). The highest-leverage next
 steps are:
 
-1. Execute the Bubble Tea v2 migration for enhanced keyboard reporting and
-   synchronized output against the committed golden/protocol contract.
-2. Add golden fixtures for very tall approval/tool blocks and a native ConPTY
-   evidence lane when a credential-free harness is available.
-3. Add end-to-end smoke coverage for first-run setup, provider switching,
-   session resume, approvals, agents, workflows, and MCP.
-4. Improve cancellation-drain visibility and add transcript search/jump-to-
-   latest.
-5. If Streamable HTTP MCP is selected, implement it only against
-   `packetcode-mcp-http-trust-v1` and its adversarial integration matrix;
-   independently, add explicit workflow pipeline stages and a broader
-   versioned example library.
-6. Add safe worktree apply/merge assistance and explicit cleanup commands.
-7. Continue context/cost work: provider-native counting where stable, bounded
-   model-facing output caps, cached-input telemetry, and opaque Codex reasoning
-   continuity when required by the backend.
-8. Continue the PacketADE/BridgeCode ledger from
+1. Add broader end-to-end smoke coverage for first-run setup, provider
+   switching, session resume, approvals, agents, workflows, and MCP. The run
+   command already has contract tests and build/CI help smoke coverage.
+2. Return to the Bubble Tea v2 migration for enhanced key reporting and
+   synchronized output against the committed golden/protocol contract; add tall
+   approval/tool fixtures and a native ConPTY evidence lane alongside it.
+3. Continue other v1 readiness work: provider catalogue freshness, opt-in live
+   contract tests, and bounded model-facing output storage.
+4. If Streamable HTTP MCP is selected, implement it only against
+   `packetcode-mcp-http-trust-v1`; independently, add workflow pipeline stages,
+   safe worktree apply/cleanup assistance, and transcript search/jump-to-latest.
+5. Continue the PacketADE/BridgeCode ledger from
    [docs/bridgecode-feature-truth-2026-07-27.md](docs/bridgecode-feature-truth-2026-07-27.md)
    and
    [docs/bridgecode-plus-hardening-loop-2026-07-27.md](docs/bridgecode-plus-hardening-loop-2026-07-27.md).
@@ -316,5 +365,7 @@ tests and a short changelog entry.
 8. Run the verification baseline before publishing.
 ```
 
-At the start of this TUI loop, `main` and `origin/main` were clean at
-`2a9e32d`. Check the current branch, log, and working tree before resuming.
+This reconciliation started from `main`/`origin/main` at `d646094` and includes
+the integrated shared-runtime/headless-run work that followed. Check the current
+branch, log, and working tree for the published tip before resuming; do not
+discard unrelated or parallel edits to make the checkout look clean.

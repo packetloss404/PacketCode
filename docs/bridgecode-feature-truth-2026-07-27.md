@@ -3,6 +3,12 @@
 Date: 2026-07-27
 Updated: 2026-08-01
 
+> **Historical audit.** Feature-status statements below are preserved as the
+> evidence recorded on those dates. Cache-input telemetry and several later
+> agent/tool hardening items have since shipped; use
+> [BACKLOG.md](../BACKLOG.md) and [CHANGELOG.md](../CHANGELOG.md) for current
+> status.
+
 This is an implementation audit, not a parity claim. BridgeCode is no longer an
 active BridgeSpace integration; it is useful only as a historical terminal-agent
 workflow benchmark. PacketCode's current bar is evidence-backed terminal-native

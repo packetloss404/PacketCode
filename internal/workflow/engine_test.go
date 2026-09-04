@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,6 +69,31 @@ func (f *fakeProvider) ChatCompletion(ctx context.Context, req provider.ChatRequ
 				return
 			}
 			<-ctx.Done()
+			return
+		}
+		// The worktree pair: a write agent that changes a file, and a verifier
+		// that reads that file for itself instead of trusting the summary.
+		if strings.Contains(prompt, "WRITE_CANDIDATE") {
+			if countToolMessages(req) == 0 {
+				emitToolCall(ch, "write_file", `{"path":"candidate.txt","content":"candidate content"}`)
+				return
+			}
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: "wrote the candidate change"}
+			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 5, OutputTokens: 2}}
+			return
+		}
+		if strings.Contains(prompt, "VERIFY_WORKTREE") {
+			atomic.AddInt32(&f.verifierRuns, 1)
+			if countToolMessages(req) == 0 {
+				emitToolCall(ch, "read_file", `{"path":"candidate.txt"}`)
+				return
+			}
+			verdict := `<packetcode-workflow-verdict>{"version":1,"verdict":"fail","reason":"could not read the change"}</packetcode-workflow-verdict>`
+			if strings.Contains(lastToolMessage(req), "candidate content") {
+				verdict = `<packetcode-workflow-verdict>{"version":1,"verdict":"pass","reason":"read the change in the worktree"}</packetcode-workflow-verdict>`
+			}
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, TextDelta: verdict}
+			ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 5, OutputTokens: 2}}
 			return
 		}
 		if strings.Contains(prompt, "VERIFY_") {
@@ -807,4 +834,114 @@ func TestEngine_AbandonedAgentFailsRun(t *testing.T) {
 	require.Contains(t, snap.Err, "abandoned")
 	require.Contains(t, snap.Err, string(jobs.AbandonCauseAppExit))
 	require.Equal(t, jobs.StateAbandoned, mgr.List()[0].State)
+}
+
+func emitToolCall(ch chan provider.StreamEvent, name, args string) {
+	ch <- provider.StreamEvent{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: name}}
+	ch <- provider.StreamEvent{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: args}}
+	ch <- provider.StreamEvent{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}}
+}
+
+func countToolMessages(req provider.ChatRequest) int {
+	n := 0
+	for _, m := range req.Messages {
+		if m.Role == provider.RoleTool {
+			n++
+		}
+	}
+	return n
+}
+
+func lastToolMessage(req provider.ChatRequest) string {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == provider.RoleTool {
+			return req.Messages[i].Content
+		}
+	}
+	return ""
+}
+
+func initWorkflowGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "packetcode-test@example.com"},
+		{"config", "user.name", "Packetcode Test"},
+	} {
+		runWorkflowGit(t, root, args...)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("base\n"), 0o644))
+	runWorkflowGit(t, root, "add", "README.md")
+	runWorkflowGit(t, root, "commit", "-m", "initial")
+	return root
+}
+
+func runWorkflowGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+}
+
+// A verifier that cannot open the work agent's worktree can only re-read the
+// project tree, where the change does not exist: its "pass" would attest to
+// the work agent's summary and nothing else. Here the verdict is produced by
+// actually reading the changed file.
+func TestEngine_VerifierReadsTheWorkWorktree(t *testing.T) {
+	prov := &fakeProvider{}
+	root := initWorkflowGitRepo(t)
+	mgr := newTestManager(t, prov, func(cfg *jobs.Config) {
+		cfg.Root = root
+		cfg.WorktreesDir = t.TempDir()
+		cfg.Tools = workflowToolRegistry(root)
+	})
+	e := NewEngine(mgr)
+	wf := Workflow{
+		SchemaVersion: CurrentSchemaVersion,
+		Name:          "verified-write",
+		Phases: []Phase{{Name: "p", Steps: []Step{{
+			Name:  "work",
+			Mode:  StepSingle,
+			Agent: AgentSpec{Prompt: "WRITE_CANDIDATE", AllowWrite: true},
+			Verify: &VerifySpec{
+				Prompt:       "VERIFY_WORKTREE",
+				Provider:     "fake",
+				Model:        "fake-model",
+				PassContract: PassContractV1,
+			},
+		}}}},
+	}
+
+	run, err := e.Start(context.Background(), wf)
+	require.NoError(t, err)
+	snap := waitRun(t, e, run.ID, RunCompleted, 90*time.Second)
+	step := snap.Phases[0].Steps[0]
+	require.Equal(t, VerificationPassed, step.Verification, step.VerifyReason)
+	require.Equal(t, "read the change in the worktree", step.VerifyReason)
+
+	// The verifier is told which tree it is looking at, so it does not report
+	// on the project checkout believing it saw the change.
+	var workID, verifierPrompt string
+	for _, job := range mgr.List() {
+		if job.WorktreePath != "" {
+			workID = job.ID
+		}
+		if strings.Contains(job.Prompt, "VERIFY_WORKTREE") {
+			verifierPrompt = job.Prompt
+		}
+	}
+	require.NotEmpty(t, workID)
+	require.Contains(t, verifierPrompt, "isolated git worktree background job "+workID)
+}
+
+func workflowToolRegistry(root string) *tools.Registry {
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewReadFileTool(root))
+	reg.Register(tools.NewWriteFileTool(root, nil))
+	return reg
 }

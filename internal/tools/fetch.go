@@ -661,6 +661,13 @@ func htmlToText(src string, base *url.URL) string {
 		}
 		name, attrs, next, ok := scanTag(src, i)
 		if !ok {
+			if next < 0 {
+				// A tag that never closes: the scan already reached the end
+				// of the document. Retrying from every later '<' made a page
+				// of `<a "` quadratic -- about 48 s of CPU at the body cap.
+				w.text(src[i:])
+				break
+			}
 			w.text(src[i : i+1])
 			i++
 			continue
@@ -770,7 +777,9 @@ func extractTitle(src string) string {
 }
 
 // scanTag reads one tag starting at src[start] == '<'. It tracks quotes so an
-// attribute value containing '>' does not end the tag early.
+// attribute value containing '>' does not end the tag early. A '<' that does
+// not begin a tag returns ok=false with next=0; a tag that begins but never
+// closes returns ok=false with next=-1, so the caller can stop scanning.
 func scanTag(src string, start int) (name, attrs string, next int, ok bool) {
 	i := start + 1
 	if i >= len(src) {
@@ -803,7 +812,7 @@ func scanTag(src string, start int) (name, attrs string, next int, ok bool) {
 		}
 		i++
 	}
-	return "", "", 0, false
+	return "", "", -1, false
 }
 
 func isTagNameByte(c byte) bool {

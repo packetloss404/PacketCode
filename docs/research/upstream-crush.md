@@ -3,6 +3,12 @@
 Source: [`charmbracelet/crush`](https://github.com/charmbracelet/crush) — "Glamourous agentic coding for all."
 Reviewed: 2026-08-14, against `main` (tree read at 1,098 files; 27.4k stars).
 
+> **Point-in-time research.** Packetcode implementation-status statements in
+> this document describe the 2026-08-14 tree. Several cited gaps have since
+> shipped; use [BACKLOG.md](../../BACKLOG.md) for current work and the
+> [adoption plan](upstream-adoption-plan.md) for its supersession note. The
+> clean-room evidence below is intentionally unchanged.
+
 **Status of this document.** This is a clean-room specification. It records
 *what crush does and why*, in enough detail that packetcode can implement the same
 capability from this document alone, without crush's source open. Nothing here is

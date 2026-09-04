@@ -413,6 +413,9 @@ type streamEvent struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
 		PartialJSON string `json:"partial_json"`
+		// StopReason arrives on message_delta: "end_turn", "tool_use",
+		// "max_tokens", "stop_sequence", or "refusal".
+		StopReason string `json:"stop_reason"`
 	} `json:"delta,omitempty"`
 	Message *struct {
 		Usage *anthropicUsage `json:"usage"`
@@ -429,6 +432,24 @@ type anthropicUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// stopReasonError turns a terminal stop reason that means "this reply is not
+// what the model meant to say" into an error, matching the openaicompat,
+// ollama, and responses adapters. toolOpen reports whether a tool_use block
+// was still being streamed, which is the case where a cut-off is most
+// damaging: the partial JSON would otherwise be handed to the tool.
+func stopReasonError(reason string, toolOpen bool) error {
+	switch reason {
+	case "max_tokens":
+		if toolOpen {
+			return fmt.Errorf("response truncated at max_tokens (%d) while streaming a tool call; the call was not executed", defaultMaxTokens)
+		}
+		return fmt.Errorf("response truncated at max_tokens (%d)", defaultMaxTokens)
+	case "refusal":
+		return fmt.Errorf("anthropic declined to continue this response (stop_reason refusal)")
+	}
+	return nil
 }
 
 type activeToolBlock struct {
@@ -457,6 +478,11 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 	// silently breaking the subset invariant the rest of the chain assumes.
 	var rawUsage *anthropicUsage
 	var dataLines []string
+	// The stop reason is the only way to tell a finished reply from one the
+	// output cap cut off. Without it a truncated tool call surfaced as
+	// "arguments are invalid JSON" and truncated prose as a complete answer;
+	// every other adapter already maps its equivalent to an error.
+	var stopReason string
 
 	flush := func() bool {
 		if len(dataLines) == 0 {
@@ -485,6 +511,9 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 		}
 		if ev.Usage != nil {
 			rawUsage = mergeAnthropicUsage(rawUsage, ev.Usage)
+		}
+		if ev.Delta != nil && ev.Delta.StopReason != "" {
+			stopReason = ev.Delta.StopReason
 		}
 		switch ev.Type {
 		case "content_block_start":
@@ -542,6 +571,10 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 				delete(tools, ev.Index)
 			}
 		case "message_stop":
+			if err := stopReasonError(stopReason, len(tools) > 0); err != nil {
+				sink.Send(provider.StreamEvent{Type: provider.EventError, Error: err, Usage: toProviderUsage(rawUsage)})
+				return false
+			}
 			if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}) {
 				return false
 			}

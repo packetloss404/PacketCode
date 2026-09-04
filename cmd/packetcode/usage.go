@@ -35,6 +35,12 @@ type subcommand struct {
 func subcommands() []subcommand {
 	return []subcommand{
 		{
+			name:    "run",
+			args:    "[flags] <prompt...>",
+			summary: "run one non-interactive agent turn and print the final response",
+			run:     func(a []string, o, e io.Writer) int { return runRunCommand(a, o, e) },
+		},
+		{
 			name:    "doctor",
 			args:    "[--json] [--check SECTION]",
 			summary: "check configuration, providers, MCP servers and stored state",
@@ -157,4 +163,35 @@ func wantsTopLevelHelp(args []string) bool {
 		return true
 	}
 	return false
+}
+
+// rejectTopLevelFlagsBeforeSubcommand prevents a successfully parsed global
+// flag from being silently discarded when a command owns its own FlagSet.
+// Besides being surprising for provider/model flags, that is unsafe for a
+// permission flag: an explicit read-only request must not fall back to a more
+// permissive saved profile merely because it appeared before the command.
+func rejectTopLevelFlagsBeforeSubcommand(fs *flag.FlagSet, args []string, w io.Writer) bool {
+	if fs == nil || len(args) == 0 {
+		return false
+	}
+	command := ""
+	for _, candidate := range subcommands() {
+		if args[0] == candidate.name {
+			command = candidate.name
+			break
+		}
+	}
+	if command == "" {
+		return false
+	}
+	var names []string
+	fs.Visit(func(f *flag.Flag) {
+		names = append(names, "--"+f.Name)
+	})
+	if len(names) == 0 {
+		return false
+	}
+	fmt.Fprintf(w, "packetcode %s: top-level flag(s) %s cannot precede a subcommand; use 'packetcode %s --help' and pass only supported command flags after %s\n",
+		command, strings.Join(names, ", "), command, command)
+	return true
 }

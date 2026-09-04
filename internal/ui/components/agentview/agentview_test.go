@@ -446,3 +446,40 @@ func TestRender_ShowsABackgroundAgentsPlan(t *testing.T) {
 		t.Fatalf("Agent View should name the live item:\n%s", out)
 	}
 }
+
+// TestAgentView_DistinguishesQuestionFromApproval: a job blocked on a tool
+// approval sets both jobs.Snapshot bits, so the view has to derive the two
+// states rather than read them. Without that, an agent with a question for the
+// user is indistinguishable from one waiting on a y/n permission decision.
+func TestAgentView_DistinguishesQuestionFromApproval(t *testing.T) {
+	now := time.Now()
+	approving := jobspkg.Snapshot{
+		ID: "appr1111", Provider: "gemini", Model: "gemini-2.5-flash",
+		State: jobspkg.StateRunning, CreatedAt: now, Prompt: "patch files",
+		LastMessage: "patch_file", NeedsInput: true, NeedsApproval: true,
+	}
+	asking := jobspkg.Snapshot{
+		ID: "ask22222", Provider: "gemini", Model: "gemini-2.5-flash",
+		State: jobspkg.StateRunning, CreatedAt: now, Prompt: "which branch?",
+		LastMessage: "which branch should I target?", NeedsInput: true,
+	}
+
+	gotApproving := fromSnapshot(approving)
+	require.True(t, gotApproving.NeedsApproval)
+	require.False(t, gotApproving.NeedsInput, "an approval must not also read as a question")
+	require.True(t, gotApproving.Blocked())
+
+	gotAsking := fromSnapshot(asking)
+	require.True(t, gotAsking.NeedsInput)
+	require.False(t, gotAsking.NeedsApproval)
+	require.True(t, gotAsking.Blocked())
+
+	m := New()
+	m.Resize(120, 30)
+	m.Show([]Job{gotApproving, gotAsking})
+	out := ansi.Strip(m.View())
+	assert.Contains(t, out, "needs approval: patch_file")
+	assert.Contains(t, out, "needs input: which branch should I target?")
+	// Both still wait in the same section: either way a human is the blocker.
+	assert.Contains(t, out, "Needs input")
+}

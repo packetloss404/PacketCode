@@ -3,6 +3,7 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,23 +38,10 @@ func writeInitialSubSession(sessionsDir string, j *Job) error {
 		return fmt.Errorf("subsession: marshal: %w", err)
 	}
 	final := filepath.Join(sessionsDir, j.SessionID+".json")
-	tmp, err := os.CreateTemp(sessionsDir, ".session.*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("subsession: temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("subsession: write: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("subsession: close: %w", err)
-	}
-	if err := os.Rename(tmpPath, final); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("subsession: rename: %w", err)
+	// Same fsync-backed write as the foreground session store: a crash must
+	// not leave a correctly named, empty transcript for the job.
+	if err := atomicfile.Write(final, data, 0o600, ".session.*.json.tmp"); err != nil {
+		return fmt.Errorf("subsession: %w", err)
 	}
 	return nil
 }

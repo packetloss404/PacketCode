@@ -30,6 +30,11 @@ type WriteFileTool struct {
 	Backups    BackupManager
 	Backend    computers.RuntimeBackend
 	backendErr error
+
+	// DiagnosticsDisabled suppresses the post-edit diagnostics block. The zero
+	// value keeps them on so a tool built by struct literal behaves like one
+	// built by the constructors.
+	DiagnosticsDisabled bool
 }
 
 func NewWriteFileTool(root string, backups BackupManager) *WriteFileTool {
@@ -82,6 +87,19 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 		return ToolResult{Content: fmt.Sprintf("write_file: backup failed: %s", err), IsError: true}, nil
 	}
 
+	// Captured before the overwrite, and only when diagnostics can use it: the
+	// pre-edit contents are the only way to tell an error this edit introduced
+	// from one the file already had. fileTooLarge also covers the missing-file
+	// case, and nil is the right answer there — every diagnostic in a brand new
+	// file was introduced by the write that created it.
+	analyze := t.postEditDiagnosticsEnabled(p.Path) && len(p.Content) <= maxPostEditSourceBytes
+	var prior []byte
+	if analyze && !fileTooLarge(resolved, maxPostEditSourceBytes) {
+		readCtx, cancel := context.WithTimeout(ctx, postEditPriorReadTimeout)
+		prior, _ = t.Backend.ReadFile(readCtx, p.Path)
+		cancel()
+	}
+
 	if err := t.Backend.WriteFile(ctx, p.Path, []byte(p.Content)); err != nil {
 		rollbackBackup(t.Backups, resolved)
 		return ToolResult{Content: fmt.Sprintf("write_file: %s", err), IsError: true}, nil
@@ -91,14 +109,34 @@ func (t *WriteFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolR
 	if !strings.HasSuffix(p.Content, "\n") && len(p.Content) > 0 {
 		lineCount++
 	}
-	return ToolResult{
-		Content: fmt.Sprintf("Wrote %s (%d bytes, %d lines).", p.Path, len(p.Content), lineCount),
-		Metadata: map[string]any{
-			"path":  p.Path,
-			"bytes": len(p.Content),
-			"lines": lineCount,
-		},
-	}, nil
+	content := fmt.Sprintf("Wrote %s (%d bytes, %d lines).", p.Path, len(p.Content), lineCount)
+	metadata := map[string]any{
+		"path":  p.Path,
+		"bytes": len(p.Content),
+		"lines": lineCount,
+	}
+	if analyze {
+		if report := postEditDiagnostics(p.Path, []byte(p.Content), prior); report.Block != "" {
+			// Appended, never substituted, and IsError stays false: the write
+			// did succeed, and a model that reads this as a failure would undo
+			// or repeat a good edit.
+			content += "\n\n" + report.Block
+			metadata["diagnostics"] = report.Introduced
+			metadata["pre_existing_diagnostics"] = report.PreExisting
+		}
+	}
+	return ToolResult{Content: content, Metadata: metadata}, nil
+}
+
+// postEditDiagnosticsEnabled reports whether this write should be analysed.
+// Remote backends are skipped: the analysis is local and in-process, and a file
+// on a Packet Computer belongs to that machine's toolchain and build context,
+// not this one's.
+func (t *WriteFileTool) postEditDiagnosticsEnabled(path string) bool {
+	if t.DiagnosticsDisabled || t.Backend == nil || t.Backend.Kind() != computers.KindLocal {
+		return false
+	}
+	return postEditDiagnosticsSupported(path)
 }
 
 // PreviewDiff computes the unified diff between the on-disk contents

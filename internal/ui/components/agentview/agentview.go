@@ -50,11 +50,19 @@ type Job struct {
 	CreatedAt, UpdatedAt, FinishedAt time.Time
 	// Tokens are cumulative API usage across all turns of this background
 	// job. They are billing totals, not foreground context-window occupancy.
-	Tokens                    struct{ Input, Output int }
-	CostUSD                   float64
-	Depth                     int
+	Tokens  struct{ Input, Output int }
+	CostUSD float64
+	Depth   int
+	// NeedsApproval and NeedsInput are mutually exclusive here, unlike the
+	// jobs.Snapshot fields they come from: a job blocked on a tool approval
+	// sets both there, which left the view with no way to say "this agent
+	// asked you a question" as distinct from "this agent wants a tool
+	// approved". fromSnapshot does the split.
 	NeedsInput, NeedsApproval bool
 }
+
+// Blocked reports that the agent is waiting on a human, whichever way.
+func (j Job) Blocked() bool { return j.NeedsInput || j.NeedsApproval }
 
 // CloseMsg is emitted when the user dismisses the agent view.
 type CloseMsg struct{}
@@ -206,8 +214,8 @@ func fromSnapshot(s jobspkg.Snapshot) Job {
 		FinishedAt:     s.FinishedAt,
 		CostUSD:        s.CostUSD,
 		Depth:          s.Depth,
-		NeedsInput:     s.NeedsInput,
-		NeedsApproval:  s.NeedsApproval,
+		NeedsInput:     s.AwaitingAnswer(),
+		NeedsApproval:  s.AwaitingApproval(),
 	}
 	j.Tokens.Input = s.Tokens.Input
 	j.Tokens.Output = s.Tokens.Output
@@ -391,7 +399,7 @@ func (m *Model) rebuildRows() {
 }
 
 func groupForJob(j Job) group {
-	if j.NeedsInput || j.NeedsApproval {
+	if j.Blocked() {
 		return groupNeedsInput
 	}
 	return groupForState(j.State)
@@ -611,6 +619,12 @@ func (m Model) renderJobRow(j Job, selected bool, w int) string {
 	switch groupForJob(j) {
 	case groupNeedsInput:
 		icon, iconStyle = "●", theme.StyleWarning
+		if j.NeedsInput {
+			// A question is not a permission decision: answering it is work
+			// only the user can do, and it must not read as one more y/n
+			// prompt in the approval queue.
+			icon, iconStyle = "»", theme.StyleAccent
+		}
 	case groupCompleted:
 		icon, iconStyle = "✓", theme.StyleSuccess
 	case groupFailed:

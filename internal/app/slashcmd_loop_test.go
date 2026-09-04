@@ -328,3 +328,28 @@ func TestLoopInterval_DoesNotClaimTurnOwnership(t *testing.T) {
 		t.Fatalf("an interval loop claimed turn ownership: LoopID = %q", got)
 	}
 }
+
+// Ctrl+C or a provider error ends the turn through EventError. A self-paced
+// loop used to treat that like any other turn end and start the next
+// iteration at once, so Ctrl+C could not stop a loop and a 401 became
+// twenty-five back-to-back failing requests.
+func TestLoopSelfPaced_StopsWhenTurnFailed(t *testing.T) {
+	r := newTestApp(t)
+	if r.app.loops == nil {
+		r.app.loops = map[string]*loopState{}
+	}
+	ls := &loopState{id: "loop1", mode: loopSelfPaced, body: "fix the tests", maxIters: 25, iterations: 1}
+	r.app.loops["loop1"] = ls
+	r.app.activeLoopID = "loop1"
+	r.app.turnFailed = true
+	r.app.lastAgentText = "" // nothing came back: the turn was cancelled
+
+	r.app.stopLoopAfterFailedTurn()
+
+	if _, ok := r.app.loops["loop1"]; ok {
+		t.Fatalf("loop should be removed after a failed turn")
+	}
+	if r.app.activeLoopID != "" {
+		t.Fatalf("activeLoopID should be cleared, got %q", r.app.activeLoopID)
+	}
+}

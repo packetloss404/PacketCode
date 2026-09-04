@@ -28,10 +28,10 @@ func packetcodeSugarCacheConfig(cfg *config.Config) agent.SugarCacheConfig {
 		return agent.SugarCacheConfig{}
 	}
 	return agent.SugarCacheConfig{
-		Enabled:   cfg.Sugar.CacheMode != "off",
-		Mode:      provider.SugarCacheMode(cfg.Sugar.CacheMode),
-		Retention: provider.SugarCacheRetention(cfg.Sugar.CacheRetention),
-		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.Privacy),
+		Enabled:   cfg.Sugar.EffectiveCacheMode() != "off",
+		Mode:      provider.SugarCacheMode(cfg.Sugar.EffectiveCacheMode()),
+		Retention: provider.SugarCacheRetention(cfg.Sugar.EffectiveCacheRetention()),
+		Privacy:   provider.SugarPrivacyMode(cfg.Sugar.EffectivePrivacy()),
 	}
 }
 

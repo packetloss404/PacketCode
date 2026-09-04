@@ -48,6 +48,10 @@ A remote foreground session defaults new jobs to its active Packet Computer. A l
 
 Open with `/agents` or Left Arrow from an empty idle prompt. The full-screen workspace groups jobs into Needs Input, Working, Completed, Failed, and Cancelled sections. Press `n`, type in its bottom prompt, and press Enter to spawn a new task.
 
+Every job has an independent bounded `todo_write` plan. Agent View shows the
+completed/total count and current item, and the plan is persisted as job
+evidence rather than shared with the foreground or another worker.
+
 | Key | Action |
 | --- | --- |
 | `Up` / `Down`, `j` / `k` | Move selection. |
@@ -161,8 +165,9 @@ Loop bodies can spawn agents or invoke workflows.
   as abandoned and can be explicitly resubmitted as new runs.
 - packetcode cannot confirm that a detached remote descendant stopped. That is
   reported honestly rather than papered over: such a job is `abandoned`, not
-  `cancelled`. Confirming it needs process-group cancellation evidence, which
-  does not exist yet.
+  `cancelled`. Local commands do have structured teardown evidence — mechanism,
+  confirmation, and surviving PIDs from POSIX process groups or Windows Job
+  Objects — but SSH can only signal the channel leader and remains unconfirmed.
 - Sub-agent transcript output is not streamed into foreground conversation.
 - Background agents cannot yet ask arbitrary user clarification questions.
 - Explicit workflow pipeline stages beyond ordered phases/steps are deferred.

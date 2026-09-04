@@ -149,19 +149,27 @@ func (p *Policy) Decide(req Request) Result {
 	if profile == ProfileSafe && !readOnlyTool(req.ToolName) {
 		return Result{Decision: DecisionDeny, Profile: profile, Reason: "safe profile denies non-read-only tools"}
 	}
+	var result Result
 	if rule, ok := p.matchingRule(req); ok {
-		return Result{
+		result = Result{
 			Decision: rule.Decision,
 			Profile:  profile,
 			Reason:   firstNonEmpty(rule.Reason, "permission rule matched "+rule.Tool),
 			Rule:     &rule,
 		}
+	} else {
+		decision, reason := profileDecision(profile, req)
+		result = Result{Decision: decision, Profile: profile, Reason: reason}
 	}
-	decision, reason := profileDecision(profile, req)
-	result := Result{Decision: decision, Profile: profile, Reason: reason}
 	// A deny floor that could not be evaluated must not read as "not denied".
 	// Escalation only tightens: an allow becomes an approval prompt, while ask
 	// and deny are already at least as restrictive and are left alone.
+	//
+	// This applies to an allow that came from a rule as much as to one that
+	// came from the profile. A session allow for execute_command, or a trusted
+	// skill's allowed-tools grant, must not switch the floor off: an explicit
+	// deny is never weakened by a later allow, and "we could not tell" is not
+	// "not denied".
 	if result.Decision == DecisionAllow {
 		if rule, ok := p.denyFloorIndeterminate(req); ok {
 			result.Decision = DecisionAsk
@@ -470,7 +478,7 @@ func readOnlyTool(name string) bool {
 	// boundary: gating the read would train the user to approve reflexively
 	// for something that cannot touch anything. "fetch" is deliberately NOT
 	// here — it reaches the network.
-	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics", "collect_agent_results", "skill":
+	case "read_file", "search_codebase", "list_directory", "list_symbols", "find_definition", "find_references", "get_diagnostics", "collect_agent_results", "skill", "read_tool_output":
 		return true
 	default:
 		return false
@@ -526,6 +534,107 @@ var commandIndirection = map[string]bool{
 	"eval": true, "exec": true, "fish": true, "ksh": true, "nice": true,
 	"nohup": true, "sh": true, "ssh": true, "sudo": true, "timeout": true,
 	"watch": true, "xargs": true, "zsh": true,
+	// Scripting interpreters and Windows shells take a program as an
+	// argument just as `sh -c` does; `python -c "import os; os.system('git
+	// push')"` is the same indirection with different spelling.
+	"python": true, "python3": true, "perl": true, "ruby": true, "node": true,
+	"deno": true, "bun": true, "php": true, "pwsh": true, "powershell": true,
+	"cmd": true, "busybox": true, "su": true, "runuser": true, "chroot": true,
+	"setsid": true, "stdbuf": true, "time": true, "strace": true,
+}
+
+// quoteChars are the characters a shell uses to build a word out of pieces.
+// `"git" push` and `gi""t push` are both `git push` once the shell has
+// unquoted them, so a deny comparison has to see through the quotes.
+const quoteChars = `"'`
+
+// unquoteField strips shell quote characters from one word. It is not a full
+// unquoting -- it does not interpret escapes or expansions -- which is why
+// the caller treats a word that still carries a backslash, `$`, or backtick
+// as unresolvable rather than as a clean miss.
+func unquoteField(field string) string {
+	if !strings.ContainsAny(field, quoteChars) {
+		return field
+	}
+	var b strings.Builder
+	for _, r := range field {
+		if r == '"' || r == '\'' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// fieldUnresolvable reports whether a word could still change meaning after
+// the unquoting above: an escape, a variable, or a substitution.
+func fieldUnresolvable(field string) bool {
+	return strings.ContainsAny(field, "\\$`")
+}
+
+// wordAppearsLater reports whether any of the words, unquoted, equals want,
+// or is unresolvable and so might.
+func wordAppearsLater(fields []string, want string) bool {
+	for _, field := range fields {
+		got := unquoteField(field)
+		if got == want || fieldUnresolvable(got) {
+			return true
+		}
+	}
+	return false
+}
+
+// prefixOutcomeForFields compares one simple command against a prefix. It
+// sees through quoting, and it does not let an option between the prefix
+// words turn a match into a miss: `git -C . push` is a `git push` as far as a
+// deny rule is concerned, but the policy cannot know from the string alone
+// whether `-C` consumed `.` or `push`, so it says "indeterminate" rather than
+// either "denied" or "not denied".
+func prefixOutcomeForFields(fields, prefix []string) prefixOutcome {
+	if len(fields) == 0 || len(prefix) == 0 {
+		return prefixNoMatch
+	}
+	head := unquoteField(fields[0])
+	if head != prefix[0] {
+		if fieldUnresolvable(head) {
+			// `\git push` or `$GIT push`: the first word is not knowable.
+			return prefixIndeterminate
+		}
+		return prefixNoMatch
+	}
+	if fieldUnresolvable(fields[0]) {
+		return prefixIndeterminate
+	}
+	skippedOption := false
+	i := 1
+	for _, want := range prefix[1:] {
+		for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+			skippedOption = true
+			i++
+		}
+		if i >= len(fields) {
+			// Ran out of words: the prefix word is provably absent.
+			return prefixNoMatch
+		}
+		got := unquoteField(fields[i])
+		if got != want {
+			if fieldUnresolvable(got) {
+				return prefixIndeterminate
+			}
+			if skippedOption && wordAppearsLater(fields[i:], want) {
+				// `git -C . push`: whether `-C` consumed `.` cannot be known
+				// from the string, and the denied word is still ahead.
+				return prefixIndeterminate
+			}
+			// `git -C . status`: no option arity could make this a push.
+			return prefixNoMatch
+		}
+		if fieldUnresolvable(fields[i]) {
+			return prefixIndeterminate
+		}
+		i++
+	}
+	return prefixMatch
 }
 
 // commandPrefixDenyOutcome evaluates a command_prefix rule against a possibly
@@ -552,10 +661,14 @@ func commandPrefixDenyOutcome(params json.RawMessage, prefix []string) prefixOut
 		if len(fields) == 0 {
 			continue
 		}
-		if fieldsHavePrefix(fields, prefix) {
+		switch prefixOutcomeForFields(fields, prefix) {
+		case prefixMatch:
 			return prefixMatch
+		case prefixIndeterminate:
+			indeterminate = true
 		}
-		if commandIndirection[strings.TrimPrefix(fields[0], "$")] || isScriptPath(fields[0]) {
+		head := unquoteField(strings.TrimPrefix(fields[0], "$"))
+		if commandIndirection[head] || isScriptPath(head) {
 			indeterminate = true
 		}
 	}
@@ -618,18 +731,6 @@ func stripEnvAssignments(fields []string) []string {
 		fields = fields[1:]
 	}
 	return fields
-}
-
-func fieldsHavePrefix(fields, prefix []string) bool {
-	if len(fields) < len(prefix) {
-		return false
-	}
-	for i, want := range prefix {
-		if fields[i] != want {
-			return false
-		}
-	}
-	return true
 }
 
 func commandPrefixMatches(params json.RawMessage, prefix []string) bool {

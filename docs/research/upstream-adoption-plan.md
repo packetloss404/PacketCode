@@ -5,6 +5,13 @@ the packetcode tree at `25a13ac` (plus working-tree changes) by four parallel
 analyses covering providers/cost, tools/execution, agent-loop/daemon, and
 extensibility/UX.
 
+> **Historical plan, superseded for status.** Keep this document as the
+> clean-room design/evidence record. By 2026-08-31, cached-input telemetry,
+> no-progress loop detection, bounded `fetch`, skills, `todo_write` with Agent
+> View integration, POSIX process-group release, and structured local teardown
+> evidence had shipped. [BACKLOG.md](../../BACKLOG.md) is the current queue;
+> do not infer open work from unchecked prose below.
+
 - [`upstream-opencode.md`](upstream-opencode.md) — MIT, TypeScript/Effect, server-first
 - [`upstream-crush.md`](upstream-crush.md) — FSL-1.1-MIT, Go, same TUI stack as packetcode
 

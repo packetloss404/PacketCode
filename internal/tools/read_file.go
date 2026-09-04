@@ -108,6 +108,11 @@ func (t *ReadFileTool) Execute(ctx context.Context, raw json.RawMessage) (ToolRe
 	if err := scanner.Err(); err != nil {
 		return ToolResult{Content: fmt.Sprintf("read_file: %s", err), IsError: true}, nil
 	}
+	if total == 0 && start <= 1 {
+		// A .gitkeep, or a file the model just created empty, is a file
+		// with nothing in it -- not a failed read.
+		return ToolResult{Content: "(empty file)"}, nil
+	}
 	if start > total {
 		return ToolResult{
 			Content: fmt.Sprintf("read_file: start_line (%d) is past end of file (%d lines)", start, total),

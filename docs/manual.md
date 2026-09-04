@@ -78,9 +78,36 @@ packetcode --trust
 packetcode --version
 packetcode doctor
 packetcode doctor --json
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode skills list
+packetcode acp
+packetcode sugar login
 ```
 
 `--provider` and `--model` override the saved default for this launch. `--resume` accepts a saved session ID. `--trust` starts in Bypass Permissions mode, so use it only in a project you trust.
+
+The default invocation opens the TUI. The five public command families are
+`run` (one headless agent turn), `doctor` (diagnostics), `skills` (Agent Skills
+management), `acp` (the local stdio protocol server), and `sugar` (the optional
+Sugar integration). Run `packetcode --help` or a command's `--help` for current
+flags.
+
+### Headless execution
+
+Use `run` from scripts, CI, benchmarks, or another agent:
+
+```text
+packetcode run [--provider NAME] [--model MODEL] [--permission-mode MODE] [--resume ID] [--json] <prompt...>
+```
+
+It shares provider, session, tool, policy, MCP, and compatibility setup with the
+TUI and ACP paths. The prompt must be positional; stdin, `--trust`,
+`--computer`, and an ephemeral-session mode are intentionally absent. If a tool
+needs interactive approval, the run fails closed with exit 3 instead of
+approving or hanging. Cancellation exits 130. Plain stdout is the sanitized
+final response only. `--json` writes one `schema_version: 1` object containing
+`ok`, session/provider/model identity, output, `elapsed_ms`, per-run
+input/output/cache usage, and `error` on failure.
 
 ## 2. Your First Conversation
 
@@ -90,7 +117,12 @@ Type a request at the bottom prompt and press `Enter`:
 Explain how this project is structured.
 ```
 
-packetcode can inspect the repository, search code, edit files, and execute commands. Actions run immediately, ask for approval, or are denied according to the permission mode shown in the footer.
+packetcode can inspect the repository, search code, edit files, execute
+commands, load skills, maintain a per-session todo list, and fetch bounded
+HTTP(S) evidence. Fetched content is explicitly untrusted, blocks private and
+loopback targets by default, and is capped by redirect, header, body, and time
+limits. Actions run immediately, ask for approval, or are denied according to
+the permission mode shown in the footer.
 
 A good first editing request is specific about the outcome and verification:
 
@@ -366,7 +398,10 @@ Complete session history remains persisted even when older oversized tool result
 /cost reset --yes
 ```
 
-`/cost` shows cumulative tracked API usage. Resetting requires confirmation with `--yes` before the total is cleared.
+`/cost` shows cumulative tracked API usage, including separate cache
+creation/read counts where a provider supplies them. Cache counts are subsets
+of input tokens, not additional tokens. Resetting requires confirmation with
+`--yes` before the total is cleared.
 
 ### Undo the last file edit
 
@@ -410,6 +445,10 @@ Remote jobs are process-lifetime work, not a durable daemon service. Closing pac
 Open Agent View with `/agents` or Left Arrow from an empty, idle prompt. Open a particular transcript with `/agents <id>`.
 
 Agent View starts in list mode. Press `n` to focus the task composer, type a prompt, and press `Enter` to spawn a read-only agent.
+
+Each job has its own bounded `todo_write` plan. Its row shows completed/total
+items and the current in-progress (or next pending) item; the list is persisted
+with the job so an abandoned run still records what it was doing.
 
 | Key | Action in Agent View |
 | --- | --- |
@@ -542,6 +581,12 @@ Self-paced loops start another turn as soon as the previous one finishes:
 The model is asked to emit a versioned `packetcode-loop-decision` JSON block
 when finished. The legacy `LOOP_DONE` sentinel remains accepted. A self-paced
 loop stops after 25 iterations even if neither signal is produced.
+
+This scheduler limit is separate from the agent's no-progress detector. Any
+foreground, background, or ACP run stops earlier when the same tool executes
+with identical arguments and an identical result often enough inside the
+bounded detection window. The diagnostic names the repeated call; a changing
+result is treated as progress.
 
 Interval loops run once immediately and then on the interval:
 
@@ -804,6 +849,12 @@ Type `/` or run `/help` for the runtime command list. Check custom command filen
 - At an empty idle prompt, it quits packetcode.
 
 `Ctrl+D` quits from an empty prompt. `/exit` and `/quit` also exit. If a picker or full-screen workspace is open, use `Esc` to return to chat first.
+
+When cancellation interrupts a local command, the result names the teardown
+mechanism, whether the process tree was confirmed stopped, and any surviving
+PIDs. POSIX process groups and Windows Job Objects supply that evidence. SSH
+can only signal the channel leader, so remote teardown is reported as
+unconfirmed and detached descendants may require operator cleanup.
 
 Background jobs are separate from foreground generation. Cancel them explicitly before exiting when you do not want them to continue during shutdown:
 

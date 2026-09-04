@@ -14,6 +14,23 @@ copy its code or prompt text.
 
 ## v1 Release Readiness
 
+- ~~Add a bounded non-interactive execution surface:~~ **Shipped 2026-08-31.**
+  `packetcode run [--provider P] [--model M] [--permission-mode MODE]
+  [--resume ID] [--json] <prompt...>` runs one agent turn through the runtime
+  builder now shared with the TUI and ACP server. It accepts no stdin prompt,
+  trust/computer shortcut, or ephemeral-session mode. An unavailable approval
+  fails closed with exit 3; cancellation exits 130. Plain mode writes only the
+  sanitized final response. JSON is one `schema_version: 1` document carrying
+  `ok`, session/provider/model identity, output, elapsed milliseconds, usage
+  (including cache subsets), and an error when applicable. The command has
+  focused contract tests plus build/CI help smoke coverage.
+- ~~Benchmark `packetcode run` against the ACP harness with identical provider,
+  model, prompt, and permission policy.~~ **Completed 2026-09-01.** The
+  [controlled result](docs/benchmarks/run-vs-acp-2026-09-01.md) matched output,
+  provider calls, tool calls, input/output tokens, and zero approvals. Median
+  wall time differed by only 3%, with ACP slightly faster; live-provider
+  variance was much larger. There is no residual ACP penalty to optimize and
+  no evidence yet that public phase observability is warranted.
 - ~~Automate signed/notarized macOS, Linux, and Windows release artifacts and
   checksum verification.~~ **Mostly shipped 2026-08-30.** See
   [docs/releases.md](docs/releases.md).
@@ -241,26 +258,30 @@ $//'`.
 
 - Add provider-native token counting where a stable tokenizer/API exists; retain the conservative fallback estimator.
 - Persist request-level occupancy samples for diagnostics without conflating them with billable totals.
-- Add configurable model-facing caps for search, command, MCP, and artifact
-  output. `execute_command` is the only tool with a byte cap (100 KB);
-  `search_codebase` and `list_directory` cap counts rather than bytes, and **MCP
-  tool results are entirely uncapped**, so a server returning megabytes lands
-  whole in the transcript. There is one chokepoint where every tool result
-  becomes a message — cap there, write the full output to disk, and hand the
-  model an excerpt plus a handle it can read more from, so truncation stops
-  meaning loss. A handle referenced after prune must degrade to "no longer
-  retained", never an error that stalls a turn.
+- ~~Add configurable model-facing caps for search, command, MCP, and artifact
+  output.~~ **Shipped 2026-09-03** as `internal/toolout`, at the chokepoint
+  this entry identified: `handleToolCall`, after PostToolUse hooks, where
+  native, MCP, and skill results all converge. Oversized output spills to disk
+  and the model gets a head-and-tail excerpt naming the withheld byte range
+  plus the `read_tool_output` call that retrieves it, so truncation stops
+  meaning loss. Head alone was not enough — for a failing test run or a
+  compiler dump the verdict is in the tail.
+  The handle is an opaque random token resolved through an in-process map,
+  never a path and never derived from model text; the model chooses that
+  argument, so a path-shaped handle would have been an arbitrary file read
+  straight through root confinement. Every miss — invented, malformed, pruned,
+  evicted, or another session's — returns one indistinguishable "no longer
+  retained" result, so nothing can be probed, and it degrades rather than
+  erroring exactly as this entry required.
+  One store per session on the todo-store precedent, a per-session budget with
+  oldest-first eviction, removal on session end, and a startup prune so a
+  killed process cannot orphan spill files. The 64 KiB session projection
+  stays as the backstop for messages that never pass through the agent loop.
+  Still open: `execute_command`'s own 100 KB cap still discards bytes before
+  the store ever sees them, so raising or removing it is now safe and worth
+  doing; and the per-tool count caps on `search_codebase`/`list_directory` are
+  unchanged.
 - Preserve/replay encrypted Codex reasoning items for multi-turn continuity if the subscription backend requires them; never attempt to display opaque reasoning.
-- Add explicit cache-hit/cached-input telemetry to `/cost` and statusline
-  snapshots. `provider.Usage` already carries the cache fields and Anthropic and
-  Codex populate them, but the wire is cut at four points and rendered as a
-  hard-coded zero at the fifth: `openaicompat`'s usage struct omits
-  `prompt_tokens_details.cached_tokens` (blinding eight providers at once),
-  Gemini omits `cachedContentTokenCount`, `session.TokenUsage` and
-  `cost.SessionCost` have no cache fields so `RecordUsage`'s signature has to
-  widen, and the statusline's two cache JSON slots are literal zeros. Cached
-  figures are a reported *subset* of input tokens, never an addend — assert that
-  per provider or the totals double-count.
 
 ## Agents, Loops, and Workflows
 
@@ -278,19 +299,22 @@ $//'`.
   shipped 2026-08-14 as PCMP10.
 - Let background agents request user clarification through Agent View. Routing
   half-exists: `jobApprover` already forwards to `uiApprover.PromptApproval`.
-  Four obstacles remain — read-only jobs are refused before reaching the parent
-  approver, `uiApprover` renders one envelope at a time so a question would
-  head-of-line-block every approval from all jobs, `Job.NeedsInput` is hardwired
-  equal to `NeedsApproval` so Agent View has no distinct signal, and there is no
-  timeout, so a blocked question holds a slot out of `background_max_concurrent`.
-- Add loop detection to the agent tool loop. The 25-iteration cap is the only
-  guard today, and its own comment names the failure it cannot catch: retrying
-  the same call on a path that keeps not existing. Hash `(tool, executed
-  arguments, result)` over a sliding window and abort on repeats, with a reason
-  that says why rather than "exceeded N tool iterations".
-- Add a todo tool. There is none, and Agent View has no structured content to
-  render for background jobs. Must render as a compact block and never be echoed
-  as prose — the system prompt explicitly discourages narrating a plan.
+  **Two of the four obstacles were cleared 2026-09-03.** The approver is now a
+  priority queue of id-bound envelopes rather than one slot, so a question can
+  no longer head-of-line-block every approval from every job; and
+  `Snapshot.AwaitingApproval`/`AwaitingAnswer`/`Blocked` give Agent View and
+  the workflow view a distinct signal, rendered distinctly today.
+  Two remain, and both are policy decisions rather than plumbing. Read-only
+  jobs are still refused before reaching the parent approver, which is correct
+  for a *tool* approval and wrong for a *question* — a read-only job is
+  precisely the one that should be able to ask. And there is still no timeout,
+  so a blocked question holds a slot out of `background_max_concurrent`
+  indefinitely; the queue now drops an envelope whose context expires, so
+  adding one is mechanical once someone picks the duration.
+  One data bug to fix with it: `internal/jobs/worker.go` sets `NeedsInput` and
+  `NeedsApproval` to the same value, so the accessors above are currently
+  reading a field that never differs. The call site must set them
+  independently when a question can actually be asked.
 - Add optional live sub-agent transcript streaming without injecting it into foreground model context.
 - Add safe worktree merge/apply assistance and explicit cleanup commands.
 
@@ -319,10 +343,22 @@ the evidence, effort, and risk for each item.
   read and refuse a write with "re-read first". Key it off the existing session
   store; do not add a database for it. Local backends only in v1, and say so
   when it is skipped for remote ones.
-- Add an LSP client and, more valuably, run diagnostics after every edit and
-  append them to the tool result, so the model learns it broke the build without
-  being told. `code_intelligence.go` stays as the zero-dependency Go fast path;
-  LSP layers above it and must degrade silently when no server is installed.
+- Add an LSP client. ~~The more valuable half — run diagnostics after every
+  edit and append them to the tool result, so the model learns it broke the
+  build without being told~~ — **shipped 2026-09-03** for Go, syntax-only, on
+  the existing zero-dependency path. Nothing shells out and there is no opt-in
+  to make it: running `go build` behind a write would execute an unapproved
+  command on every edit, which is what `execute_command`'s permission gate
+  exists to prevent, and the only importer that resolves real types invokes the
+  `go` command itself, so type checking is the same shell-out renamed. Errors
+  the file already had are excluded, because blaming the model for pre-existing
+  breakage sends it editing code nobody asked it to touch. Bounded to the
+  edited file, 250 ms, ten items, 2 KB; non-Go files add nothing at all.
+  `behavior.post_edit_diagnostics_disabled` turns it off.
+  What an LSP layer would add on top is **type** diagnostics and non-Go
+  languages — the syntax check catches a broken edit, not a wrong one.
+  `code_intelligence.go` stays as the zero-dependency Go fast path; LSP layers
+  above it and must degrade silently when no server is installed.
   **Import `github.com/charmbracelet/x/powernap`** (MIT, `go 1.24`, two pure-Go
   deps) rather than hand-rolling: it carries 388 KB of generated protocol
   bindings and a 372-server config table. The stdlib-only rule is scoped to LLM
@@ -350,22 +386,13 @@ the evidence, effort, and risk for each item.
   becomes an unkillable goroutine; and the whole permission suite must be
   re-validated against the new execution path. Start with the handler stack, not
   a coreutils reimplementation. Do this **after** the cheaper items above.
-- Close the gaps in the tracked-process work.
-  `TrackTree`/`ReleaseTree` is Windows-only — the POSIX side is a no-op, so
-  "descendants cannot survive a normally exiting parent" is a Windows-only
-  guarantee and the doc comment should either say so or gain a POSIX equivalent.
-  It is wired into MCP but not `LocalBackend.Execute`, so `execute_command` gets
-  no Job Object containment. `trackedJobs` leaks on any path that skips
-  `ReleaseTree`, which MCP never does but a shell running hundreds of commands
-  would. And procrun needs a **group handle** — one containment boundary that
-  many `exec.Cmd`s join — before either background shell jobs or an in-process
-  shell, since a pipeline would otherwise create one boundary per stage.
-- Add a bounded `fetch` tool. There is no HTTP in the tool layer at all. Size
-  cap, timeout, redirect limit, refuse non-http(s) schemes, refuse loopback and
-  private address ranges by default, land it under the output store, and frame
-  the result as untrusted evidence — fetched content is the classic
-  prompt-injection vector. Defer agentic fetch, download, and web search until
-  the network policy axis under Security and Trust exists.
+- Add a reusable **process-group handle** before background shell jobs or an
+  in-process shell: one containment boundary that multiple `exec.Cmd`s can join
+  so a pipeline is not split across unrelated trees. The earlier tracked-
+  process gaps are closed: POSIX release sweeps the process group, local
+  `execute_command` participates in containment, and cancellation returns
+  structured mechanism/confirmation/survivor evidence. SSH remains explicitly
+  unconfirmed because it has no remote process-group mechanism.
 - Expose `doctor` as a read-only self-diagnostic tool. `buildDoctorReport`
   already emits a versioned structured report with redaction, so this is a thin
   adapter that turns "it's broken" into a self-diagnosing session. Move the
@@ -505,7 +532,10 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   project-skill trust boundary when it is not — a hostile repo can still use
   the native layout. Tightening it breaks existing projects, so it needs to be
   a decision rather than a drift.
-- Offer user-invocable skills through the ACP command catalogue. Blocked on the
+- Offer user-invocable skills through the ACP command catalogue. The ACP server
+  already exposes Markdown prompt commands through `_packetcode/commands/list`
+  and expands them in `session/prompt`; this remaining item is specifically
+  about skills. It is blocked on the
   wire vocabulary: `CommandInfo.Source` is a closed `builtin`/`user`/`project`
   set that clients group menus by, and a builtin skill would arrive as a
   `builtin` entry — the one thing that catalogue promises never to emit.
@@ -634,15 +664,13 @@ root-confined core tools via `packetcode --computer <name>`.
   unrecognised terminal state as a **success** were fixed at the same time (two
   workflow gates, `spawn_agent`, `collect_agent_results`, Agent View grouping);
   they now test `State.IsSuccess()` instead of enumerating failures.
-- **Still open from PCMP10: process-group-aware cancellation evidence.** The
-  state is honest about uncertainty but cannot reduce it. `procrun.KillTree`
-  returns a bare `error`, `computers.ExecResult` carries only an exit code, and
-  `jobs.Manager.Cancel` is a fire-and-forget `context.CancelFunc` with no return
-  path, so nothing learns whether a kill worked; on SSH there is no mechanism to
-  evidence at all. Windows already *computes* per-PID survivor data in
-  `killDescendants` and discards it. Until this lands, `transport-lost` is
-  claimed only where a transport error was actually observed. Sequence it after
-  the in-flight `procrun` Job Object work is committed.
+- **Still open from PCMP10: remote cancellation evidence.** Local teardown now
+  reports the mechanism, whether containment was confirmed, and surviving PIDs;
+  POSIX process groups and Windows Job Objects are both covered. SSH can only
+  signal the channel leader and therefore always reports unconfirmed teardown;
+  there is no remote process-group mechanism or evidence path yet. Until that
+  exists, `transport-lost` is claimed only where a transport error was actually
+  observed.
 - Add a generation-aware SSH connection manager only with a no-replay rule for
   writes/commands; current jobs intentionally own independent connections.
 - Add asynchronous remote project workflow discovery and an explicit

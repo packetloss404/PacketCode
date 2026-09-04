@@ -463,18 +463,22 @@ packetcode --permission-mode read-only
 packetcode --trust
 packetcode --version
 packetcode doctor
-packetcode doctor --json</code></pre>
+packetcode doctor --json
+packetcode run --permission-mode read-only --json "summarize this repository"
+packetcode skills list
+packetcode acp
+packetcode sugar login</code></pre>
         <p><code>--provider</code> and <code>--model</code> override the saved default for one launch. <code>--resume</code> opens a saved session. <code>--trust</code> starts in Bypass Permissions mode.</p>
-        <div class="callout limit">
-          <span class="callout-title">Current CLI limit</span>
-          <p>There is no non-interactive “prompt as a positional argument” mode. The only public subcommand is <code>doctor</code>; normal work happens in the TUI.</p>
-        </div>
+        <h3 id="headless-run">Headless execution</h3>
+        <pre><code>packetcode run [--provider NAME] [--model MODEL] [--permission-mode MODE] [--resume ID] [--json] &lt;prompt...&gt;</code></pre>
+        <p><code>run</code> executes one non-interactive agent turn through the provider, session, tool, policy, MCP, and compatibility runtime shared with the TUI and ACP server. The prompt is positional; stdin, <code>--trust</code>, <code>--computer</code>, and ephemeral-session modes are intentionally absent. An unavailable approval fails closed with exit 3; cancellation exits 130. Plain stdout contains only the sanitized final response. JSON is one <code>schema_version: 1</code> object with <code>ok</code>, session/provider/model identity, output, total elapsed milliseconds, per-run input/output/cache usage, and an error on failure.</p>
       </section>
 
       <section id="daily-work" aria-labelledby="daily-work-title">
         <h2 id="daily-work-title"><span class="section-no">02</span><a class="anchor-link" href="#daily-work">Daily terminal workflow</a></h2>
         <p>Type a request at the bottom prompt and press <kbd>Enter</kbd>. Specific outcome-and-verification prompts work best:</p>
         <pre><code>Add validation to the signup handler and run the focused tests.</code></pre>
+        <p>The foreground and ACP tools include root-scoped file/search/code intelligence, commands, skill retrieval, a per-session <code>todo_write</code> plan, and bounded HTTP(S) <code>fetch</code>. Fetch blocks private/loopback targets by default, disables ambient proxies, caps redirects/headers/body/time, and labels returned content as untrusted evidence; it is not a download or general web-search surface and is intentionally unavailable to background agents.</p>
         <p>Completed turns move into normal terminal scrollback. The small live region is reserved for the current response, tool activity, prompt, context gauge, and permission mode.</p>
 
         <h3 id="everyday-keys">Everyday keys</h3>
@@ -667,7 +671,7 @@ action = "ask"</code></pre>
 /undo
 /transcript
 /clear</code></pre>
-        <p><code>/clear</code> and <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output but keep the session. <code>/undo</code> restores the latest session-scoped native write/patch backup; Git remains the durable rollback mechanism. Pricing is an estimate, and unknown/local/subscription-backed models may display <code>$0</code> even when provider plan limits apply.</p>
+        <p><code>/clear</code> and <kbd>Ctrl</kbd>+<kbd>L</kbd> clear visible output but keep the session. <code>/undo</code> restores the latest session-scoped native write/patch backup; Git remains the durable rollback mechanism. Where a provider reports them, cache creation/read counts flow through sessions, jobs, <code>/cost</code>, and statusline JSON as subsets of input, not extra tokens. Pricing is an estimate, and unknown/local/subscription-backed models may display <code>$0</code> even when provider plan limits apply.</p>
       </section>
 
       <section id="agents" aria-labelledby="agents-title">
@@ -685,6 +689,7 @@ action = "ask"</code></pre>
 
         <h3 id="agent-view">Agent View</h3>
         <p>Open <code>/agents</code>, press Left Arrow from an empty idle prompt, or open one transcript with <code>/agents &lt;id&gt;</code>.</p>
+        <p>Each job owns a bounded <code>todo_write</code> list. Its row shows completed/total items and the current in-progress (or next pending) item; the list persists with the job so an abandoned run retains that evidence.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Key</th><th>Action</th></tr></thead>
@@ -783,6 +788,7 @@ max = 2</code></pre>
 /loop stop &lt;loop-id&gt;
 /loop stop all</code></pre>
         <p>Self-paced loops ask the model for a versioned <code>packetcode-loop-decision</code> JSON block, retain <code>LOOP_DONE</code> for compatibility, and stop after 25 iterations regardless. Interval loops run immediately and then on the interval (minimum one second). A tick during active foreground work queues rather than overlaps.</p>
+        <p>That scheduler ceiling is separate from the shared no-progress detector: foreground, background, and ACP runs stop earlier when the same tool executes repeatedly with identical arguments and identical results. The diagnostic names the call; changing output counts as progress.</p>
         <div class="callout limit">
           <span class="callout-title">Current orchestration limits</span>
           <p>Explicit multi-stage pipelines beyond ordered phases/steps are not shipped. Workflow verification and bounded retries are process-local orchestration; loops are also process-local schedulers, not durable daemons.</p>
@@ -883,6 +889,9 @@ LOG_LEVEL = "warn"</code></pre>
         <p>MCP calls use normal permission rules; match all with <code>mcp:*</code> or a server with <code>filesystem__*</code>. Startup failures do not prevent the TUI from opening. Logs use a bounded, redacted tail.</p>
         <div class="callout limit"><span class="callout-title">MCP limit</span><p>Streamable HTTP, prompts/resources, and live configuration reload are not supported. The reviewed <a href="mcp-http-trust-contract.md">Streamable HTTP trust contract</a> pins exact origins/address classes, bounded bodyless same-origin redirects, disabled ambient proxies, system-root TLS, atomically bound target-only credentials, bounded credential-redacted output, per-call approval/revocation, and manual reconnect, but no URL field, transport flag, or HTTP client exists. Use <code>/mcp restart &lt;name&gt;</code> after a stdio process crash; restart PacketCode after changing configuration.</p></div>
 
+        <h3 id="acp-server">ACP server</h3>
+        <p><code>packetcode acp</code> runs the same engine over local stdio. Versioned <code>_packetcode/*</code> extensions expose provider/model overrides, saved-session list/load/rename, usage, permission mode, configured MCP tools, project file search, Markdown prompt-command discovery/expansion, and explicit session close. ACP agents receive the shared skill index/tool path. User-invocable skills are not yet listed in <code>_packetcode/commands/list</code>, whose catalogue currently contains Markdown prompt commands only.</p>
+
         <h3 id="hooks">Hooks</h3>
         <p>Hooks execute configured shell text in the project root: PowerShell on Windows and <code>sh -c</code> elsewhere.</p>
         <pre><code>[[hooks.user_prompt_submit]]
@@ -945,6 +954,7 @@ Bubble Tea app ---- provider registry ---- active model stream
           <li>Read tools bound output and avoid binary content where appropriate.</li>
           <li>Permission policy gates invocation; an allowed process runs with your account's authority.</li>
           <li><code>execute_command</code>, hooks, statusline commands, and MCP servers are not OS-sandboxed.</li>
+          <li>Cancelled local commands report the teardown mechanism, confirmation state, and surviving PIDs. POSIX process groups and Windows Job Objects provide that evidence; SSH teardown remains explicitly unconfirmed.</li>
           <li>Worktrees isolate repository files, not network access, credentials, or arbitrary paths reachable by an allowed shell.</li>
           <li>Custom model endpoints receive system instructions, conversation content, tool schemas, and tool results.</li>
           <li><code>@file</code> expansion sends the selected file content to the active provider.</li>
@@ -1035,6 +1045,7 @@ packetcode doctor --check project,state.worktrees</code></pre>
           <table>
             <thead><tr><th>Area</th><th>Shipped</th><th>Not yet shipped</th></tr></thead>
             <tbody>
+              <tr><td>Automation</td><td><code>packetcode run</code>, session resume, fail-closed approval, versioned JSON with total elapsed time and usage.</td><td>Optional provider/tool/approval phase timing for benchmark attribution.</td></tr>
               <tr><td>Agents</td><td>Bounded concurrent jobs, nesting, persistence, cancellation, live transcripts, result lifecycle.</td><td>Resume execution after restart; arbitrary clarification questions.</td></tr>
               <tr><td>Write isolation</td><td>Dedicated worktree/branch from committed <code>HEAD</code>.</td><td>Automatic apply/merge, cleanup, conflict resolution, dirty-checkout cloning.</td></tr>
               <tr><td>Workflows</td><td>Versioned schema, offline validation, sequential phases, fan-out join, fail-closed step verifiers, bounded retries, cancellation, budgets.</td><td>Explicit pipeline stages and a broader example library.</td></tr>
@@ -1062,7 +1073,8 @@ packetcode --resume &lt;session-id&gt;
 packetcode --permission-mode auto
 packetcode --trust
 packetcode doctor --check providers
-packetcode doctor --json</code></pre>
+packetcode doctor --json
+packetcode run --permission-mode read-only --json "summarize this repository"</code></pre>
             <p class="micro">Permission modes: <code>ask</code>, <code>accept-edits</code>, <code>auto</code>, <code>read-only</code>, <code>bypass</code>.</p>
           </div>
           <div>

@@ -104,3 +104,23 @@ func TestReadFile_Schema(t *testing.T) {
 	require.NoError(t, json.Unmarshal(tool.Schema(), &doc))
 	assert.Equal(t, "object", doc["type"])
 }
+
+// A .gitkeep, or a file the model just created empty, is a file with nothing
+// in it. It used to come back as "start_line (1) is past end of file (0
+// lines)" with IsError set, and the model would try to fix a file that was
+// never broken.
+func TestReadFile_EmptyFileIsNotAnError(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "empty.txt"), nil, 0o600))
+	tool := NewReadFileTool(root)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"path":"empty.txt"}`))
+	require.NoError(t, err)
+	assert.False(t, res.IsError, res.Content)
+	assert.Contains(t, res.Content, "empty")
+
+	// An explicit range past the end is still the caller's mistake.
+	res, err = tool.Execute(context.Background(), json.RawMessage(`{"path":"empty.txt","start_line":3}`))
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+}

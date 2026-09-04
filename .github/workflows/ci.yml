@@ -130,6 +130,8 @@ jobs:
         run: ${{ matrix.binary }} --version
       - name: Smoke help
         run: ${{ matrix.binary }} --help
+      - name: Smoke headless run help
+        run: ${{ matrix.binary }} run --help
 
   # The release pipeline, exercised on every push rather than first exercised
   # by tagging.

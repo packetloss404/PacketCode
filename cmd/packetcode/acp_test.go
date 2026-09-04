@@ -5,7 +5,6 @@ import (
 	"io"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,7 +14,6 @@ import (
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
-	"github.com/packetcode/packetcode/internal/tools"
 )
 
 func TestServerSessionRenamerPersistsSanitizedName(t *testing.T) {
@@ -293,47 +291,69 @@ func TestPacketACPFactoryMCPServersFallback(t *testing.T) {
 	assert.False(t, servers[0].Enabled)
 }
 
-// TestPacketACPFactoryMCPStartupFailureSemantics pins the deliberate split: a
-// broken operator-configured server degrades the session, a broken
-// client-requested server fails it.
-func TestPacketACPFactoryMCPStartupFailureSemantics(t *testing.T) {
+// TestPacketACPFactoryNewSessionMCPFailureSemantics pins the deliberate split
+// at the public factory boundary. NewSession now delegates MCP construction to
+// packetRuntime, so testing the old startMCP helper alone would let the two
+// paths drift without catching the regression.
+func TestPacketACPFactoryNewSessionMCPFailureSemantics(t *testing.T) {
 	broken := filepath.Join(t.TempDir(), "definitely-not-an-executable")
+	newConfig := func() *config.Config {
+		cfg := config.Default()
+		cfg.Default.Provider = "ollama"
+		cfg.Default.Model = "test-model"
+		cfg.Providers["ollama"] = config.ProviderConfig{DefaultModel: "test-model"}
+		return cfg
+	}
+	newFactory := func(cfg *config.Config, log io.Writer) *packetACPFactory {
+		return &packetACPFactory{
+			cfg: cfg, provider: "ollama", model: "test-model", log: log,
+			sessionsDir: t.TempDir(), backupsDir: t.TempDir(),
+		}
+	}
 
 	// Agent defaults: log and continue, so one bad config block cannot make
-	// every ACP session uncreatable.
-	cfg := config.Default()
+	// every ACP session uncreatable. The failed status must survive the shared
+	// runtime mapping and its Close function must be safe to call repeatedly.
+	cfg := newConfig()
 	cfg.MCP = map[string]config.MCPServerConfig{"broken": {Command: broken, TimeoutSec: 2}}
 	var logs bytes.Buffer
-	factory := &packetACPFactory{cfg: cfg, log: &logs}
-	degraded, statuses, err := factory.startMCP(t.Context(), acp.SessionConfig{}, tools.NewRegistry())
+	factory := newFactory(cfg, &logs)
+	degraded, err := factory.NewSession(t.Context(), acp.SessionConfig{CWD: t.TempDir()}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, degraded)
-	t.Cleanup(func() { _ = degraded.Shutdown(time.Second) })
-	require.Len(t, statuses, 1)
-	assert.Equal(t, "broken", statuses[0].Name)
-	assert.Equal(t, "failed", statuses[0].Status)
-	assert.Equal(t, "agent", statuses[0].Source)
-	assert.NotEmpty(t, statuses[0].Error)
+	require.NotNil(t, degraded.Close)
+	require.Len(t, degraded.MCPServers, 1)
+	assert.Equal(t, "broken", degraded.MCPServers[0].Name)
+	assert.Equal(t, "failed", degraded.MCPServers[0].Status)
+	assert.Equal(t, "agent", degraded.MCPServers[0].Source)
+	assert.NotEmpty(t, degraded.MCPServers[0].Error)
 	assert.Contains(t, logs.String(), "mcp broken: failed")
+	require.NoError(t, degraded.Close())
+	require.NoError(t, degraded.Close(), "runtime cleanup must be idempotent")
 
 	// Client-requested: the client named this server for this session, so
 	// silently dropping it would hand the agent a fleet it did not ask for.
-	factory = &packetACPFactory{cfg: config.Default(), log: io.Discard}
-	_, _, err = factory.startMCP(t.Context(), acp.SessionConfig{
+	factory = newFactory(newConfig(), io.Discard)
+	rejected, err := factory.NewSession(t.Context(), acp.SessionConfig{
+		CWD:           t.TempDir(),
 		MCPServersSet: true,
 		MCPServers:    []acp.MCPServer{{Name: "broken", Command: broken}},
-	}, tools.NewRegistry())
+	}, nil)
 	require.Error(t, err)
+	assert.Nil(t, rejected)
 	assert.Contains(t, err.Error(), `MCP server "broken" failed to start`)
 
-	// No servers at all: no manager, and an empty (not nil) status list so the
-	// mcp/list extension reports "none" rather than "unknown".
-	factory = &packetACPFactory{cfg: config.Default(), log: io.Discard}
-	none, statuses, err := factory.startMCP(t.Context(), acp.SessionConfig{}, tools.NewRegistry())
+	// No servers at all still returns an empty (not nil) status list so the
+	// mcp/list extension reports "none" rather than "unknown", and the shared
+	// runtime still supplies the cleanup hook it owns.
+	factory = newFactory(newConfig(), io.Discard)
+	none, err := factory.NewSession(t.Context(), acp.SessionConfig{CWD: t.TempDir()}, nil)
 	require.NoError(t, err)
-	assert.Nil(t, none)
-	assert.NotNil(t, statuses)
-	assert.Empty(t, statuses)
+	require.NotNil(t, none)
+	assert.NotNil(t, none.MCPServers)
+	assert.Empty(t, none.MCPServers)
+	require.NotNil(t, none.Close)
+	require.NoError(t, none.Close())
 }
 
 func TestPacketMCPListerReportsConfiguredServers(t *testing.T) {

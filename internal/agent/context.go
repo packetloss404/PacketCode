@@ -68,7 +68,16 @@ func (cm *ContextManager) EstimateRequest(systemPrompt string, messages []provid
 func messageChars(messages []provider.Message) int {
 	chars := 0
 	for _, m := range messages {
-		chars += len(m.Content) + len(m.Name) + len(m.ToolCallID)
+		// A tool result with a projection is sent as ModelContent, not
+		// Content: counting the full local copy would report context the
+		// request never carries and trigger compaction that is not needed —
+		// most visibly once large results are spilled to disk and the model
+		// only ever sees a 32 KiB excerpt of them.
+		body := m.Content
+		if m.ModelContent != "" {
+			body = m.ModelContent
+		}
+		chars += len(body) + len(m.Name) + len(m.ToolCallID)
 		for _, tc := range m.ToolCalls {
 			chars += len(tc.ID) + len(tc.Name) + len(tc.Arguments)
 		}
@@ -155,6 +164,13 @@ func (cm *ContextManager) CompactWithUsage(
 	// Never split an assistant tool-call message from its tool results: the
 	// cut moves back to the start of the group that would be straddled.
 	tailStart := compactTailStart(modelBody, len(modelBody)-keepRecent)
+	if tailStart == 0 {
+		// The cut landed inside the first tool group, so the whole body is
+		// the tail. Sending an empty summarisation request would insert a
+		// summary of nothing and advance the compaction generation for no
+		// benefit.
+		return normalizeToolTranscript(messages), nil, nil
+	}
 	toSummarize := modelBody[:tailStart]
 	tail := body[tailStart:]
 

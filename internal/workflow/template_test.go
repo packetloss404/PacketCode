@@ -54,3 +54,30 @@ func TestSummariesOf(t *testing.T) {
 	got := summariesOf(sr)
 	require.Equal(t, "one\n\n(error) boom\n\ntwo", got)
 }
+
+func TestWorkspaceForVerifier_SelectsSoleWorktree(t *testing.T) {
+	got := workspaceForVerifier([]jobs.Result{
+		{JobID: "job-1", WorktreePath: "C:/tmp/worktree-1"},
+	})
+	require.Equal(t, "job-1", got.WorktreeJobID)
+	require.Contains(t, got.Framing, "isolated git worktree background job job-1")
+	require.Contains(t, got.Framing, "read-only")
+}
+
+func TestWorkspaceForVerifier_ReadOnlyWorkHasNoWorktree(t *testing.T) {
+	got := workspaceForVerifier([]jobs.Result{{JobID: "job-1"}})
+	require.Empty(t, got.WorktreeJobID)
+	require.Empty(t, got.Framing)
+}
+
+// Packetcode never merges the worktrees of a parallel write step, so no single
+// tree is the step's work. The verifier must be told it is not looking at the
+// change rather than shown one agent's tree as if it were all of them.
+func TestWorkspaceForVerifier_ParallelWorktreesAreNotRooted(t *testing.T) {
+	got := workspaceForVerifier([]jobs.Result{
+		{JobID: "job-1", WorktreePath: "C:/tmp/worktree-1"},
+		{JobID: "job-2", WorktreePath: "C:/tmp/worktree-2"},
+	})
+	require.Empty(t, got.WorktreeJobID)
+	require.Contains(t, got.Framing, "you cannot read this work")
+}

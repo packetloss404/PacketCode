@@ -40,6 +40,9 @@ func (m *Manager) prepareWorktree(ctx context.Context, j *Job) (worktreeInfo, er
 	if created.Path != "" || created.Note != "" {
 		m.setWorktree(j, created)
 	}
+	if created.Path != "" {
+		m.recordWorktreeRoot(j, created.Root)
+	}
 	return created, nil
 }
 
@@ -144,8 +147,19 @@ func createWorktree(ctx context.Context, root, worktreesDir, id string) (worktre
 	if err := writeWorktreeMetadata(worktreesDir, repoKey, id, repoRoot, branch, base, path); err != nil {
 		return info, err
 	}
+	// The job's root is the same place inside the checkout that the
+	// foreground root is inside the repository. Launched from
+	// repo/services/api, a write job used to get the worktree's top level
+	// while a read-only sibling kept services/api, so the two disagreed
+	// about every relative path in the prompt. The remote path already did
+	// this; the local one did not.
+	jobRoot := path
+	if rel, relErr := filepath.Rel(repoRoot, root); relErr == nil && rel != "." &&
+		rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		jobRoot = filepath.Join(path, rel)
+	}
 	return worktreeInfo{
-		Root:   path,
+		Root:   jobRoot,
 		Path:   path,
 		Branch: branch,
 		Base:   base,

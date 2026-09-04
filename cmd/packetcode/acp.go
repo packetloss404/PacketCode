@@ -16,13 +16,10 @@ import (
 	"github.com/packetcode/packetcode/internal/agent"
 	"github.com/packetcode/packetcode/internal/app"
 	"github.com/packetcode/packetcode/internal/config"
-	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/mcp"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
-	"github.com/packetcode/packetcode/internal/skills"
-	"github.com/packetcode/packetcode/internal/tools"
 )
 
 type packetACPFactory struct {
@@ -455,63 +452,6 @@ func mcpServersForSession(sc acp.SessionConfig, cfg *config.Config) (servers []m
 	return out, true
 }
 
-// startMCP spawns the session's MCP fleet and registers its tools.
-//
-// Failure semantics differ by who chose the servers, deliberately:
-//   - client-supplied: a server that fails to start fails session creation.
-//     The client named exactly these servers for this session; silently
-//     running without one would hand the agent a fleet it did not ask for.
-//   - agent-configured defaults: a failed server is logged and skipped, the
-//     session proceeds. This matches the TUI (see runTUI, where MCP failures
-//     "are logged but never block startup") and keeps one broken [mcp.<name>]
-//     block in config.toml from making every desktop session uncreatable —
-//     which, with the defaults fallback above, would otherwise turn a config
-//     typo into an unusable GUI.
-func (f *packetACPFactory) startMCP(
-	ctx context.Context, cfg acp.SessionConfig, toolReg *tools.Registry,
-) (*mcp.Manager, []acp.MCPServerStatus, error) {
-	servers, clientSupplied := mcpServersForSession(cfg, f.cfg)
-	if len(servers) == 0 {
-		return nil, []acp.MCPServerStatus{}, nil
-	}
-	source := "agent"
-	if clientSupplied {
-		source = "client"
-	}
-	logDir, _ := config.HomeDir()
-	manager := mcp.NewManager(mcp.Config{
-		Servers: servers, LogDir: logDir,
-		ClientInfo: mcp.ClientInfo{Name: "packetcode-acp", Version: welcomeVersion()},
-	})
-	startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	reports := manager.Start(startupCtx)
-	cancel()
-
-	statuses := make([]acp.MCPServerStatus, 0, len(reports))
-	for _, report := range reports {
-		if report.Status != "running" && clientSupplied {
-			_ = manager.Shutdown(2 * time.Second)
-			return nil, nil, fmt.Errorf("MCP server %q failed to start: %s", report.Name, report.Err)
-		}
-		switch report.Status {
-		case "running":
-			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %d tools, pid %d\n", report.Name, report.ToolCount, report.PID)
-		default:
-			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %s — %s\n", report.Name, report.Status, report.Err)
-		}
-		statuses = append(statuses, acp.MCPServerStatus{
-			Name: report.Name, Status: report.Status, ToolCount: report.ToolCount,
-			Source: source, Command: report.Command, Error: report.Err,
-		})
-	}
-	for _, report := range mcp.RegisterTools(toolReg, manager.Clients()) {
-		if report.Status == "skipped" {
-			fmt.Fprintf(f.log, "packetcode acp: mcp %s.%s skipped alias %s: %s\n", report.Server, report.Tool, report.Alias, report.Err)
-		}
-	}
-	return manager, statuses, nil
-}
-
 // packetProjectFileIndex answers @-mention file searches via the
 // _packetcode/project/files extension. It reuses app.ListProjectFiles, so the
 // candidate set and ignore rules are identical to the TUI's @ menu: git's own
@@ -578,20 +518,6 @@ func rankProjectFiles(paths []string, query string, limit int) []string {
 	return out
 }
 
-// acpSystemPrompt appends the skills index for an ACP session. Discovery
-// errors go to stderr, matching the foreground path: a skill that failed to
-// load is a file the user wrote and expects to work.
-func acpSystemPrompt(reg *skills.Registry) string {
-	prompt := systemPrompt
-	if block := reg.IndexBlock(); block != "" {
-		prompt += "\n\n" + block
-	}
-	for _, skillErr := range reg.Errors() {
-		fmt.Fprintf(os.Stderr, "packetcode: skill %s\n", skillErr)
-	}
-	return prompt
-}
-
 func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig, approver agent.Approver) (*acp.Runtime, error) {
 	// Resolve the per-session policy first so an invalid permissionMode fails
 	// before any session state is created.
@@ -599,129 +525,59 @@ func (f *packetACPFactory) NewSession(ctx context.Context, cfg acp.SessionConfig
 	if err != nil {
 		return nil, err
 	}
-	sessions := session.NewManager(f.sessionsDir)
-	factories := providerFactoriesFromConfig(f.cfg)
-
-	// Resume path (ACP session/load): bind the runtime to the persisted
-	// transcript and prefer the provider/model the conversation was held with.
-	var resumed *session.Session
-	activeProvider, activeModel := f.provider, f.model
-	if cfg.SessionID != "" {
-		loaded, err := sessions.Load(cfg.SessionID)
-		if err != nil {
-			return nil, fmt.Errorf("load session %s: %w", cfg.SessionID, err)
-		}
-		// Remote-bound transcripts must not resume against the local filesystem.
-		if err := session.ValidateWorkspace(loaded, "", ""); err != nil {
-			return nil, err
-		}
-		if loaded.Provider != "" {
-			activeProvider = loaded.Provider
-		}
-		if loaded.Model != "" {
-			activeModel = loaded.Model
-		}
-		resumed = loaded
-	}
-
-	// Per-session overrides (session/new "_packetcode" object) take precedence
-	// over both the configured defaults and a resumed transcript's stored pair.
 	if cfg.Provider != "" {
+		factories := providerFactoriesFromConfig(f.cfg)
 		if _, ok := factories[cfg.Provider]; !ok {
 			return nil, fmt.Errorf("%w %q", acp.ErrUnknownProvider, cfg.Provider)
 		}
-		if cfg.Provider != activeProvider {
-			// A provider override invalidates the previous model choice; fall
-			// back to that provider's own default unless the client also
-			// picked a model.
-			activeModel = f.cfg.Providers[cfg.Provider].DefaultModel
-		}
-		activeProvider = cfg.Provider
 	}
-	if cfg.Model != "" {
-		activeModel = cfg.Model
-	}
-
-	// Feature gate: refuse a Sugar-backed session when the integration is
-	// switched off. Checked against the RESOLVED provider rather than the
-	// configured default, so a per-session override to sugar is gated too.
-	if activeProvider == "sugar" && !f.cfg.SugarIsEnabled() && !f.cfg.SugarUsesCustomProvider() {
-		return nil, fmt.Errorf("Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
-	}
-	if activeProvider == "" {
-		return nil, fmt.Errorf("no default provider is configured; configure PacketCode before creating a session")
-	}
-	if activeModel == "" {
-		return nil, fmt.Errorf("no model is configured for provider %q", activeProvider)
-	}
-	providerFactory, ok := factories[activeProvider]
-	if !ok {
-		return nil, fmt.Errorf("provider %q is unknown", activeProvider)
-	}
-	key := f.cfg.GetProviderKey(activeProvider)
-	if providerRequiresAPIKey(f.cfg, activeProvider) && key == "" {
-		return nil, fmt.Errorf("provider %q is not configured with an API key", activeProvider)
-	}
-	reg := provider.NewRegistry()
-	reg.Register(providerFactory(key))
-	if err := reg.SetActive(activeProvider, activeModel); err != nil {
-		return nil, err
-	}
-
-	toolReg := tools.NewRegistry()
 	root := filepath.Clean(cfg.CWD)
-	// Per ACP session, for the same reason as the foreground registry.
-	toolReg.Register(tools.NewTodoWriteTool(tools.NewTodoStore()))
-	// Held in a local so the index can reach the prompt below. Registering the
-	// tool without the index left ACP clients told to "load a skill" with no
-	// way to learn a single name.
-	skillRegistry := skills.Load(root)
-	toolReg.Register(tools.NewSkillTool(skillRegistry))
-	toolReg.Register(tools.NewFetchTool())
-	toolReg.Register(tools.NewReadFileTool(root))
-	toolReg.Register(tools.NewSearchCodebaseTool(root))
-	toolReg.Register(tools.NewListDirectoryTool(root))
-	toolReg.Register(tools.NewListSymbolsTool(root))
-	toolReg.Register(tools.NewFindDefinitionTool(root))
-	toolReg.Register(tools.NewFindReferencesTool(root))
-	toolReg.Register(tools.NewGetDiagnosticsTool(root))
-	toolReg.Register(tools.NewExecuteCommandTool(root))
-
-	current := resumed
-	if current == nil {
-		created, err := sessions.New(activeProvider, activeModel)
-		if err != nil {
-			return nil, fmt.Errorf("persist session: %w", err)
-		}
-		current = created
-	}
-	backups := session.NewBackupManager(f.backupsDir, current.ID)
-	toolReg.Register(tools.NewWriteFileTool(root, backups))
-	toolReg.Register(tools.NewPatchFileTool(root, backups))
-
-	mcpManager, mcpStatuses, err := f.startMCP(ctx, cfg, toolReg)
+	servers, clientSupplied := mcpServersForSession(cfg, f.cfg)
+	rt, err := buildPacketRuntime(ctx, packetRuntimeConfig{
+		Config:           f.cfg,
+		Root:             root,
+		DefaultProvider:  f.provider,
+		DefaultModel:     f.model,
+		ProviderOverride: cfg.Provider,
+		ModelOverride:    cfg.Model,
+		ResumeID:         cfg.SessionID,
+		PermissionPolicy: policy,
+		SessionsDir:      f.sessionsDir,
+		BackupsDir:       f.backupsDir,
+		MCPServers:       servers,
+		MCPServersSet:    true,
+		MCPClientName:    "packetcode-acp",
+		FailOnMCPError:   clientSupplied,
+		SystemPrompt:     systemPrompt,
+		Diagnostics:      f.log,
+		DiagnosticPrefix: "packetcode acp: ",
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	hookRunner := hooks.New(f.cfg.Hooks, root)
-	runner := agent.New(agent.Config{
-		LoopDetection: agent.LoopDetectionSettings(
-			f.cfg.Behavior.LoopDetectionDisabled,
-			f.cfg.Behavior.LoopDetectionWindow,
-			f.cfg.Behavior.LoopDetectionThreshold),
-		Registry: reg, Tools: toolReg, Session: sessions,
-		Approver: approver, Policy: policy, SystemPrompt: acpSystemPrompt(skillRegistry),
-		Hooks:         hookRunner,
-		SugarCache:    packetcodeSugarCacheConfig(f.cfg),
-		ConduitShadow: packetcodeConduitShadowConfig(f.cfg),
-	})
-	runtime := &acp.Runtime{ID: current.ID, Runner: runner, MCPServers: mcpStatuses}
-	if resumed != nil {
-		runtime.History = resumed.Messages
+	source := "agent"
+	if clientSupplied {
+		source = "client"
 	}
-	if mcpManager != nil {
-		runtime.Close = func() error { return mcpManager.Shutdown(2 * time.Second) }
+	mcpStatuses := make([]acp.MCPServerStatus, 0, len(rt.MCPReports))
+	for _, report := range rt.MCPReports {
+		switch report.Status {
+		case "running":
+			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %d tools, pid %d\n", report.Name, report.ToolCount, report.PID)
+		default:
+			fmt.Fprintf(f.log, "packetcode acp: mcp %s: %s — %s\n", report.Name, report.Status, report.Err)
+		}
+		mcpStatuses = append(mcpStatuses, acp.MCPServerStatus{
+			Name: report.Name, Status: report.Status, ToolCount: report.ToolCount,
+			Source: source, Command: report.Command, Error: report.Err,
+		})
 	}
-	return runtime, nil
+	result := &acp.Runtime{
+		ID: rt.SessionID, Runner: rt.NewAgent(approver), MCPServers: mcpStatuses,
+		Close: rt.Close,
+	}
+	if rt.Resumed {
+		result.History = rt.CurrentSession().Messages
+	}
+	return result, nil
 }
