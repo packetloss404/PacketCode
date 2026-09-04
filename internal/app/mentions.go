@@ -108,12 +108,31 @@ func readMention(raw, root string) (rel, content string, ok bool) {
 		return "", "", false
 	}
 
-	info, err := os.Stat(p)
+	// The lexical check above is on the typed path. Resolve symlinks on both
+	// sides and check again, so a link inside the project that points outside
+	// it -- committed to a repository, or left by a build tool -- cannot pull
+	// a file from outside the root into the prompt. The native read tools
+	// already resolve this way (internal/computers/local_backend.go); the
+	// mention path is the same boundary and must not be looser.
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", "", false
+	}
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", "", false
+	}
+	relReal, err := filepath.Rel(realRoot, real)
+	if err != nil || relReal == ".." || strings.HasPrefix(relReal, ".."+string(filepath.Separator)) {
+		return "", "", false
+	}
+
+	info, err := os.Lstat(real)
 	if err != nil || !info.Mode().IsRegular() {
 		return "", "", false
 	}
 
-	data, err := os.ReadFile(p)
+	data, err := os.ReadFile(real)
 	if err != nil {
 		return "", "", false
 	}

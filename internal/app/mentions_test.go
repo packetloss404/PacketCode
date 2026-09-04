@@ -82,3 +82,36 @@ func TestExpandFileMentions_RefusesDotEnv(t *testing.T) {
 		t.Fatalf("secret leaked into prompt: %q", expanded)
 	}
 }
+
+func TestExpandFileMentions_RefusesSymlinkEscape(t *testing.T) {
+	outside := t.TempDir()
+	root := t.TempDir()
+	secret := filepath.Join(outside, "id_rsa")
+	os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600)
+	link := filepath.Join(root, "notes.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	expanded, attached := expandFileMentions("read @notes.txt", root)
+	if len(attached) != 0 {
+		t.Fatalf("attached = %v, want none", attached)
+	}
+	if strings.Contains(expanded, "PRIVATE KEY MATERIAL") {
+		t.Fatalf("symlinked file leaked into prompt: %q", expanded)
+	}
+}
+
+func TestExpandFileMentions_AllowsSymlinkInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "real.go"), []byte("package real"), 0o644)
+	if err := os.Symlink(filepath.Join(root, "real.go"), filepath.Join(root, "alias.go")); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	expanded, attached := expandFileMentions("read @alias.go", root)
+	if len(attached) != 1 {
+		t.Fatalf("attached = %v, want one file", attached)
+	}
+	if !strings.Contains(expanded, "package real") {
+		t.Fatalf("in-root symlink was not expanded: %q", expanded)
+	}
+}
