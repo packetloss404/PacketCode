@@ -291,13 +291,12 @@ type Snapshot struct {
 // AwaitingApproval, AwaitingAnswer and Blocked split the one "this job is
 // waiting on a human" bit into the two things it can actually mean.
 //
-// The stored fields cannot be read directly for this. Every writer that sets
-// NeedsInput today also sets NeedsApproval, so NeedsInput alone has never
-// distinguished "a tool call needs approving" from "the agent asked you
-// something" — and the second is the signal the background-question feature
-// needs a place for. AwaitingAnswer is deliberately the *residue*: it becomes
-// true the moment a writer sets NeedsInput without NeedsApproval, and stays
-// false until one does, so no caller has to be updated when that happens.
+// A pending tool approval sets NeedsApproval alone; NeedsInput is reserved for
+// "the agent asked you something", which is the signal the background-question
+// feature needs a place for. AwaitingAnswer is deliberately the *residue*: it
+// becomes true the moment a writer sets NeedsInput without NeedsApproval, and
+// stays false until one does, so no caller has to be updated when that happens.
+// (Until audit patch P05 every writer set both, so it was never true.)
 func (s Snapshot) AwaitingApproval() bool { return s.NeedsApproval }
 
 // AwaitingAnswer reports a job blocked on something other than a tool

@@ -265,7 +265,11 @@ func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent
 			if needsApproval {
 				activity = "needs approval"
 			}
-			m.updateActivity(j, activity, ev.ToolCall.Name, needsApproval, needsApproval)
+			// NeedsInput stays false here: it means "the agent asked the user
+			// something", which no tool proposal is. Setting both made
+			// Snapshot.AwaitingAnswer true for every pending approval and drew
+			// the question icon in Agent View for a plain y/n prompt.
+			m.updateActivity(j, activity, ev.ToolCall.Name, false, needsApproval)
 		case agent.EventToolCallApproved:
 			m.updateActivity(j, "tool approved", ev.ToolCall.Name, false, false)
 		case agent.EventToolCallRejected:

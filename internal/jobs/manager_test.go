@@ -988,7 +988,7 @@ func TestManager_SnapshotMarksPendingApproval(t *testing.T) {
 			return false
 		}
 		pending = got
-		return got.NeedsInput && got.NeedsApproval && got.LastActivity == "needs approval"
+		return !got.NeedsInput && got.NeedsApproval && got.LastActivity == "needs approval"
 	})
 	assert.Greater(t, pending.Seq, snap.Seq)
 
