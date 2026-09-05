@@ -14,6 +14,22 @@ copy its code or prompt text.
 
 ## v1 Release Readiness
 
+- Make `internal/jobs` survive CPU pressure. The package runs in ~3.4s idle
+  and took 88s with `TestManager_ReadOnlyJobWithoutVerifyRootCannotSeeWorktree`
+  failing outright when three `golangci-lint` passes ran alongside it. It
+  passes in isolation every time, so nothing is broken in the ordinary
+  sense; the tests are simply tuned for an idle machine, and a CI runner is
+  not one. This is the most likely source of the next unexplained red run,
+  now that the known flakes are fixed. Look at the timeouts and the
+  worktree/process setup cost rather than at the assertions.
+- Move the CI toolchain to Go 1.27 once golangci-lint ships a build against
+  it. Attempted 2026-09-05 and reverted the same day: golangci-lint v2.9.0
+  is itself built with Go 1.26 and panics on a 1.27 standard library with
+  `file requires newer Go version go1.27 (application built with go1.26)`,
+  so the CI Go version cannot move ahead of the linter's own build. Nothing
+  is lost by waiting — every reachable stdlib advisory is fixed by go1.26.6
+  and the pin is 1.26.8. The module floor is `go 1.26.0` and does not need
+  to move with it.
 - ~~Add a bounded non-interactive execution surface:~~ **Shipped 2026-08-31.**
   `packetcode run [--provider P] [--model M] [--permission-mode MODE]
   [--resume ID] [--json] <prompt...>` runs one agent turn through the runtime
@@ -86,7 +102,9 @@ copy its code or prompt text.
 - Keep provider catalogs, pricing, context windows, and tool-capability metadata
   current; prefer live discovery when authoritative. **Decided 2026-08-14: fetch
   models.dev with stdlib, do not import `charm.land/catwalk`.** Catwalk declares
-  `go 1.26.6` against this repo's 1.24.2, pulls prometheus and protobuf for what
+  `go 1.26.6` against this repo's 1.24.2 (**that half no longer applies: the
+  floor moved to `go 1.26.0` on 2026-09-05; the four reasons below still
+  stand**), pulls prometheus and protobuf for what
   is 70 lines of stdlib HTTP, has no `mistral` entry, prices MiniMax-M3 at the
   long-context tier, and has no tiered-pricing field at all — so it structurally
   cannot express the MiniMax billing item below. models.dev carries the tiers
@@ -570,6 +588,12 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   amendment covering token storage, refresh, and loopback redirect-URI binding.
 - Add a declarative pack manifest and install/list/enable workflow for prompt commands, MCP, hooks, themes, and workflows.
 - Surface MCP timeout, crash, and reconnect details consistently in transcripts and Agent View.
+- Pass the manager's context to MCP children instead of `context.Background()`
+  (`internal/mcp/process.go:27`). Audit finding F-14. `cmd.Cancel` can never
+  fire today, so shutdown leans entirely on closing stdin and then
+  `KillTree`. It works, which is why this is cosmetic rather than a bug —
+  but it means the one mechanism designed to stop these processes is dead
+  code, and the 2026-09-05 shutdown race in `client.go` sat next door to it.
 
 ## Providers and Local Models
 
@@ -725,6 +749,23 @@ review-gate, and Flight surfaces to show them in. See
   the first `Decide`, keep deny as an absolute floor over any hook verdict, make
   both mutating verdicts opt-in per hook, and assert that a rewrite lands before
   the approval prompt renders.
+
+- Decide whether unchecked type assertions in tests should stay exempt from
+  errcheck. `.golangci.yml` keeps `check-type-assertions` on for shipping
+  code and excludes it under `_test.go` only, by matching errcheck's
+  unnamed message. The reasoning was that a panicking assertion in a test
+  already fails the test and names the offending type, so rewriting ~40
+  inline assertions like `assert.Equal(t, root, tool.(*ReadFileTool).Root)`
+  into two-statement checked forms costs readability for no safety.
+  Unchecked *errors* are still enforced in tests. It is one config block to
+  reverse if the project would rather have the rewrites.
+- Answer audit question U1: can anything other than a same-user editor write
+  the stdin of `packetcode acp`? F-09 is medium or high depending on the
+  answer, because an ACP client may choose any absolute `cwd` and supply
+  arbitrary MCP `command` and `env`, which the server then execs. The
+  evidence needed is PacketADE's launch code — whether it spawns the process
+  itself and owns both pipe ends — plus any service unit or socket wrapper
+  around `packetcode acp` anywhere.
 
 ## PacketADE Integration and BridgeCode-Plus
 
