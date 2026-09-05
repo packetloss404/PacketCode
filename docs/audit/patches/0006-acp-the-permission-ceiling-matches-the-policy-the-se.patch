@@ -1,0 +1,108 @@
+From f04688d8f7697a438e6224438af43d0b3c784968 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 16:57:10 -0500
+Subject: [PATCH 06/10] acp: the permission ceiling matches the policy the
+ server runs
+
+serverPermissionCeiling answered "full" for an empty profile and for any
+custom profile, while permissions.New runs "" as balanced (ask) and a
+custom profile as ask plus rules. A client could therefore be offered
+and granted auto or bypass on top of a policy the operator never raised
+above ask. The ceiling now resolves through ParseProfile the way the
+policy does and falls back to ask; trust_mode remains the one explicit
+way to raise it to full, because it already raises the policy to full.
+
+Reachability: config.Default() writes profile = "balanced", so the empty
+case needed a hand-edited profile = "" and the custom case needed a
+[permissions.profiles.<name>] table. Both are fail-closed now.
+
+Audit patch P12. Rollback: git revert this commit. Call sites of
+serverPermissionCeiling: runACPCommand (cmd/packetcode/acp.go) and its
+tests; signature unchanged.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ cmd/packetcode/acp.go      | 29 +++++++++++++++++++----------
+ cmd/packetcode/acp_test.go | 14 ++++++++++----
+ 2 files changed, 29 insertions(+), 14 deletions(-)
+
+diff --git a/cmd/packetcode/acp.go b/cmd/packetcode/acp.go
+index 5a34263..527ba44 100644
+--- a/cmd/packetcode/acp.go
++++ b/cmd/packetcode/acp.go
+@@ -47,17 +47,26 @@ var profileRank = map[permissions.Profile]int{
+ 
+ // serverPermissionCeiling derives the escalation ceiling from the effective
+ // startup configuration (after any --permission-mode flag was applied — the
+-// flag writes cfg.Permissions.Profile). An EXPLICITLY configured profile caps
+-// what clients may request; a default (empty) profile leaves them
+-// unrestricted, because on a default setup the ACP client's local user is the
+-// operator and per-session modes are their consent mechanism. Custom profiles
+-// have unknown permissiveness and also leave clients unrestricted.
++// flag writes cfg.Permissions.Profile).
++//
++// The ceiling is the profile the server-wide policy actually runs under, so a
++// client can narrow its session but never widen it past what the operator
++// started with. Two cases used to answer "unrestricted" instead:
++//
++//   - An empty profile. permissions.New treats "" as "balanced" (ask), so the
++//     policy was ask while the ceiling said full -- and config.Default() sets
++//     "balanced" explicitly, so the only way to reach "" was to write
++//     profile = "" by hand.
++//   - A custom profile. Its base is ask with the operator's rules layered on
++//     (permissions.configProfile), so ask is the exact ceiling, not a guess.
++//
++// Both now resolve through ParseProfile the way the policy itself does, and
++// fall back to ask. Trust mode remains the one explicit way to raise the
++// ceiling to full, because it already raises the policy to full.
+ func serverPermissionCeiling(cfg *config.Config) permissions.Profile {
+-	ceiling := permissions.ProfileFull
+-	if cfg.Permissions.Profile != "" {
+-		if profile, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
+-			ceiling = profile
+-		}
++	ceiling := permissions.ProfileAsk
++	if profile, err := permissions.ParseProfile(cfg.Permissions.Profile); err == nil {
++		ceiling = profile
+ 	}
+ 	if cfg.Behavior.TrustMode {
+ 		ceiling = permissions.ProfileFull
+diff --git a/cmd/packetcode/acp_test.go b/cmd/packetcode/acp_test.go
+index 2ba906c..17b761e 100644
+--- a/cmd/packetcode/acp_test.go
++++ b/cmd/packetcode/acp_test.go
+@@ -221,10 +221,15 @@ func TestPacketACPFactoryPermissionCeiling(t *testing.T) {
+ }
+ 
+ func TestServerPermissionCeilingDefaults(t *testing.T) {
+-	// Default config: the local user is the operator; no restriction.
++	// Default config runs the "balanced" (ask) policy, so the ceiling is ask.
+ 	cfg := config.Default()
++	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
++
++	// An empty profile is what permissions.New treats as "balanced": the
++	// ceiling must match the policy, not exceed it.
+ 	cfg.Permissions.Profile = ""
+-	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
++	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
++	assert.Equal(t, []string{"ask", "read-only"}, allowedPermissionModes(serverPermissionCeiling(cfg)))
+ 	assert.Equal(t, acp.PermissionModes, allowedPermissionModes(permissions.ProfileFull))
+ 
+ 	// Explicit ask profile caps at ask.
+@@ -236,10 +241,11 @@ func TestServerPermissionCeilingDefaults(t *testing.T) {
+ 	cfg.Behavior.TrustMode = true
+ 	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
+ 
+-	// Custom profiles have unknown shape: unrestricted.
++	// A custom profile is ask plus the operator's rules, so its ceiling is
++	// ask: a client cannot request auto or bypass on top of it.
+ 	cfg.Behavior.TrustMode = false
+ 	cfg.Permissions.Profile = "my-custom-profile"
+-	assert.Equal(t, permissions.ProfileFull, serverPermissionCeiling(cfg))
++	assert.Equal(t, permissions.ProfileAsk, serverPermissionCeiling(cfg))
+ }
+ 
+ // TestPacketACPFactoryMCPServersFallback pins the absent-vs-empty decision at
+-- 
+2.53.0.windows.2
+

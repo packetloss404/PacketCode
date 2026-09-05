@@ -1,0 +1,384 @@
+From 195060ba4db5715ce71cce1e713df289078b924c Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 08:15:56 -0500
+Subject: [PATCH 07/10] config: validate settings at boot and name the missing
+ variable
+
+A missing env_from variable, an api_key_env naming an unset variable, a
+custom provider with an unusable base_url, an enabled MCP server with no
+command, an out-of-range behavior value, and a default provider with no
+key were each reported somewhere -- but each somewhere else, and some
+only when the feature was first used. Config.ValidationProblems produces
+one list from the loaded config; the TUI, run, and acp print it to
+stderr at startup, and doctor carries it as config.validation.
+
+Reported, never fatal, the same way CompatProblems is: this is a file a
+person typed. Anything already fatal (permission policy, Sugar/Conduit
+ranges) still fails where it did. acp also gains the .env and compat
+reports the TUI and run already printed.
+
+Audit patch P08 (dark-period hardening). Rollback: git revert this
+commit; no on-disk format changes. New exported symbol:
+(*config.Config).ValidationProblems; callers are main.go run(),
+run_command.go, acp.go, doctor.go.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ cmd/packetcode/acp.go            |   9 ++
+ cmd/packetcode/doctor.go         |  18 ++++
+ cmd/packetcode/main.go           |   7 ++
+ cmd/packetcode/run_command.go    |   3 +
+ internal/config/validate.go      | 160 +++++++++++++++++++++++++++++++
+ internal/config/validate_test.go |  85 ++++++++++++++++
+ 6 files changed, 282 insertions(+)
+ create mode 100644 internal/config/validate.go
+ create mode 100644 internal/config/validate_test.go
+
+diff --git a/cmd/packetcode/acp.go b/cmd/packetcode/acp.go
+index 527ba44..04946ed 100644
+--- a/cmd/packetcode/acp.go
++++ b/cmd/packetcode/acp.go
+@@ -136,6 +136,15 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
+ 		fmt.Fprintln(stderr, "packetcode acp: ACP integration is disabled; enable [acp].enabled or set PACKETCODE_ACP_ENABLED=true")
+ 		return 1
+ 	}
++	for _, problem := range cfg.DotEnvProblems() {
++		fmt.Fprintf(stderr, "packetcode acp: .env %s\n", problem)
++	}
++	for _, problem := range cfg.CompatProblems() {
++		fmt.Fprintf(stderr, "packetcode acp: config %s\n", problem)
++	}
++	for _, problem := range cfg.ValidationProblems() {
++		fmt.Fprintf(stderr, "packetcode acp: config %s\n", problem)
++	}
+ 	if *permissionFlag != "" {
+ 		profile, err := permissions.ParseProfile(*permissionFlag)
+ 		if err != nil {
+diff --git a/cmd/packetcode/doctor.go b/cmd/packetcode/doctor.go
+index 1f3ee36..5ff3809 100644
+--- a/cmd/packetcode/doctor.go
++++ b/cmd/packetcode/doctor.go
+@@ -197,6 +197,7 @@ func buildDoctorReport() doctorReport {
+ 	}
+ 
+ 	addConfigCompatCheck(&r, cfg)
++	addConfigValidationCheck(&r, cfg)
+ 	addProviderChecks(&r, cfg)
+ 	addStateDirCheck(&r, "state.sessions", "sessions dir", config.SessionsDir)
+ 	addStateDirCheck(&r, "state.backups", "backups dir", config.BackupsDir)
+@@ -342,6 +343,23 @@ func addConfigCompatCheck(r *doctorReport, cfg *config.Config) {
+ 		"Upgrade packetcode, or remove the setting", "docs/compatibility.md")
+ }
+ 
++// addConfigValidationCheck is the same list the TUI, run, and acp print at
++// startup, so doctor and the running program cannot disagree about which
++// settings are inert. Warn, not fail: every item here is one the program
++// starts in spite of.
++func addConfigValidationCheck(r *doctorReport, cfg *config.Config) {
++	problems := cfg.ValidationProblems()
++	if len(problems) == 0 {
++		r.add("config.validation", "config", doctorOK,
++			"config settings validate", "", "", "docs/configuration.md")
++		return
++	}
++	r.add("config.validation", "config", doctorWarn,
++		fmt.Sprintf("%d config setting(s) will fail or do nothing", len(problems)),
++		strings.Join(problems, "; "),
++		"Correct the named settings in "+doctorConfigPath()+" or set the named environment variables", "docs/configuration.md")
++}
++
+ func addStateDirCheck(r *doctorReport, id, message string, fn func() (string, error)) {
+ 	dir, err := fn()
+ 	if err != nil {
+diff --git a/cmd/packetcode/main.go b/cmd/packetcode/main.go
+index 2b01e7f..5f26166 100644
+--- a/cmd/packetcode/main.go
++++ b/cmd/packetcode/main.go
+@@ -172,6 +172,13 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
+ 		}
+ 	}
+ 
++	// Settings that will fail or do nothing once running, each naming the
++	// setting and any environment variable it needs. After setup, so a first
++	// run is not warned about the key it is about to be asked for.
++	for _, p := range cfg.ValidationProblems() {
++		fmt.Fprintf(os.Stderr, "packetcode: config %s\n", p)
++	}
++
+ 	if trust {
+ 		cfg.Behavior.TrustMode = true
+ 	}
+diff --git a/cmd/packetcode/run_command.go b/cmd/packetcode/run_command.go
+index 8e6c895..1c859c9 100644
+--- a/cmd/packetcode/run_command.go
++++ b/cmd/packetcode/run_command.go
+@@ -178,6 +178,9 @@ func executeRunWithRuntime(ctx context.Context, opts runCommandOptions, stderr i
+ 	for _, problem := range cfg.CompatProblems() {
+ 		fmt.Fprintf(stderr, "packetcode run: config %s\n", problem)
+ 	}
++	for _, problem := range cfg.ValidationProblems() {
++		fmt.Fprintf(stderr, "packetcode run: config %s\n", problem)
++	}
+ 	if opts.PermissionMode != "" {
+ 		profile, parseErr := permissions.ParseProfile(opts.PermissionMode)
+ 		if parseErr != nil {
+diff --git a/internal/config/validate.go b/internal/config/validate.go
+new file mode 100644
+index 0000000..e7b7818
+--- /dev/null
++++ b/internal/config/validate.go
+@@ -0,0 +1,160 @@
++package config
++
++import (
++	"fmt"
++	"net/url"
++	"os"
++	"sort"
++	"strings"
++)
++
++// ValidationProblems reports settings that will fail, or silently do nothing,
++// once the program is running -- and names the setting, and where one is
++// missing, the environment variable to set.
++//
++// This exists for the operator who is not watching the terminal: a missing
++// env_from variable, an api_key_env that names an unset variable, a custom
++// provider with an unusable base_url, or an enabled MCP server with no
++// command are each reported today, but each one somewhere else and some of
++// them only when the feature is first used. One list, produced at boot from
++// the loaded config, is what makes "why does this option do nothing" a
++// question answered by the first lines of stderr rather than by a debugging
++// session.
++//
++// Reported, never fatal, for the same reason CompatProblems is: this is a
++// file a person typed, and refusing to start over a warning is the worse
++// failure. Anything that IS fatal (an invalid permission policy, an
++// out-of-range Sugar/Conduit value) still fails where it always did.
++func (c *Config) ValidationProblems() []string {
++	if c == nil {
++		return nil
++	}
++	var problems []string
++
++	names := make([]string, 0, len(c.MCP))
++	for name := range c.MCP {
++		names = append(names, name)
++	}
++	sort.Strings(names)
++	for _, name := range names {
++		entry := c.MCP[name]
++		if _, err := MCPLogFileName(name); err != nil {
++			problems = append(problems, fmt.Sprintf("[mcp.%s]: %v", name, err))
++			continue
++		}
++		if !entry.IsEnabled() {
++			continue
++		}
++		if strings.TrimSpace(entry.Command) == "" {
++			problems = append(problems, fmt.Sprintf("[mcp.%s] is enabled but has no command; set command, or enabled = false", name))
++		}
++		if entry.TimeoutSec < 0 {
++			problems = append(problems, fmt.Sprintf("[mcp.%s] timeout_sec %d is negative; the default of 10 is used", name, entry.TimeoutSec))
++		}
++		for _, variable := range entry.EnvFrom {
++			variable = strings.TrimSpace(variable)
++			if variable == "" {
++				continue
++			}
++			if _, ok := os.LookupEnv(variable); !ok {
++				problems = append(problems, fmt.Sprintf("[mcp.%s] env_from names %s, which is not set in this environment; the server starts without it", name, variable))
++			}
++		}
++	}
++
++	slugs := make([]string, 0, len(c.Providers))
++	for slug := range c.Providers {
++		slugs = append(slugs, slug)
++	}
++	sort.Strings(slugs)
++	for _, slug := range slugs {
++		pc := c.Providers[slug]
++		if pc.IsOpenAICompatible() {
++			if err := validateProviderBaseURL(pc.BaseURL); err != nil {
++				problems = append(problems, fmt.Sprintf("[providers.%s] %v", slug, err))
++			}
++		}
++		if env := strings.TrimSpace(pc.APIKeyEnv); env != "" && c.ProviderRequiresAPIKey(slug) && c.GetProviderKey(slug) == "" {
++			problems = append(problems, fmt.Sprintf("[providers.%s] api_key_env names %s, which is not set, and no api_key is configured; set %s or api_key", slug, env, env))
++		}
++	}
++
++	if active := strings.TrimSpace(c.Default.Provider); active != "" {
++		_, configured := c.Providers[active]
++		known := configured || isReservedHostedProvider(active) || IsKeylessProvider(active)
++		switch {
++		case !known:
++			problems = append(problems, fmt.Sprintf("[default] provider %q is not a built-in provider and has no [providers.%s] table", active, active))
++		case c.ProviderRequiresAPIKey(active) && c.GetProviderKey(active) == "":
++			problems = append(problems, fmt.Sprintf("[default] provider %s has no API key: set %s (environment or .env) or api_key under [providers.%s]", active, c.ProviderAPIKeyEnvName(active), active))
++		}
++	}
++
++	b := c.Behavior
++	if b.AutoCompactThreshold < 0 || b.AutoCompactThreshold > 100 {
++		problems = append(problems, fmt.Sprintf("[behavior] auto_compact_threshold %d is outside 0..100; the default of 80 is used", b.AutoCompactThreshold))
++	}
++	if b.ProviderMaxRetries < 0 {
++		problems = append(problems, fmt.Sprintf("[behavior] provider_max_retries %d is negative; the default of 3 is used", b.ProviderMaxRetries))
++	}
++	if b.ProviderStallTimeout < 0 {
++		problems = append(problems, fmt.Sprintf("[behavior] provider_stall_timeout %d is negative; the default of 60 is used", b.ProviderStallTimeout))
++	}
++	for _, cap := range []struct {
++		name  string
++		value int
++	}{
++		{"background_max_concurrent", b.BackgroundMaxConcurrent},
++		{"background_max_depth", b.BackgroundMaxDepth},
++		{"background_max_total", b.BackgroundMaxTotal},
++		{"background_token_budget", b.BackgroundTokenBudget},
++		{"workflow_token_budget", b.WorkflowTokenBudget},
++	} {
++		if cap.value < 0 {
++			problems = append(problems, fmt.Sprintf("[behavior] %s %d is negative; the default is used", cap.name, cap.value))
++		}
++	}
++
++	if c.StatusLine.IsEnabled() && c.StatusLine.TimeoutSec < 0 {
++		problems = append(problems, fmt.Sprintf("[statusline] timeout_sec %d is negative; the default of 2 is used", c.StatusLine.TimeoutSec))
++	}
++	for _, group := range []struct {
++		name  string
++		hooks []HookConfig
++	}{
++		{"user_prompt_submit", c.Hooks.UserPromptSubmit},
++		{"pre_tool_use", c.Hooks.PreToolUse},
++		{"post_tool_use", c.Hooks.PostToolUse},
++	} {
++		for i, hook := range group.hooks {
++			if strings.TrimSpace(hook.Command) == "" && (hook.Enabled == nil || *hook.Enabled) {
++				problems = append(problems, fmt.Sprintf("[[hooks.%s]] entry %d has no command and does nothing", group.name, i+1))
++			}
++			if hook.TimeoutSec < 0 {
++				problems = append(problems, fmt.Sprintf("[[hooks.%s]] entry %d timeout_sec %d is negative; the default of 10 is used", group.name, i+1, hook.TimeoutSec))
++			}
++		}
++	}
++	return problems
++}
++
++// validateProviderBaseURL mirrors the check custom providers apply when they
++// are constructed, so a bad base_url is named at boot rather than on the
++// first request.
++func validateProviderBaseURL(raw string) error {
++	raw = strings.TrimSpace(raw)
++	if raw == "" {
++		return fmt.Errorf("base_url is required for an openai_compatible provider")
++	}
++	u, err := url.Parse(raw)
++	if err != nil {
++		return fmt.Errorf("base_url is invalid: %w", err)
++	}
++	if u.Scheme != "http" && u.Scheme != "https" {
++		return fmt.Errorf("base_url must use http or https")
++	}
++	if u.Host == "" {
++		return fmt.Errorf("base_url must include a host")
++	}
++	return nil
++}
+diff --git a/internal/config/validate_test.go b/internal/config/validate_test.go
+new file mode 100644
+index 0000000..82be823
+--- /dev/null
++++ b/internal/config/validate_test.go
+@@ -0,0 +1,85 @@
++package config
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestValidationProblems_CleanDefaultConfig(t *testing.T) {
++	cfg := Default()
++	assert.Empty(t, cfg.ValidationProblems())
++}
++
++func TestValidationProblems_NamesMissingEnvFromVariable(t *testing.T) {
++	t.Setenv("PACKETCODE_TEST_PRESENT", "1")
++	cfg := Default()
++	cfg.MCP["gh"] = MCPServerConfig{Command: "gh-mcp", EnvFrom: []string{"PACKETCODE_TEST_PRESENT", "PACKETCODE_TEST_DEFINITELY_ABSENT"}}
++	problems := cfg.ValidationProblems()
++	require.Len(t, problems, 1)
++	assert.Contains(t, problems[0], "[mcp.gh]")
++	assert.Contains(t, problems[0], "PACKETCODE_TEST_DEFINITELY_ABSENT")
++	assert.NotContains(t, problems[0], "PACKETCODE_TEST_PRESENT")
++}
++
++func TestValidationProblems_MCPShape(t *testing.T) {
++	cfg := Default()
++	cfg.MCP["bad name"] = MCPServerConfig{Command: "x"}
++	cfg.MCP["empty"] = MCPServerConfig{}
++	off := false
++	cfg.MCP["disabled"] = MCPServerConfig{Enabled: &off}
++	problems := strings.Join(cfg.ValidationProblems(), "\n")
++	assert.Contains(t, problems, "[mcp.bad name]")
++	assert.Contains(t, problems, "[mcp.empty] is enabled but has no command")
++	assert.NotContains(t, problems, "[mcp.disabled]")
++}
++
++func TestValidationProblems_ProviderKeyEnvAndBaseURL(t *testing.T) {
++	cfg := Default()
++	cfg.Providers["lab"] = ProviderConfig{Type: "openai_compatible", BaseURL: "ftp://x", APIKeyEnv: "PACKETCODE_TEST_LAB_TOKEN"}
++	problems := strings.Join(cfg.ValidationProblems(), "\n")
++	assert.Contains(t, problems, "[providers.lab] base_url must use http or https")
++	assert.Contains(t, problems, "api_key_env names PACKETCODE_TEST_LAB_TOKEN")
++
++	t.Setenv("PACKETCODE_TEST_LAB_TOKEN", "k")
++	cfg.Providers["lab"] = ProviderConfig{Type: "openai_compatible", BaseURL: "https://lab.example/v1", APIKeyEnv: "PACKETCODE_TEST_LAB_TOKEN"}
++	assert.Empty(t, cfg.ValidationProblems())
++}
++
++func TestValidationProblems_DefaultProviderWithoutKeyNamesTheVariable(t *testing.T) {
++	t.Setenv("PACKETCODE_OPENAI_API_KEY", "")
++	cfg := Default()
++	cfg.Default.Provider = "openai"
++	cfg.Default.Model = "gpt-5.6-sol"
++	problems := strings.Join(cfg.ValidationProblems(), "\n")
++	assert.Contains(t, problems, "[default] provider openai has no API key")
++	assert.Contains(t, problems, "PACKETCODE_OPENAI_API_KEY")
++
++	cfg.Providers["openai"] = ProviderConfig{APIKey: "sk-test"}
++	assert.Empty(t, cfg.ValidationProblems())
++
++	cfg.Default.Provider = "nosuch"
++	problems = strings.Join(cfg.ValidationProblems(), "\n")
++	assert.Contains(t, problems, `[default] provider "nosuch" is not a built-in provider`)
++}
++
++func TestValidationProblems_KeylessDefaultsAreClean(t *testing.T) {
++	for _, slug := range []string{"ollama", "codex"} {
++		cfg := Default()
++		cfg.Default.Provider = slug
++		assert.Empty(t, cfg.ValidationProblems(), slug)
++	}
++}
++
++func TestValidationProblems_BehaviorRanges(t *testing.T) {
++	cfg := Default()
++	cfg.Behavior.AutoCompactThreshold = 120
++	cfg.Behavior.ProviderMaxRetries = -1
++	cfg.Behavior.BackgroundMaxDepth = -2
++	problems := strings.Join(cfg.ValidationProblems(), "\n")
++	assert.Contains(t, problems, "auto_compact_threshold 120")
++	assert.Contains(t, problems, "provider_max_retries -1")
++	assert.Contains(t, problems, "background_max_depth -2")
++}
+-- 
+2.53.0.windows.2
+

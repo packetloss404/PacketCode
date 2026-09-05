@@ -1,0 +1,82 @@
+From 571fa98e27208d850a6a983305dfa78bda10b647 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 16:57:07 -0500
+Subject: [PATCH 04/10] jobs: a pending tool approval no longer also reports
+ NeedsInput
+
+worker.go set NeedsInput and NeedsApproval to the same value on every
+tool proposal, so Snapshot.AwaitingAnswer -- documented as the residue
+"NeedsInput without NeedsApproval" reserved for a question to the user --
+was true for every approval, and Agent View drew the question icon for a
+plain y/n prompt. NeedsInput now stays false on a proposal; NeedsApproval
+carries the approval state as before. Blocked() and grouping are
+unchanged because both fields still feed them.
+
+Audit patch P05 (BACKLOG item: NeedsInput/NeedsApproval data bug).
+Rollback: git revert this commit; persisted job records carry both
+fields and older builds read either shape.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ internal/jobs/job.go          | 13 ++++++-------
+ internal/jobs/manager_test.go |  2 +-
+ internal/jobs/worker.go       |  6 +++++-
+ 3 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/internal/jobs/job.go b/internal/jobs/job.go
+index 1225a06..d92012c 100644
+--- a/internal/jobs/job.go
++++ b/internal/jobs/job.go
+@@ -291,13 +291,12 @@ type Snapshot struct {
+ // AwaitingApproval, AwaitingAnswer and Blocked split the one "this job is
+ // waiting on a human" bit into the two things it can actually mean.
+ //
+-// The stored fields cannot be read directly for this. Every writer that sets
+-// NeedsInput today also sets NeedsApproval, so NeedsInput alone has never
+-// distinguished "a tool call needs approving" from "the agent asked you
+-// something" — and the second is the signal the background-question feature
+-// needs a place for. AwaitingAnswer is deliberately the *residue*: it becomes
+-// true the moment a writer sets NeedsInput without NeedsApproval, and stays
+-// false until one does, so no caller has to be updated when that happens.
++// A pending tool approval sets NeedsApproval alone; NeedsInput is reserved for
++// "the agent asked you something", which is the signal the background-question
++// feature needs a place for. AwaitingAnswer is deliberately the *residue*: it
++// becomes true the moment a writer sets NeedsInput without NeedsApproval, and
++// stays false until one does, so no caller has to be updated when that happens.
++// (Until audit patch P05 every writer set both, so it was never true.)
+ func (s Snapshot) AwaitingApproval() bool { return s.NeedsApproval }
+ 
+ // AwaitingAnswer reports a job blocked on something other than a tool
+diff --git a/internal/jobs/manager_test.go b/internal/jobs/manager_test.go
+index a549e0b..a093f8c 100644
+--- a/internal/jobs/manager_test.go
++++ b/internal/jobs/manager_test.go
+@@ -988,7 +988,7 @@ func TestManager_SnapshotMarksPendingApproval(t *testing.T) {
+ 			return false
+ 		}
+ 		pending = got
+-		return got.NeedsInput && got.NeedsApproval && got.LastActivity == "needs approval"
++		return !got.NeedsInput && got.NeedsApproval && got.LastActivity == "needs approval"
+ 	})
+ 	assert.Greater(t, pending.Seq, snap.Seq)
+ 
+diff --git a/internal/jobs/worker.go b/internal/jobs/worker.go
+index bf0152d..50d7b8d 100644
+--- a/internal/jobs/worker.go
++++ b/internal/jobs/worker.go
+@@ -265,7 +265,11 @@ func (m *Manager) consumeEvents(j *Job, ctx context.Context, events <-chan agent
+ 			if needsApproval {
+ 				activity = "needs approval"
+ 			}
+-			m.updateActivity(j, activity, ev.ToolCall.Name, needsApproval, needsApproval)
++			// NeedsInput stays false here: it means "the agent asked the user
++			// something", which no tool proposal is. Setting both made
++			// Snapshot.AwaitingAnswer true for every pending approval and drew
++			// the question icon in Agent View for a plain y/n prompt.
++			m.updateActivity(j, activity, ev.ToolCall.Name, false, needsApproval)
+ 		case agent.EventToolCallApproved:
+ 			m.updateActivity(j, "tool approved", ev.ToolCall.Name, false, false)
+ 		case agent.EventToolCallRejected:
+-- 
+2.53.0.windows.2
+

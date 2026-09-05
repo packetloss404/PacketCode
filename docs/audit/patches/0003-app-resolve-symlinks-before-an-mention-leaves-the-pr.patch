@@ -1,0 +1,105 @@
+From d4f820cf43b6442f26a08063c991e7ed2c7aabd5 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 16:57:06 -0500
+Subject: [PATCH 03/10] app: resolve symlinks before an @-mention leaves the
+ project root
+
+readMention confined the typed path lexically and then called os.Stat and
+os.ReadFile, both of which follow symlinks. A link inside the project
+pointing outside it -- committed to a repository, or left by a build
+tool -- was therefore enough to pull an out-of-root file into the prompt
+sent to the provider. The native read tools already resolve both sides
+with EvalSymlinks (internal/computers/local_backend.go); the mention path
+is the same boundary and now applies the same check. Symlinks that stay
+inside the root still expand.
+
+Audit patch P03. Rollback: git revert this commit.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ internal/app/mentions.go      | 23 +++++++++++++++++++++--
+ internal/app/mentions_test.go | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 54 insertions(+), 2 deletions(-)
+
+diff --git a/internal/app/mentions.go b/internal/app/mentions.go
+index a84edaf..03286a7 100644
+--- a/internal/app/mentions.go
++++ b/internal/app/mentions.go
+@@ -108,12 +108,31 @@ func readMention(raw, root string) (rel, content string, ok bool) {
+ 		return "", "", false
+ 	}
+ 
+-	info, err := os.Stat(p)
++	// The lexical check above is on the typed path. Resolve symlinks on both
++	// sides and check again, so a link inside the project that points outside
++	// it -- committed to a repository, or left by a build tool -- cannot pull
++	// a file from outside the root into the prompt. The native read tools
++	// already resolve this way (internal/computers/local_backend.go); the
++	// mention path is the same boundary and must not be looser.
++	realRoot, err := filepath.EvalSymlinks(absRoot)
++	if err != nil {
++		return "", "", false
++	}
++	real, err := filepath.EvalSymlinks(p)
++	if err != nil {
++		return "", "", false
++	}
++	relReal, err := filepath.Rel(realRoot, real)
++	if err != nil || relReal == ".." || strings.HasPrefix(relReal, ".."+string(filepath.Separator)) {
++		return "", "", false
++	}
++
++	info, err := os.Lstat(real)
+ 	if err != nil || !info.Mode().IsRegular() {
+ 		return "", "", false
+ 	}
+ 
+-	data, err := os.ReadFile(p)
++	data, err := os.ReadFile(real)
+ 	if err != nil {
+ 		return "", "", false
+ 	}
+diff --git a/internal/app/mentions_test.go b/internal/app/mentions_test.go
+index 80ee9de..08ce2bc 100644
+--- a/internal/app/mentions_test.go
++++ b/internal/app/mentions_test.go
+@@ -82,3 +82,36 @@ func TestExpandFileMentions_RefusesDotEnv(t *testing.T) {
+ 		t.Fatalf("secret leaked into prompt: %q", expanded)
+ 	}
+ }
++
++func TestExpandFileMentions_RefusesSymlinkEscape(t *testing.T) {
++	outside := t.TempDir()
++	root := t.TempDir()
++	secret := filepath.Join(outside, "id_rsa")
++	os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600)
++	link := filepath.Join(root, "notes.txt")
++	if err := os.Symlink(secret, link); err != nil {
++		t.Skipf("symlinks unavailable here: %v", err)
++	}
++	expanded, attached := expandFileMentions("read @notes.txt", root)
++	if len(attached) != 0 {
++		t.Fatalf("attached = %v, want none", attached)
++	}
++	if strings.Contains(expanded, "PRIVATE KEY MATERIAL") {
++		t.Fatalf("symlinked file leaked into prompt: %q", expanded)
++	}
++}
++
++func TestExpandFileMentions_AllowsSymlinkInsideRoot(t *testing.T) {
++	root := t.TempDir()
++	os.WriteFile(filepath.Join(root, "real.go"), []byte("package real"), 0o644)
++	if err := os.Symlink(filepath.Join(root, "real.go"), filepath.Join(root, "alias.go")); err != nil {
++		t.Skipf("symlinks unavailable here: %v", err)
++	}
++	expanded, attached := expandFileMentions("read @alias.go", root)
++	if len(attached) != 1 {
++		t.Fatalf("attached = %v, want one file", attached)
++	}
++	if !strings.Contains(expanded, "package real") {
++		t.Fatalf("in-root symlink was not expanded: %q", expanded)
++	}
++}
+-- 
+2.53.0.windows.2
+

@@ -1,0 +1,82 @@
+From f82868e376bf9a1c7bc09312b5f8489934099c02 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 16:57:09 -0500
+Subject: [PATCH 05/10] cost: fsync the tally before the rename that publishes
+ it
+
+Every other store packetcode writes (sessions, jobs, config, computers)
+goes through internal/atomicfile so a crash cannot publish a correctly
+named empty file. cost-tally.json used a bare temp-then-rename, and Load
+refuses to decode an empty file, so one badly timed power loss took /cost
+and the statusline cost segment down until someone deleted the file.
+
+Audit patch P06. Rollback: git revert this commit; on-disk format
+unchanged.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ internal/cost/tally.go | 30 +++++++++---------------------
+ 1 file changed, 9 insertions(+), 21 deletions(-)
+
+diff --git a/internal/cost/tally.go b/internal/cost/tally.go
+index ccba145..428ece5 100644
+--- a/internal/cost/tally.go
++++ b/internal/cost/tally.go
+@@ -21,11 +21,13 @@ package cost
+ import (
+ 	"encoding/json"
+ 	"fmt"
+-	"github.com/packetcode/packetcode/internal/provider"
+ 	"os"
+ 	"path/filepath"
+ 	"sync"
+ 	"time"
++
++	"github.com/packetcode/packetcode/internal/atomicfile"
++	"github.com/packetcode/packetcode/internal/provider"
+ )
+ 
+ // Tally is the on-disk root document.
+@@ -80,7 +82,11 @@ func Load(path string) (*Tally, error) {
+ 	return t, nil
+ }
+ 
+-// Save writes the tally atomically.
++// Save writes the tally atomically: temp file, fsync, rename, the same way
++// sessions, job records, and config.toml are written. The previous
++// temp-then-rename had no fsync, so a crash could publish a correctly named
++// empty tally -- which Load then refuses to decode, taking /cost and the
++// statusline down with it until the file is deleted by hand.
+ func (t *Tally) Save(path string) error {
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+ 		return err
+@@ -89,25 +95,7 @@ func (t *Tally) Save(path string) error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tally.*.json.tmp")
+-	if err != nil {
+-		return err
+-	}
+-	tmpPath := tmp.Name()
+-	if _, err := tmp.Write(data); err != nil {
+-		_ = tmp.Close()
+-		_ = os.Remove(tmpPath)
+-		return err
+-	}
+-	if err := tmp.Close(); err != nil {
+-		_ = os.Remove(tmpPath)
+-		return err
+-	}
+-	if err := os.Rename(tmpPath, path); err != nil {
+-		_ = os.Remove(tmpPath)
+-		return err
+-	}
+-	return nil
++	return atomicfile.Write(path, data, 0o600, ".tally.*.json.tmp")
+ }
+ 
+ // PricingFunc returns USD per 1M tokens for (provider, model). Callers (the
+-- 
+2.53.0.windows.2
+

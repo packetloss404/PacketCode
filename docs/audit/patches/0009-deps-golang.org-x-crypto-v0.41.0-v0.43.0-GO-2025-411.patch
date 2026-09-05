@@ -1,0 +1,71 @@
+From d61a919f50a1b0fa57142d15d3c0d92a8e7a6b80 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 08:18:23 -0500
+Subject: [PATCH 09/10] deps: golang.org/x/crypto v0.41.0 -> v0.43.0
+ (GO-2025-4116)
+
+The highest x/crypto release whose go directive keeps this module's
+documented Go 1.24 floor. It fixes GO-2025-4116 (ssh/agent denial of
+service), reachable through computers.NewSSHBackend. Seven further
+reachable x/crypto/ssh advisories need v0.52.0 (go 1.25) or v0.56.0
+(go 1.26); that upgrade is supplied as an opt-in patch file in the audit
+report because it raises the toolchain floor, which is a project
+decision rather than a dependency fix.
+
+Audit patch P10a. Rollback: git revert this commit.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ go.mod | 4 ++--
+ go.sum | 5 +++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/go.mod b/go.mod
+index f0cdcf7..0ba0139 100644
+--- a/go.mod
++++ b/go.mod
+@@ -14,7 +14,7 @@ require (
+ 	github.com/pkg/sftp v1.13.10
+ 	github.com/pmezard/go-difflib v1.0.0
+ 	github.com/stretchr/testify v1.11.1
+-	golang.org/x/crypto v0.41.0
++	golang.org/x/crypto v0.43.0
+ 	golang.org/x/sys v0.38.0
+ )
+ 
+@@ -37,6 +37,6 @@ require (
+ 	github.com/muesli/termenv v0.16.0 // indirect
+ 	github.com/rivo/uniseg v0.4.7 // indirect
+ 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+-	golang.org/x/text v0.28.0 // indirect
++	golang.org/x/text v0.30.0 // indirect
+ 	gopkg.in/yaml.v3 v3.0.1 // indirect
+ )
+diff --git a/go.sum b/go.sum
+index 23b7917..3f69f5a 100644
+--- a/go.sum
++++ b/go.sum
+@@ -62,6 +62,8 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
+ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
+ golang.org/x/crypto v0.41.0 h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=
+ golang.org/x/crypto v0.41.0/go.mod h1:pO5AFd7FA68rFak7rOAGVuygIISepHftHnr8dr6+sUc=
++golang.org/x/crypto v0.43.0 h1:dduJYIi3A3KOfdGOHX8AVZ/jGiyPa3IbBozJ5kNuE04=
++golang.org/x/crypto v0.43.0/go.mod h1:BFbav4mRNlXJL4wNeejLpWxB7wMbc79PdRGhWKncxR0=
+ golang.org/x/exp v0.0.0-20231006140011-7918f672742d h1:jtJma62tbqLibJ5sFQz8bKtEM8rJBtfilJ2qTU199MI=
+ golang.org/x/exp v0.0.0-20231006140011-7918f672742d/go.mod h1:ldy0pHrwJyGW56pPQzzkH36rKxoZW1tw7ZJpeKx+hdo=
+ golang.org/x/sys v0.0.0-20210809222454-d867a43fc93e/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+@@ -70,8 +72,11 @@ golang.org/x/sys v0.38.0 h1:3yZWxaJjBmCWXqhN1qh02AkOnCQ1poK6oF+a7xWL6Gc=
+ golang.org/x/sys v0.38.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/term v0.34.0 h1:O/2T7POpk0ZZ7MAzMeWFSg6S5IpWd/RXDlM9hgM3DR4=
+ golang.org/x/term v0.34.0/go.mod h1:5jC53AEywhIVebHgPVeg0mj8OD3VO9OzclacVrqpaAw=
++golang.org/x/term v0.36.0 h1:zMPR+aF8gfksFprF/Nc/rd1wRS1EI6nDBGyWAvDzx2Q=
+ golang.org/x/text v0.28.0 h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=
+ golang.org/x/text v0.28.0/go.mod h1:U8nCwOR8jO/marOQ0QbDiOngZVEBB7MAiitBuMjXiNU=
++golang.org/x/text v0.30.0 h1:yznKA/E9zq54KzlzBEAWn1NXSQ8DIp/NYMy88xJjl4k=
++golang.org/x/text v0.30.0/go.mod h1:yDdHFIX9t+tORqspjENWgzaCVXgk0yYnYuSZ8UzzBVM=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+-- 
+2.53.0.windows.2
+

@@ -1,0 +1,73 @@
+From 7aa0951838c26f1c88f8cb33f8d9b1566123cac7 Mon Sep 17 00:00:00 2001
+From: packetloss404 <packetloss404@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 08:22:22 -0500
+Subject: [PATCH 10/10] tools: remove the unused atomicWrite helper
+
+internal/tools/atomic.go defined atomicWrite with no callers in production
+or tests; write_file and patch_file go through RuntimeBackend.WriteFile
+(internal/computers/local_backend.go), which owns the temp-then-rename
+semantics the comment attributed to this function. Dead code that
+duplicates a live security boundary is a place for the two to drift.
+
+Audit patch P11 (half-built inventory). Rollback: git revert this commit.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ internal/tools/atomic.go | 45 ----------------------------------------
+ 1 file changed, 45 deletions(-)
+ delete mode 100644 internal/tools/atomic.go
+
+diff --git a/internal/tools/atomic.go b/internal/tools/atomic.go
+deleted file mode 100644
+index dd0d013..0000000
+--- a/internal/tools/atomic.go
++++ /dev/null
+@@ -1,45 +0,0 @@
+-package tools
+-
+-import (
+-	"fmt"
+-	"os"
+-	"path/filepath"
+-)
+-
+-// atomicWrite writes data to path via a same-directory temp file plus
+-// rename. Shared between write_file and patch_file to keep their crash
+-// semantics identical.
+-func atomicWrite(path string, data []byte) error {
+-	dir := filepath.Dir(path)
+-	if err := os.MkdirAll(dir, 0o755); err != nil {
+-		return fmt.Errorf("create parent dir: %w", err)
+-	}
+-	mode := os.FileMode(0o644)
+-	if info, err := os.Stat(path); err == nil {
+-		mode = info.Mode().Perm()
+-	}
+-	tmp, err := os.CreateTemp(dir, ".write.*.tmp")
+-	if err != nil {
+-		return fmt.Errorf("create temp: %w", err)
+-	}
+-	tmpPath := tmp.Name()
+-	if err := tmp.Chmod(mode); err != nil {
+-		_ = tmp.Close()
+-		_ = os.Remove(tmpPath)
+-		return fmt.Errorf("chmod temp: %w", err)
+-	}
+-	if _, err := tmp.Write(data); err != nil {
+-		_ = tmp.Close()
+-		_ = os.Remove(tmpPath)
+-		return fmt.Errorf("write temp: %w", err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		_ = os.Remove(tmpPath)
+-		return fmt.Errorf("close temp: %w", err)
+-	}
+-	if err := os.Rename(tmpPath, path); err != nil {
+-		_ = os.Remove(tmpPath)
+-		return fmt.Errorf("rename: %w", err)
+-	}
+-	return nil
+-}
+-- 
+2.53.0.windows.2
+
