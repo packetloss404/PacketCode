@@ -33,6 +33,63 @@ section 7, item U6.
 
 ---
 
+## Closeout (2026-09-05, after the follow-up work)
+
+Everything below this section is the audit as written against baseline
+`c1bca77`, and is left as written: the findings, line numbers and
+reasoning were true then. This section says what has happened since, so
+nobody acts on a question that already has an answer.
+
+`main` is at `733d286`. **All sixteen CI jobs pass**, which had not
+happened before: `lint` could not load its config, the TUI golden check had
+never passed in its recorded history, and `vulncheck` reported fifteen
+reachable advisories.
+
+Merged since the audit: PRs #1 (day-31 backlog), #4 (lint), #5 (TUI
+goldens), #7 (platform test failures), #8 (Go floor), #10 (intermittents).
+
+### Findings that changed status
+
+| ID | Was | Now |
+| --- | --- | --- |
+| F-07 | `x/crypto` v0.43.0, toolchain open | **closed.** `x/crypto` v0.56.0 and `go 1.26.0`; govulncheck reports no reachable module advisories at all. Section 8.5 is superseded. |
+| F-11 | open: documented behaviour | **closed.** `RequiresApproval` returns false, so the tool and `permissions.readOnlyTool` finally agree. No profile changes its decision. |
+
+Still open, unchanged by the follow-up work: **F-08** (repository content
+presented as the user's own words), **F-09** (client-supplied MCP commands,
+gated on U1), **F-10** (plain-http custom providers), **F-13** (Sigstore
+verification default), **F-14** (MCP children started with
+`context.Background()`).
+
+### Four bugs the CI work surfaced that this audit did not
+
+Worth recording, because each was found by making a check run rather than
+by reading the code:
+
+| Where | What |
+| --- | --- |
+| `internal/mcp/client.go` | `cmd.Wait` closes the stdout pipe under the reader, and because `markDead` is first-writer-wins the resulting `os.ErrClosed` stuck as the cause of death. `Shutdown` reported failure for a healthy server. |
+| `internal/acp/server.go` | The session `active` flag was cleared in a `defer`, after the prompt response was already on the wire, so a client sending `session/load` immediately on receiving it could be rejected as busy. |
+| `cmd/packetcode/main.go` | A cleanup called `jobsMgr.Shutdown` and returned `nil` unconditionally, so a job manager that failed to stop reported success. |
+| `internal/procrun/process_posix.go`, `process_windows.go` | Unchecked type assertions on the tracked-process maps. |
+
+### Unresolved questions: current state
+
+| ID | State |
+| --- | --- |
+| U1 | **Open.** Still a question about how PacketADE launches `packetcode acp`. F-09 depends on it. |
+| U2 | **Answered: no.** No provider `base_url` is set anywhere in the tree, so no plain-http endpoint exists to find. F-10 remains a decision about whether to refuse one pre-emptively. |
+| U3 | **Resolved: yes.** The floor moved to `go 1.26.0` with `x/crypto` v0.56.0. The intermediate v0.52.0 / `go 1.25.0` option was rejected: 1.25 is itself end-of-life, and it would have left GO-2026-6354 and 6355 reachable. |
+| U4 | **Answered: no.** No session under `~/.packetcode/sessions` had read a `.env`. |
+| U5 | **Open.** Still a question for PacketADE's permission control code. |
+| U6 | **Resolved.** The hypothesis in the question was right: it was PowerShell's cold start, not any patch. Fixed separately on `fix/windows-hook-cold-start`. |
+| U7 | **Open.** Outside this tree. |
+| U8 | **Open.** Product decision; F-08 waits on it. |
+| U9 | **Answered: yes.** `internal/doctor/` exists in the primary checkout, is empty, and is untracked by git, so it is a local artefact rather than a repository one. The `BACKLOG.md` line describing it is accurate. |
+| U10 | **Resolved: no.** Collection does not prompt; see F-11. |
+
+---
+
 ## 0. Orientation
 
 ### What this is
@@ -307,11 +364,11 @@ Severity: crit / high / med / low. Status: the patch commit that fixes it, or
 | F-04 | low (auth, fail-open) | `cmd/packetcode/acp.go:55-66` | ACP permission ceiling is `full` when the profile is `""` or a custom profile, while the policy those produce is `ask` (`permissions/policy.go:63-65,356-385`) | Operator writes `profile = ""` or `[permissions.profiles.team]`; ACP client requests `permissionMode: "bypass"` and gets it | Resolve the ceiling through `ParseProfile` like the policy does; default `ask`; only `trust_mode` raises to full | **P12** `f04688d` |
 | F-05 | low (correctness) | `internal/jobs/worker.go:263-268` | `NeedsInput` set equal to `NeedsApproval` on every tool proposal, so `Snapshot.AwaitingAnswer` (`job.go:305`) is never true and Agent View draws the question icon for approvals (`agentview.go:622`) | Any write job proposes a tool | Pass `false` for `needsInput` | **P05** `571fa98` |
 | F-06 | low (durability) | `internal/cost/tally.go:84-111` | tally written temp-then-rename without fsync; a crash can publish an empty file that `Load` refuses (`:74`), disabling `/cost` and the statusline cost | Power loss during any usage update | Use `internal/atomicfile.Write` | **P06** `f82868e` |
-| F-07 | med | `go.mod:17` (`golang.org/x/crypto v0.41.0`); toolchain go1.26.2 | 8 reachable `x/crypto/ssh` advisories and 9 reachable stdlib advisories (`govulncheck`), all via `computers.NewSSHBackend` and provider HTTP | Connecting to a hostile or compromised SSH computer; hostile HTTP/2 server | `x/crypto` v0.43.0 (keeps `go 1.24` floor) now; v0.56.0 + `go 1.26.0` as opt-in patch; build with Go >= 1.26.6 | **P10a** `d61a919`; P10b file; toolchain: open |
+| F-07 | med | `go.mod:17` (`golang.org/x/crypto v0.41.0`); toolchain go1.26.2 | 8 reachable `x/crypto/ssh` advisories and 9 reachable stdlib advisories (`govulncheck`), all via `computers.NewSSHBackend` and provider HTTP | Connecting to a hostile or compromised SSH computer; hostile HTTP/2 server | `x/crypto` v0.43.0 (keeps `go 1.24` floor) now; v0.56.0 + `go 1.26.0` as opt-in patch; build with Go >= 1.26.6 | **P10a** `d61a919`; **closed** by v0.56.0 + `go 1.26.0` (PR #8) — see Closeout |
 | F-08 | med | `internal/app/app.go:2320-2357`; `internal/acp/server.go:848-877`; `internal/workflow/loader.go` | Repository content is treated as the user's own words: `.packetcode/commands/*.md` bodies are mention-expanded and shown as the user's message; `.packetcode/workflows/*.toml` may set `system_prompt`, `provider`, `model`, `allow_write` per step. Skills, by contrast, are labelled untrusted (`skills/block.go:19-34`) | Clone a hostile repo, type `/review` (a name the repo chose) or `/workflows run <name>`; the prompt and system prompt are the attacker's, presented as yours. Every tool call is still gated, and P02 removes the `.env` exfil path | Label project command bodies the way skill bodies are labelled (`skills.Block` framing) and stop mention-expanding them; require `/workflows validate` + confirm for project workflows that set `system_prompt` or `allow_write` | open: product decision (documented as accepted in `docs/security.md:3`) |
 | F-09 | med (conditional) | `internal/acp/server.go:936-969,1134-1164`; `cmd/packetcode/acp.go:441-453` | An ACP client may choose any existing absolute `cwd` and supply arbitrary MCP `command` + `env`; the server execs them. Fine for a same-user editor; equivalent to arbitrary code execution for anything else that can reach the stdio pipe | A non-trusted local process gets hold of the `packetcode acp` stdin | Restrict client-supplied MCP commands to those already in `config.toml` unless `[acp] allow_client_mcp = true` | open: depends on U1 |
 | F-10 | med | `internal/provider/custom/custom.go:255-270`; `cmd/packetcode/doctor.go:513-523` | Custom OpenAI-compatible providers accept plain `http://` to non-loopback hosts and send the Bearer key plus the whole conversation in cleartext; only `doctor` warns | Operator types `base_url = "http://models.corp/v1"` | Refuse non-loopback `http` unless `allow_insecure_http = true` on the provider table; safe partial is the existing doctor warning plus a startup warning (add to `ValidationProblems`) | open: decision (see U5) |
-| F-11 | low | `internal/tools/collect_agent_results.go:31-36`; `internal/jobs/spawner_adapter.go:172-175`; `permissions/policy.go:481` | Foreground `collect_agent_results` is classified read-only, so it never prompts under any profile despite `RequiresApproval` returning true, and it may collect any job id | Model collects a job the user did not intend to inject | Either drop it from `readOnlyTool` or drop `RequiresApproval`; today the two disagree | open: documented behaviour (`docs/advanced-guide.md:288`) |
+| F-11 | low | `internal/tools/collect_agent_results.go:31-36`; `internal/jobs/spawner_adapter.go:172-175`; `permissions/policy.go:481` | Foreground `collect_agent_results` is classified read-only, so it never prompts under any profile despite `RequiresApproval` returning true, and it may collect any job id | Model collects a job the user did not intend to inject | Either drop it from `readOnlyTool` or drop `RequiresApproval`; today the two disagree | **closed** by dropping `RequiresApproval` (PR #1) — see Closeout |
 | F-12 | low | `internal/hooks/hooks.go:197`; `internal/statusline/statusline.go:221` | Hooks and statusline run through `powershell -ExecutionPolicy Bypass` | Operator config only | None needed; documented (`docs/security.md:70`) | checked, accepted |
 | F-13 | low | `install.sh:98-99`; `install.ps1:53-54` | Sigstore verification is skipped when `cosign` is absent unless `REQUIRE_SIGNATURE=1` / `-RequireSignature` | Machine without cosign installs an unsigned or substituted archive whose checksums also match | Default the requirement on once a release with signatures exists; until then document | open: release decision |
 | F-14 | low | `internal/mcp/process.go:27` | MCP children are started with `context.Background()`, so `cmd.Cancel` never fires; shutdown relies on stdin close + `KillTree` | None (works) | Pass the manager's context; cosmetic | open: BACKLOG |
@@ -616,6 +673,11 @@ it is safe to run from a cron job. `packetcode --version` exits 0 and prints
 `packetcode <version> (<commit>)`.
 
 ### 8.5 Dependency snapshot
+
+> **Superseded for the `x/*` rows and the advisory table below.** `x/crypto`
+> is now v0.56.0, `x/sys` v0.47.0, `x/text` v0.41.0, and the module floor is
+> `go 1.26.0`; govulncheck reports no reachable module advisories. The
+> upgrade notes on the other rows still hold. See the Closeout section.
 
 `go list -m all` (direct requirements from `go.mod`, versions after P10a):
 
