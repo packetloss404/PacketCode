@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // Write writes data to path via a temp file in the same directory, fsynced
@@ -55,12 +56,59 @@ func Write(path string, data []byte, perm os.FileMode, tmpPattern string) error 
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameRetrying(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
 	syncDir(dir)
 	return nil
+}
+
+// shareRetries and shareRetryDelay bound how long an operation waits out a
+// Windows sharing collision: ten attempts, ten milliseconds apart, so about a
+// tenth of a second in the worst case and no wait at all in the common one.
+//
+// Bounded on purpose. A file genuinely held open by another program -- an
+// editor, a virus scanner with a long lease -- must still fail and say so; the
+// retry is for the millisecond-scale window in which two of our own goroutines
+// touch the same record, which is the only case observed here.
+const (
+	shareRetries    = 10
+	shareRetryDelay = 10 * time.Millisecond
+)
+
+// renameRetrying is os.Rename that waits out a transient Windows sharing
+// collision instead of reporting one as a failed write.
+func renameRetrying(from, to string) error {
+	var err error
+	for attempt := 0; attempt < shareRetries; attempt++ {
+		if err = os.Rename(from, to); err == nil || !isShareViolation(err) {
+			return err
+		}
+		time.Sleep(shareRetryDelay)
+	}
+	return err
+}
+
+// ReadFile is os.ReadFile that waits out a transient Windows sharing collision.
+//
+// It is the read half of the same problem Write solves: a reader that happens
+// to open a file during the instant a rename is replacing it gets
+// ERROR_SHARING_VIOLATION, which callers cannot distinguish from a corrupt or
+// missing record and so tend to report as one. A file that does not exist still
+// returns os.ErrNotExist on the first attempt, without waiting.
+func ReadFile(path string) ([]byte, error) {
+	var (
+		data []byte
+		err  error
+	)
+	for attempt := 0; attempt < shareRetries; attempt++ {
+		if data, err = os.ReadFile(path); err == nil || !isShareViolation(err) {
+			return data, err
+		}
+		time.Sleep(shareRetryDelay)
+	}
+	return data, err
 }
 
 // syncDir flushes the directory entry so the rename itself survives a crash,

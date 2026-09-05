@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,12 +111,29 @@ func TestResubmit_SpawnsNewJobAndLinksBothWays(t *testing.T) {
 	assert.Equal(t, snap.ID, before.ResubmittedAs)
 
 	// Both links must be durable across a reload.
-	waitFor(t, 5*time.Second, "successor terminal", func() bool {
-		s, ok := mgr.Get(snap.ID)
-		return ok && s.State.IsTerminal()
+	//
+	// Wait for the successor's *record*, not for mgr.Get to report a terminal
+	// state. markTerminalCause flips the in-memory state under the manager
+	// lock and only persists after releasing it, so "terminal in memory" does
+	// not yet mean "terminal on disk". Reading during that window used to find
+	// the record still Running, which sent the loader down its reconcile-and-
+	// rewrite path against a file the manager was writing at the same moment --
+	// and on Windows one of those two collides and the record is dropped.
+	//
+	// readPersistedJob is the right instrument for the wait because it only
+	// reads. Polling loadPersistedJobs would rewrite what it is waiting on.
+	successorRecord := filepath.Join(jobsDir, snap.ID+".json")
+	waitFor(t, 5*time.Second, "successor terminal on disk", func() bool {
+		p, ok := readPersistedJob(successorRecord)
+		return ok && parseState(p.State).IsTerminal()
 	})
-	reloaded, _, _, lerr := loadPersistedJobs(jobsDir, "")
+
+	reloaded, _, unreadable, lerr := loadPersistedJobs(jobsDir, "")
 	require.NoError(t, lerr)
+	// Asserted rather than discarded: a record the loader rejects is dropped
+	// from `reloaded`, so without this the failure is "map does not contain
+	// <id>" and says nothing about why. It cost an afternoon once.
+	require.Empty(t, unreadable, "every record written by this test must load back")
 	byID := map[string]*Job{}
 	for _, j := range reloaded {
 		byID[j.ID] = j

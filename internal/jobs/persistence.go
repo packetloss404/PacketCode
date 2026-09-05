@@ -317,7 +317,7 @@ func savePersistedSnapshot(jobsDir string, p persistedJob) error {
 }
 
 func readPersistedJob(path string) (persistedJob, bool) {
-	data, err := os.ReadFile(path)
+	data, err := atomicfile.ReadFile(path)
 	if err != nil {
 		return persistedJob{}, false
 	}
@@ -332,7 +332,11 @@ func readPersistedJob(path string) (persistedJob, bool) {
 // Both the loader and the read-only inspector go through it so a record that
 // one of them calls unreadable is never quietly accepted by the other.
 func decodeRecordFile(path string) (persistedJob, State, *UnreadableRecord) {
-	data, err := os.ReadFile(path)
+	// atomicfile.ReadFile, not os.ReadFile: on Windows a read that lands in the
+	// instant a rename is replacing the record fails with a sharing violation,
+	// and reporting that as an unreadable record is how a perfectly good job
+	// silently disappeared from a reload.
+	data, err := atomicfile.ReadFile(path)
 	if err != nil {
 		return persistedJob{}, StateFailed, &UnreadableRecord{Path: path, Reason: err.Error()}
 	}

@@ -6,6 +6,32 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- **Job records could silently disappear on Windows.** Windows opens deny by
+  default, and Go's `os.ReadFile` asks for `FILE_SHARE_READ|WRITE` but not
+  `FILE_SHARE_DELETE`. So while any reader holds a job record open, the rename
+  that publishes a new version of it fails with `ERROR_ACCESS_DENIED`, and
+  while that rename is in flight a reader fails with
+  `ERROR_SHARING_VIOLATION`. Both are "try again in a moment", which is what
+  POSIX does implicitly; both were being treated as permanent. Measured on one
+  contended path: 809 of 2000 renames and 857 concurrent reads failed. The
+  consequences were real — a terminal job state whose write failed is
+  discarded silently by every `_ = m.savePersistedSnapshot...` call site, and a
+  record whose read failed is reported as *malformed* by `decodeRecordFile` and
+  dropped from the reload entirely. `atomicfile` now waits such a collision out
+  (ten attempts, 10ms apart, Windows only; the loops compile to a single pass
+  everywhere else) and exposes `atomicfile.ReadFile` for the read half, which
+  the job record readers use. A regression test contends a reader and a writer
+  on one path and fails without the retry.
+- `TestResubmit_SpawnsNewJobAndLinksBothWays` was flaky on Windows CI as a
+  result of the above, plus a mistake of its own: it waited for `Manager.Get`
+  to report a terminal state and then read the record off disk, but
+  `markTerminalCause` flips the in-memory state under the manager lock and
+  persists only after releasing it. Reading inside that window found the
+  successor still `running`, which sent the loader down its reconcile-and-
+  rewrite path against a file the manager was writing at the same instant. It
+  now waits for the record itself, and asserts the loader reported nothing
+  unreadable — the discarded `unreadable` return is why the failure only ever
+  said "map does not contain <id>".
 - `TestRunUserPromptSubmit_CollectsStdout` failed on `test (windows-latest)`
   about two runs in three and never on a developer machine. The cause was
   measured rather than guessed: on four GitHub `windows-latest` runners the
