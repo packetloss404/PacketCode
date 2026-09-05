@@ -149,6 +149,11 @@ def assert_protocol_safety(raw):
     assert_balanced_mode(changes, 2004, "bracketed-paste")
 
 
+# The marker that separates rendered text from the style spans below it.
+# scripts/tui_golden.sh splits captures on this string too.
+STYLE_HEADER = "-- cell styles --"
+
+
 def cell_style(cell):
     """Return a stable description of non-default pyte cell attributes."""
     attributes = []
@@ -185,7 +190,7 @@ def render_snapshot(screen):
 
     text = "\n".join(lines) + ("\n" if lines else "")
     if spans:
-        text += "\n-- cell styles --\n" + "\n".join(spans) + "\n"
+        text += "\n" + STYLE_HEADER + "\n" + "\n".join(spans) + "\n"
     return text
 
 
@@ -203,6 +208,50 @@ def assert_semantic_text(raw, expected_values, post_resize_raw=None):
             )
 
 
+def child_env(base=None):
+    """Build the captured process's environment.
+
+    The harness owns a real PTY and has already set its size, so the child
+    is genuinely attached to a terminal and should render exactly as it
+    would for a developer. Anything in the host environment that would
+    argue otherwise is removed rather than trusted, because a golden
+    harness whose output depends on where it runs is not a golden harness.
+
+    NO_COLOR counts by presence, even when set to "0".
+
+    CI is the one that actually bit: termenv answers isTTY() with a flat
+    "no" whenever CI is set, before it ever looks at the file descriptor,
+    so lipgloss falls back to the Ascii profile and the render carries no
+    SGR at all. Every captured style span disappears and each golden looks
+    changed for no visible reason. CLICOLOR_FORCE is not a substitute: it
+    only lifts Ascii to 16-colour ANSI, while the goldens record TrueColor.
+    """
+    env = dict(os.environ if base is None else base,
+               TERM="xterm-256color", COLORTERM="truecolor", CLICOLOR="1")
+    for name in ("NO_COLOR", "CI"):
+        env.pop(name, None)
+    return env
+
+
+def assert_styled(cells, target, scenario):
+    """Require at least one styled cell in a captured snapshot.
+
+    A capture that renders every cell in the default style is not a
+    snapshot of this TUI, it is a snapshot of colour having been switched
+    off -- which is what happens when something in the environment
+    convinces termenv it is not writing to a terminal. Without this check
+    the failure is silent in both directions: `check` reports every golden
+    as changed with no hint why, and `update` will happily overwrite the
+    reviewed goldens with colourless ones.
+    """
+    if STYLE_HEADER not in cells:
+        raise RuntimeError(
+            f"{target}/{scenario}: capture contains no styled cells, so the "
+            "render was produced with colour disabled. Check that nothing in "
+            "the environment (CI, NO_COLOR, TERM) is suppressing it."
+        )
+
+
 def capture(command, width, height, keys, settle, timeout, resize):
     if os.name == "nt":
         raise RuntimeError(
@@ -213,9 +262,7 @@ def capture(command, width, height, keys, settle, timeout, resize):
     master, slave = pty.openpty()
     # TIOCSWINSZ takes rows, columns.
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
-    env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor", CLICOLOR="1")
-    # NO_COLOR is enabled by presence, even when its value is "0".
-    env.pop("NO_COLOR", None)
+    env = child_env()
     proc = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
                             env=env, start_new_session=True, close_fds=True)
     os.close(slave)
@@ -308,6 +355,7 @@ def main():
         if args.protocol_check:
             assert_protocol_safety(raw)
         assert_semantic_text(raw, args.expect_text, post_resize_raw)
+        assert_styled(cells, args.target, args.scenario)
         geometry = f"{initial_width}x{initial_height}"
         if args.resize is not None:
             geometry += f"-to-{width}x{height}"
