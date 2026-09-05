@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/testwait"
 )
 
 // TestSnapshotClaudeCodeCompat verifies the emitted JSON carries both
@@ -106,12 +107,17 @@ func TestModelDisplayNameHonoured(t *testing.T) {
 
 func TestRunner_RenderPassesJSONOnStdin(t *testing.T) {
 	command := "read input; case \"$input\" in *gpt-test*) printf custom-status;; *) exit 1;; esac"
-	timeoutSec := 2
 	if runtime.GOOS == "windows" {
 		command = "$data = [Console]::In.ReadToEnd(); if ($data -match 'gpt-test') { 'custom-status' } else { exit 1 }"
-		timeoutSec = 5
 	}
-	r := New(config.StatusLineConfig{Command: command, TimeoutSec: timeoutSec}, t.TempDir())
+	// This spawns the same Windows PowerShell that internal/hooks does, so it
+	// carries the same trap: the first one on a machine costs about 4.6s
+	// against what used to be a five-second budget, and every later one costs
+	// under 0.2s. Today internal/hooks runs earlier and absorbs that cost,
+	// which is the only reason this test is not the flaky one -- a dependency
+	// on package scheduling that nothing here states or enforces. See the
+	// TestMain comment in internal/hooks for the measurements.
+	r := New(config.StatusLineConfig{Command: command, TimeoutSec: testwait.Seconds(2 * time.Second)}, t.TempDir())
 	require.NotNil(t, r)
 
 	out, err := r.Render(context.Background(), Snapshot{

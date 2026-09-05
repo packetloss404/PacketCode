@@ -5,11 +5,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/hooks"
+	"github.com/packetcode/packetcode/internal/testwait"
 )
 
 // TestSummarise_TrimsAndCaps spot-checks summarise's behaviour: it
@@ -114,8 +116,11 @@ func TestRunJob_PassesHooksToBackgroundAgent(t *testing.T) {
 	}
 	prov := &scriptedProvider{turns: scriptedHello()}
 	mgr, _ := newTestManager(t, prov, func(c *Config) {
+		// Scaled for the reason given in internal/hooks' TestMain: on Windows
+		// this is a PowerShell spawn, and the first one on a machine costs
+		// about 4.6s against a two-second budget.
 		c.Hooks = hooks.New(config.HooksConfig{
-			UserPromptSubmit: []config.HookConfig{{Command: command, TimeoutSec: 2}},
+			UserPromptSubmit: []config.HookConfig{{Command: command, TimeoutSec: testwait.Seconds(2 * time.Second)}},
 		}, t.TempDir())
 	})
 

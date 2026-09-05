@@ -21,6 +21,7 @@ package testwait
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -77,6 +78,18 @@ func Timeout(baseline time.Duration) time.Duration {
 		d = minTimeout
 	}
 	return d
+}
+
+// Seconds is Timeout in whole seconds, for the config fields that spell a
+// budget as a `timeout_sec` int rather than a Duration -- hook and status line
+// commands, which are the subprocess equivalent of the waits above and go
+// wrong for the same reason.
+//
+// It rounds up. Truncation would silently hand back less than the scale asked
+// for, and a budget that is quietly shorter than it claims is the exact defect
+// this package exists to prevent.
+func Seconds(baseline time.Duration) int {
+	return int(math.Ceil(Timeout(baseline).Seconds()))
 }
 
 // TB is the subset of testing.TB used here, so this package does not import
