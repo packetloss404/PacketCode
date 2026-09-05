@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/provider"
 )
 
@@ -998,6 +999,9 @@ func (s *Server) handleNewSession(msg rpcMessage) {
 	}
 	s.sessions[runtime.ID] = state
 	s.stateMu.Unlock()
+	diaglog.L().Info("acp.session_new", "session", runtime.ID, "cwd", cwd,
+		"permission_mode", sessionConfig.PermissionMode, "provider", sessionConfig.Provider,
+		"mcp_client_supplied", params.MCPServers != nil, "mcp_servers", len(mcpServers))
 	s.sendResult(msg.ID, map[string]string{"sessionId": runtime.ID})
 }
 
@@ -1088,6 +1092,8 @@ func (s *Server) handleLoadSession(msg rpcMessage) {
 	s.stateMu.Lock()
 	s.sessions[runtime.ID] = state
 	s.stateMu.Unlock()
+	diaglog.L().Info("acp.session_load", "session", runtime.ID, "cwd", cwd,
+		"mcp_client_supplied", params.MCPServers != nil, "replaced", existing != nil)
 	// Requests are handled serially, so nothing raced the replacement; the
 	// superseded runtime (if any) just needs its resources released.
 	if existing != nil && existing.runtime.Close != nil {
@@ -1493,6 +1499,7 @@ func (s *Server) handleCloseSession(msg rpcMessage) {
 	delete(s.sessions, params.SessionID)
 	s.stateMu.Unlock()
 	if state != nil {
+		diaglog.L().Info("acp.session_close", "session", params.SessionID)
 		s.releaseSession(state)
 	}
 	s.sendResult(msg.ID, map[string]any{})
@@ -1571,6 +1578,8 @@ func (a *permissionApprover) Approve(ctx context.Context, req agent.ApprovalRequ
 	if err := json.Unmarshal(response, &result); err != nil {
 		return agent.ApprovalDecision{Approved: false, Reason: "invalid ACP permission response"}
 	}
+	diaglog.L().Info("acp.permission", "session", a.sessionID, "tool", req.ToolCall.Name,
+		"outcome", result.Outcome.Outcome, "option", result.Outcome.OptionID)
 	if result.Outcome.Outcome != "selected" {
 		return agent.ApprovalDecision{Approved: false, Reason: "ACP permission request cancelled"}
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/procrun"
 )
 
@@ -154,6 +155,7 @@ func (r *Runner) runOne(ctx context.Context, cfg config.HookConfig, payload any)
 	stderr := procrun.NewBoundedBuffer(maxHookOutputBytes)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	started := time.Now()
 	err = cmd.Run()
 	res := Result{
 		Stdout:          stdout.String(),
@@ -163,6 +165,7 @@ func (r *Runner) runOne(ctx context.Context, cfg config.HookConfig, payload any)
 		TimedOut:        runCtx.Err() == context.DeadlineExceeded,
 		Canceled:        runCtx.Err() == context.Canceled,
 	}
+	logHook(cfg, payload, res, err, time.Since(started))
 	if res.TimedOut {
 		return res, fmt.Errorf("timed out after %s; process tree cancellation requested", timeout)
 	}
@@ -170,6 +173,29 @@ func (r *Runner) runOne(ctx context.Context, cfg config.HookConfig, payload any)
 		return res, fmt.Errorf("canceled; process tree cancellation requested")
 	}
 	return res, err
+}
+
+// logHook records one hook execution: the event, the configured command,
+// the exit outcome, and timing. Payloads and hook output are not logged; the
+// prompt and tool arguments they carry are exactly what must stay out.
+func logHook(cfg config.HookConfig, payload any, res Result, err error, elapsed time.Duration) {
+	if !diaglog.Enabled() {
+		return
+	}
+	event := ""
+	switch p := payload.(type) {
+	case PromptPayload:
+		event = p.Event
+	case ToolPayload:
+		event = p.Event + ":" + p.ToolName
+	}
+	attrs := []any{"event", event, "command", cfg.Command, "ms", elapsed.Milliseconds(),
+		"timed_out", res.TimedOut, "canceled", res.Canceled, "stdout_bytes", len(res.Stdout)}
+	if err != nil {
+		diaglog.L().Warn("hook.run", append(attrs, "error", err.Error())...)
+		return
+	}
+	diaglog.L().Info("hook.run", attrs...)
 }
 
 func hookErrorMessage(res Result, err error) string {

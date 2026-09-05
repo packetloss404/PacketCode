@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/provider/sugar"
 )
 
@@ -280,6 +281,7 @@ func runSugarLogin(args []string, stdin io.Reader, stdout, stderr io.Writer, cli
 		return 1
 	}
 
+	diaglog.L().Info("sugar.login", "server", baseURL, "client_name", clientName, "models", len(models), "default_model", defaultModel)
 	fmt.Fprintf(stdout, "Connected to Sugar as %s. %d live models available; default is %s.\n", tokenResponse.Name, len(models), defaultModel)
 	return 0
 }

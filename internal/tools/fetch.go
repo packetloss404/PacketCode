@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/packetcode/packetcode/internal/diaglog"
 )
 
 const (
@@ -188,6 +190,7 @@ func (t *FetchTool) Execute(ctx context.Context, raw json.RawMessage) (ToolResul
 
 	resp, err := t.client.Do(req)
 	if err != nil {
+		diaglog.L().Warn("fetch", "url", target.Redacted(), "error", diaglog.ErrText(err))
 		if reqCtx.Err() == context.DeadlineExceeded {
 			return fetchError("fetch: timed out after %s: %s", timeout, redactURLError(err))
 		}
@@ -210,6 +213,8 @@ func (t *FetchTool) Execute(ctx context.Context, raw json.RawMessage) (ToolResul
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL
 	}
+	diaglog.L().Info("fetch", "url", target.Redacted(), "final_url", finalURL.Redacted(),
+		"status", resp.StatusCode, "bytes", len(body), "truncated", bodyTruncated)
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 

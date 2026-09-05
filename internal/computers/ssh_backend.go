@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/procrun"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -89,6 +90,7 @@ func NewSSHBackend(ctx context.Context, computer Computer) (*SSHBackend, error) 
 		if agentConn != nil {
 			_ = agentConn.Close()
 		}
+		diaglog.L().Warn("ssh.connect", "computer", norm.Name, "addr", addr, "user", norm.SSHUser, "stage", "dial", "error", err.Error())
 		return nil, fmt.Errorf("ssh %s: dial: %w", norm.Name, err)
 	}
 	_ = raw.SetDeadline(time.Now().Add(sshDialTimeout))
@@ -98,6 +100,7 @@ func NewSSHBackend(ctx context.Context, computer Computer) (*SSHBackend, error) 
 		if agentConn != nil {
 			_ = agentConn.Close()
 		}
+		diaglog.L().Warn("ssh.connect", "computer", norm.Name, "addr", addr, "user", norm.SSHUser, "stage", "handshake", "error", err.Error())
 		return nil, fmt.Errorf("ssh %s: handshake: %w", norm.Name, err)
 	}
 	_ = raw.SetDeadline(time.Time{})
@@ -139,6 +142,8 @@ func NewSSHBackend(ctx context.Context, computer Computer) (*SSHBackend, error) 
 		agent:    agentConn,
 		closed:   make(chan struct{}),
 	}
+	diaglog.L().Info("ssh.connect", "computer", norm.Name, "addr", addr, "user", norm.SSHUser,
+		"root", b.root, "agent", agentConn != nil)
 	go b.keepalive()
 	return b, nil
 }

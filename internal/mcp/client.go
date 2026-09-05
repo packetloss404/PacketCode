@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/procrun"
 )
 
@@ -126,10 +127,13 @@ func NewClient(ctx context.Context, cfg ServerConfig, logDir string, info Client
 	go c.reaperLoop()
 
 	if err := c.handshake(ctx, timeout, info); err != nil {
+		diaglog.L().Warn("mcp.spawn", "server", cfg.Name, "command", cfg.Command, "pid", c.PID(), "error", err.Error())
 		// Kill + drain so we don't leak the child.
 		_ = c.killAndWait(2 * time.Second)
 		return nil, err
 	}
+	diaglog.L().Info("mcp.spawn", "server", cfg.Name, "command", cfg.Command, "pid", c.PID(),
+		"tools", len(c.tools), "server_name", c.serverInfo.Name, "server_version", c.serverInfo.Version)
 	return c, nil
 }
 

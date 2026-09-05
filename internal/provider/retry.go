@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/diaglog"
 )
 
 var (
@@ -121,7 +123,9 @@ func DoWithRetry(ctx context.Context, client *http.Client, cfg RetryConfig, newR
 			// Request construction errors are deterministic, not transient.
 			return nil, err
 		}
+		started := time.Now()
 		resp, err := client.Do(req)
+		logAttempt(req, resp, err, attempt, cfg.MaxAttempts, time.Since(started))
 		if err != nil {
 			lastErr = err
 			// A transport error occurs before any stream byte, so it is safe
@@ -156,6 +160,32 @@ func DoWithRetry(ctx context.Context, client *http.Client, cfg RetryConfig, newR
 		return nil, lastErr
 	}
 	return nil, errors.New("provider request failed after retries")
+}
+
+// logAttempt records one outbound provider request: method, redacted URL
+// (no query string), attempt, and either the status or the transport error.
+// Bodies and headers are never logged.
+func logAttempt(req *http.Request, resp *http.Response, err error, attempt, max int, elapsed time.Duration) {
+	logger := diaglog.L()
+	if !diaglog.Enabled() || req == nil {
+		return
+	}
+	attrs := []any{
+		"method", req.Method,
+		"url", diaglog.RedactURL(req.URL),
+		"attempt", attempt,
+		"max_attempts", max,
+		"ms", elapsed.Milliseconds(),
+	}
+	if err != nil {
+		logger.Warn("provider.http", append(attrs, "error", diaglog.ErrText(err))...)
+		return
+	}
+	if resp.StatusCode >= 400 {
+		logger.Warn("provider.http", append(attrs, "status", resp.StatusCode)...)
+		return
+	}
+	logger.Info("provider.http", append(attrs, "status", resp.StatusCode)...)
 }
 
 // waitBackoff sleeps for the backoff appropriate to attempt n (1-based),

@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/packetcode/packetcode/internal/cost"
+	"github.com/packetcode/packetcode/internal/diaglog"
 	"github.com/packetcode/packetcode/internal/hooks"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
@@ -476,6 +477,9 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 		RequiresApproval: tool.RequiresApproval(),
 		Params:           params,
 	})
+	diaglog.L().Info("policy.decision",
+		"session", a.currentSessionID(), "tool", call.Name,
+		"decision", string(policyResult.Decision), "profile", string(policyResult.Profile), "reason", policyResult.Reason)
 	if policyResult.Decision == permissions.DecisionDeny {
 		rejection := "permission denied: " + policyResult.Reason
 		events <- AgentEvent{Type: EventToolCallRejected, ToolCall: call, Text: rejection}
@@ -505,6 +509,10 @@ func (a *Agent) handleToolCall(ctx context.Context, call provider.ToolCall, even
 			ToolCall: call,
 			Params:   params,
 		})
+		diaglog.L().Info("approval",
+			"session", a.currentSessionID(), "tool", call.Name,
+			"approved", decision.Approved, "edited", len(decision.EditedParams) > 0 && string(decision.EditedParams) != string(params),
+			"reason", decision.Reason)
 		if !decision.Approved {
 			rejection := decision.Reason
 			if rejection == "" {

@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/packetcode/packetcode/internal/diaglog"
 )
 
 const (
@@ -155,8 +157,10 @@ func (s *Store) Refresh(ctx context.Context) (Tokens, error) {
 
 	refreshed, err := s.exchange(ctx, af.Tokens.RefreshToken)
 	if err != nil {
+		diaglog.L().Warn("codex.token_refresh", "path", s.path, "error", diaglog.ErrText(err))
 		return Tokens{}, err
 	}
+	diaglog.L().Info("codex.token_refresh", "path", s.path, "rotated_refresh_token", refreshed.RefreshToken != "")
 
 	// The token endpoint may omit a rotated refresh token; keep the old one
 	// when that happens. account_id is not part of the OAuth response, so it
