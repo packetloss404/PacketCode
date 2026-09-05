@@ -421,17 +421,7 @@ func (c *Client) readerLoop() {
 	if err == nil {
 		err = io.EOF
 	}
-	// Provisional when there is still a child to reap. EOF on stdout is not a
-	// cause of death, it is the first symptom -- and recording it as the cause
-	// is worse than recording nothing, because "exited: EOF" reads like an
-	// explanation and displaces the real one. The reaper replaces this with the
-	// exit status. A scanner error is kept: that one really is what happened to
-	// the stream, and the reaper's status does not describe it.
-	if c.cmd != nil && errors.Is(err, io.EOF) {
-		c.markDead(pendingExit())
-	} else {
-		c.markDead(eofExit(err))
-	}
+	c.markDead(exitReasonFromRead(err, c.cmd != nil))
 	c.flushPendingExited()
 }
 
@@ -448,6 +438,33 @@ func numericID(raw json.RawMessage) (int64, error) {
 // decide whether the exit was clean (EOF after stdin close).
 func eofExit(underlying error) error {
 	return &serverExitError{underlying: underlying}
+}
+
+// exitReasonFromRead classifies the error that ended the reader loop.
+//
+// EOF on stdout is not a cause of death, it is the first symptom, and
+// recording it as the cause is worse than recording nothing: "exited: EOF"
+// reads like an explanation and displaces the real one. When there is still
+// a child to reap, the reason is left provisional and the reaper replaces it
+// with the exit status.
+//
+// os.ErrClosed is the same symptom wearing a different coat. os/exec closes
+// the pipes it created once Wait sees the child exit, so a read still in
+// flight fails with "file already closed" instead of reporting EOF -- the
+// scanner simply lost a race with reaperLoop. It says nothing about the
+// server's health, and because markDead is first-writer-wins, recording it
+// as the cause makes it stick: the reaper's clean exit path cannot overwrite
+// it, and Close then reports a shutdown failure for a server that stopped
+// perfectly normally. That is the whole of the intermittent
+// TestManager_Shutdown_AllClients failure.
+//
+// Any other scanner error is kept, because that one really is what happened
+// to the stream and the reaper's status does not describe it.
+func exitReasonFromRead(err error, haveChild bool) error {
+	if haveChild && (errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed)) {
+		return pendingExit()
+	}
+	return eofExit(err)
 }
 
 // DeathReasonWait is how long a diagnostic should wait for a dying server's

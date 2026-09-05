@@ -1323,14 +1323,26 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 	cancelled := state.cancelled || ctx.Err() != nil
 	state.cancel = nil
 	state.mu.Unlock()
-	// active stays set until every trailing update and the prompt response have
-	// been written, so a session/load landing mid-teardown is rejected as busy
-	// instead of interleaving its replay with this prompt's final updates.
-	defer func() {
+	// active stays set until every trailing update for this prompt has been
+	// written, so a session/load landing mid-teardown cannot interleave its
+	// replay with them. It must then be cleared *before* the prompt response,
+	// not after: the response is the last thing the client sees for this
+	// prompt, so a client that reads it and immediately sends session/load is
+	// entitled to be served. Clearing in a deferred function ran after the
+	// response was already on the wire, leaving a window in which a perfectly
+	// well-behaved re-load was rejected with "session already has an active
+	// prompt" -- which is what made TestServerLoadSessionReplaysHistoryBeforeResponse
+	// fail intermittently, and would reject a real client doing the same thing.
+	//
+	// Each terminal path below calls this immediately before its response. The
+	// defer stays as a safety net for any future path that returns without
+	// sending one; clearing twice is harmless.
+	clearActive := func() {
 		state.mu.Lock()
 		state.active = false
 		state.mu.Unlock()
-	}()
+	}
+	defer clearActive()
 
 	if cancelled || runErr != nil {
 		for id := range openCalls {
@@ -1347,15 +1359,18 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 		// Plan entries have no cancelled state in ACP v1. Replace the complete
 		// plan with an empty list so clients do not retain an in-progress task.
 		s.sendUpdate(sessionID, map[string]any{"sessionUpdate": "plan", "entries": []any{}})
+		clearActive()
 		s.sendResult(requestID, map[string]string{"stopReason": "cancelled"})
 		return
 	}
 	if runErr != nil {
 		s.sendUpdate(sessionID, map[string]any{"sessionUpdate": "plan", "entries": []any{}})
+		clearActive()
 		s.sendError(requestID, codeInternalError, runErr.Error(), nil)
 		return
 	}
 	if !done {
+		clearActive()
 		s.sendError(requestID, codeInternalError, "agent event stream ended without a terminal event", nil)
 		return
 	}
@@ -1374,6 +1389,7 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 			fmt.Fprintf(s.log, "packetcode acp: read usage for session %s: %v\n", sessionID, err)
 		}
 	}
+	clearActive()
 	s.sendResult(requestID, result)
 }
 
