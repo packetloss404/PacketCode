@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/testwait"
 )
 
 // stubBinaryPath is set by TestMain after compiling internal/mcp/cmd/stub.

@@ -9,7 +9,6 @@ package approval
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/ui/terminaltext"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/tools"
+	"github.com/packetcode/packetcode/internal/ui/terminaltext"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 )
 

@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/codexauth"
 	"github.com/packetcode/packetcode/internal/provider/responses"

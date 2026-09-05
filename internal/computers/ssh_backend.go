@@ -14,11 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/packetcode/packetcode/internal/diaglog"
-	"github.com/packetcode/packetcode/internal/procrun"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+
+	"github.com/packetcode/packetcode/internal/diaglog"
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 const (

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/toolout"
 	"io"
 	"sync"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/skills"
+	"github.com/packetcode/packetcode/internal/toolout"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 

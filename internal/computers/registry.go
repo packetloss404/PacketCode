@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/atomicfile"
 	"os"
 	"path"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/packetcode/packetcode/internal/atomicfile"
 	"github.com/packetcode/packetcode/internal/compat"
 )
 
