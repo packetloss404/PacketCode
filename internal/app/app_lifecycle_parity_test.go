@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/packetcode/packetcode/internal/agent"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/ui/components/agentview"
 )
 
@@ -28,7 +29,7 @@ func TestFirstVisibleProgressStopsThinkingSpinner(t *testing.T) {
 func TestLeftArrowOpensAgentsOnlyFromEmptyIdleInput(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	t.Cleanup(func() { _ = mgr.Shutdown(2 * time.Second) })
+	t.Cleanup(func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) })
 	r.app.input.Reset()
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
 	if !r.app.agentView.Visible() {
@@ -46,7 +47,7 @@ func TestLeftArrowOpensAgentsOnlyFromEmptyIdleInput(t *testing.T) {
 func TestAgentWorkspaceTaskPromptCanClearReturnAndSpawn(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	t.Cleanup(func() { _ = mgr.Shutdown(2 * time.Second) })
+	t.Cleanup(func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) })
 
 	r.app.showAgentView()
 	r.app.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
@@ -84,7 +85,7 @@ func TestAgentWorkspaceTaskPromptCanClearReturnAndSpawn(t *testing.T) {
 func TestAgentWorkspaceListActionsAreNotSwallowedByTaskInput(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	t.Cleanup(func() { _ = mgr.Shutdown(2 * time.Second) })
+	t.Cleanup(func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) })
 
 	_, _ = r.app.handleSpawnCommand([]string{"inspect the renderer"})
 	r.app.showAgentView()

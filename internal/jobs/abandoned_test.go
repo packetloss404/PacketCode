@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -133,7 +134,7 @@ func TestCancel_RecordsRequestAndStaysCancelled(t *testing.T) {
 	// loadPersistedJobs reconciles anything still marked running — so reading
 	// the directory under a live manager would race the flush and rewrite the
 	// very record under test.
-	require.NoError(t, mgr.Shutdown(2*time.Second))
+	require.NoError(t, mgr.Shutdown(testwait.Timeout(2*time.Second)))
 
 	reloaded, _, unread, lerr := loadPersistedJobs(jobsDir, "")
 	require.NoError(t, lerr)

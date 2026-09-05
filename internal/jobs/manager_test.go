@@ -18,6 +18,7 @@ import (
 	"github.com/packetcode/packetcode/internal/config"
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -322,7 +323,7 @@ func TestManager_Shutdown_Persists(t *testing.T) {
 		return running == N
 	})
 
-	require.NoError(t, mgr.Shutdown(2*time.Second))
+	require.NoError(t, mgr.Shutdown(testwait.Timeout(2*time.Second)))
 
 	for _, id := range ids {
 		snap, ok := mgr.Get(id)

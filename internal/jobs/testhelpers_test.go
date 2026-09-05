@@ -197,8 +197,25 @@ func newTestManager(t *testing.T, prov provider.Provider, opts ...func(*Config))
 	}
 	mgr, _, err := NewManager(cfg)
 	require.NoError(t, err)
+	// Scaled, and reported rather than discarded.
+	//
+	// Shutdown returns when its timeout expires whether or not the workers
+	// stopped. Two seconds was ample on an idle machine and not ample under a
+	// parallel suite, and what happened then was not a slow test but a broken
+	// one: the workers were still running, still writing job records into the
+	// t.TempDir() Go was about to remove. On Windows a directory that is
+	// gaining files cannot be removed, so the test died in cleanup with
+	// "TempDir RemoveAll cleanup: ... The directory is not empty" -- naming
+	// neither the worker, nor the timeout, nor even the assertion it never
+	// reached. TestResubmit_IsOnlyAllowedOnce failed that way.
+	//
+	// The error says "N workers still running after ...", which is the one
+	// sentence that would have identified this immediately. Discarding it was
+	// how a shutdown that did not shut anything down looked like success.
 	t.Cleanup(func() {
-		_ = mgr.Shutdown(2 * time.Second)
+		if err := mgr.Shutdown(testwait.Timeout(2 * time.Second)); err != nil {
+			t.Errorf("jobs manager did not shut down cleanly: %v", err)
+		}
 	})
 	return mgr, tr
 }
