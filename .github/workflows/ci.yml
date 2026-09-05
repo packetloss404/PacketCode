@@ -49,7 +49,20 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - run: go mod verify
+      - name: Runner facts
+        if: runner.os == 'Windows'
+        run: |
+          echo "cpus=$env:NUMBER_OF_PROCESSORS"
+          (Get-CimInstance Win32_Processor).Name
+          (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
       - run: go test -count=1 ${{ matrix.test_flags }} ./...
+        env:
+          PACKETCODE_DIAG_FILE: ${{ runner.temp }}/hook-diag.txt
+      # DIAGNOSTIC (temporary): timings recorded from inside the real suite run,
+      # written to a file because go test discards a passing package's stderr.
+      - name: DIAG in-suite hook timings
+        if: always() && runner.os == 'Windows'
+        run: Get-Content "${{ runner.temp }}/hook-diag.txt"
       # DIAGNOSTIC (temporary): tiered measurement of Windows hook spawn cost.
       - name: DIAG hook spawn timing
         if: always() && runner.os == 'Windows'

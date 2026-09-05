@@ -2,8 +2,7 @@ package hooks
 
 import (
 	"context"
-	"fmt"
-	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -25,20 +24,42 @@ func TestRunUserPromptSubmit_CollectsStdout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		timeoutSec = 120 // DIAGNOSTIC: measure the real cost, do not truncate it
 	}
+
+	// DIAGNOSTIC discriminator, taken immediately before the first hook and in
+	// this order: a bare CreateProcess, then a cold PowerShell that touches no
+	// stdin, then the real hook. If all three are slow the machine is
+	// contended; if only the last two are, the cost is PowerShell start-up; if
+	// only the last is, it is stdin plumbing or internal/hooks itself.
+	if runtime.GOOS == "windows" {
+		t0 := time.Now()
+		bare := exec.Command("cmd.exe", "/c", "exit")
+		bareErr := bare.Run()
+		bareD := time.Since(t0)
+
+		t1 := time.Now()
+		ps := exec.Command("powershell", "-NoLogo", "-NoProfile", "-NonInteractive",
+			"-ExecutionPolicy", "Bypass", "-Command", "exit 0")
+		psErr := ps.Run()
+		psD := time.Since(t1)
+
+		diagRecord("DIAG cold-probe bare_createprocess=%s (err=%v) cold_powershell_no_stdin=%s (err=%v)",
+			bareD.Round(time.Millisecond), bareErr, psD.Round(time.Millisecond), psErr)
+	}
+
 	r := New(config.HooksConfig{
 		UserPromptSubmit: []config.HookConfig{{Command: command, TimeoutSec: timeoutSec}},
 	}, t.TempDir())
 
 	start := time.Now()
 	out, err := r.RunUserPromptSubmit(context.Background(), PromptPayload{Prompt: "hello"})
-	fmt.Fprintf(os.Stderr, "DIAG first-hook-spawn elapsed=%s err=%v\n", time.Since(start).Round(time.Millisecond), err)
+	diagRecord("DIAG first-hook-spawn elapsed=%s err=%v", time.Since(start).Round(time.Millisecond), err)
 	require.NoError(t, err)
 	assert.Equal(t, "injected-context", out)
 
 	for i := 0; i < 5; i++ {
 		s := time.Now()
 		_, err := r.RunUserPromptSubmit(context.Background(), PromptPayload{Prompt: "hello"})
-		fmt.Fprintf(os.Stderr, "DIAG warm-hook-spawn[%d] elapsed=%s err=%v\n", i, time.Since(s).Round(time.Millisecond), err)
+		diagRecord("DIAG warm-hook-spawn[%d] elapsed=%s err=%v", i, time.Since(s).Round(time.Millisecond), err)
 	}
 }
 
@@ -57,7 +78,7 @@ func TestRunPreToolUse_MatcherCanBlock(t *testing.T) {
 
 	blockStart := time.Now()
 	_, err := r.RunPreToolUse(context.Background(), ToolPayload{ToolName: "execute_command"})
-	fmt.Fprintf(os.Stderr, "DIAG matcher-block-spawn elapsed=%s\n", time.Since(blockStart).Round(time.Millisecond))
+	diagRecord("DIAG matcher-block-spawn elapsed=%s\n", time.Since(blockStart).Round(time.Millisecond))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "blocked")
 
@@ -76,7 +97,7 @@ func TestRunPreToolUse_TimeoutMessage(t *testing.T) {
 
 	start := time.Now()
 	_, err := r.RunPreToolUse(context.Background(), ToolPayload{ToolName: "execute_command"})
-	fmt.Fprintf(os.Stderr, "DIAG timeout-path elapsed=%s err=%v\n", time.Since(start).Round(time.Millisecond), err)
+	diagRecord("DIAG timeout-path elapsed=%s err=%v\n", time.Since(start).Round(time.Millisecond), err)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out after 1s")
 	assert.Contains(t, err.Error(), "process tree cancellation requested")
@@ -97,7 +118,7 @@ func TestRunPostToolUse_TruncatesStdoutAndStderr(t *testing.T) {
 
 	truncStart := time.Now()
 	out, err := r.RunPostToolUse(context.Background(), ToolPayload{ToolName: "execute_command"})
-	fmt.Fprintf(os.Stderr, "DIAG truncate-spawn elapsed=%s\n", time.Since(truncStart).Round(time.Millisecond))
+	diagRecord("DIAG truncate-spawn elapsed=%s\n", time.Since(truncStart).Round(time.Millisecond))
 	require.NoError(t, err)
 	assert.Contains(t, out, "stdout truncated at 64KB")
 	assert.Contains(t, out, "stderr truncated at 64KB")
