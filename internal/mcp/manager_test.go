@@ -100,7 +100,7 @@ func TestClient_DeathReason_PreservesNonZeroExit(t *testing.T) {
 		LogDir:     t.TempDir(),
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 	reports := mgr.Start(context.Background())
 	require.Len(t, reports, 1)
 	require.Equal(t, "running", reports[0].Status, reports[0].Err)
@@ -157,7 +157,7 @@ func TestManager_Start_MixedStatuses(t *testing.T) {
 		LogDir:     logDir,
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 
 	reports := mgr.Start(context.Background())
 	require.Len(t, reports, 3)
@@ -194,7 +194,7 @@ func TestManager_StartAgainClosesPreviousClients(t *testing.T) {
 		LogDir:     logDir,
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 
 	reports := mgr.Start(context.Background())
 	require.Equal(t, "running", reports[0].Status, reports[0].Err)
@@ -220,7 +220,7 @@ func TestManager_Restart_ReplacesOnlyNamedClient(t *testing.T) {
 		LogDir:     t.TempDir(),
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 	reports := mgr.Start(context.Background())
 	require.Equal(t, "running", reports[0].Status, reports[0].Err)
 	require.Equal(t, "running", reports[1].Status, reports[1].Err)
@@ -273,7 +273,7 @@ func TestManager_Start_ParallelSpawn(t *testing.T) {
 		LogDir:     logDir,
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 
 	start := time.Now()
 	reports := mgr.Start(context.Background())

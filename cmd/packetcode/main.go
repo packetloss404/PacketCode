@@ -455,8 +455,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return tools.NewCollectAgentResultsTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth)
 	})
 	runtime.AddCleanup(func() error {
-		jobsMgr.Shutdown(5 * time.Second)
-		return nil
+		return jobsMgr.Shutdown(5 * time.Second)
 	})
 
 	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))
