@@ -100,5 +100,12 @@ func releaseTree(cmd *exec.Cmd) (KillOutcome, error) {
 	if !ok {
 		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
 	}
-	return signalGroup(value.(int), true)
+	// trackedGroups only ever holds a pgid, so this cannot fail. A value
+	// of the wrong type means nothing usable is tracked, which is the same
+	// outcome as no group being tracked at all.
+	pgid, isPGID := value.(int)
+	if !isPGID {
+		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
+	}
+	return signalGroup(pgid, true)
 }

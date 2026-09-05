@@ -9,9 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 func TestRuntimeClientIsInertUntilExplicitlyEnabled(t *testing.T) {

@@ -76,13 +76,6 @@ func TestManager_ConcurrencyLimit(t *testing.T) {
 		mu   sync.Mutex
 		peak int
 	)
-	track := func(_ Snapshot) {
-		mu.Lock()
-		// peak reads ActiveCount via the manager — but we don't have
-		// the manager here. Instead, sample on the next OnUpdate.
-		mu.Unlock()
-	}
-	_ = track // silence unused
 
 	mgr, _ := newTestManager(t, prov, func(c *Config) { c.MaxConcurrent = 2 })
 

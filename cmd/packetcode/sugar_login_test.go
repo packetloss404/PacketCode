@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/packetcode/packetcode/internal/config"
-	"github.com/packetcode/packetcode/internal/provider/sugar"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/config"
+	"github.com/packetcode/packetcode/internal/provider/sugar"
 )
 
 func TestSugarLoginDiscoversLiveModelsAndPersistsProvider(t *testing.T) {

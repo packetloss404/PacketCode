@@ -140,10 +140,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.visible = false
 			return m, nil
 		case "j", "down":
-			m.vp.LineDown(1)
+			m.vp.ScrollDown(1)
 			return m, nil
 		case "k", "up":
-			m.vp.LineUp(1)
+			m.vp.ScrollUp(1)
 			return m, nil
 		case "g":
 			m.vp.GotoTop()
@@ -152,10 +152,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.vp.GotoBottom()
 			return m, nil
 		case "pgdown", " ":
-			m.vp.HalfViewDown()
+			m.vp.HalfPageDown()
 			return m, nil
 		case "pgup":
-			m.vp.HalfViewUp()
+			m.vp.HalfPageUp()
 			return m, nil
 		}
 	}

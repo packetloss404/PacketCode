@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/packetcode/packetcode/internal/procrun"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/procrun"
 )
 
 // shellEcho emits a portable echo invocation for the test command.

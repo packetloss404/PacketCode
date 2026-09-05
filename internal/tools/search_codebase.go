@@ -126,9 +126,7 @@ func (t *SearchCodebaseTool) searchWithBackend(ctx context.Context, pattern, glo
 				return ctx.Err()
 			}
 			rel := path.Join(dir, entry.Name)
-			if strings.HasPrefix(rel, "./") {
-				rel = strings.TrimPrefix(rel, "./")
-			}
+			rel = strings.TrimPrefix(rel, "./")
 			if entry.IsDir {
 				if shouldSkipDir(entry.Name) {
 					continue

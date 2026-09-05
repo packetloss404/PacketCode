@@ -148,9 +148,7 @@ func NormalizeBaseURL(raw string) string {
 	if strings.HasSuffix(base, "/api/v1") {
 		return base
 	}
-	if strings.HasSuffix(base, "/v1") {
-		base = strings.TrimSuffix(base, "/v1")
-	}
+	base = strings.TrimSuffix(base, "/v1")
 	return base + "/api/v1"
 }
 

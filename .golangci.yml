@@ -1,17 +1,45 @@
+version: "2"
 linters:
   enable:
-    - govet
-    - errcheck
-    - staticcheck
-    - unused
-    - ineffassign
     - misspell
+  settings:
+    errcheck:
+      check-type-assertions: true
+  exclusions:
+    generated: lax
+    rules:
+      # errcheck's check-type-assertions is on so that an unchecked
+      # assertion in shipping code is a finding rather than a panic in
+      # front of a user. In a test a panicking assertion already fails the
+      # test with the offending type in the message, and rewriting forty
+      # inline assertions into two-statement checks would cost readability
+      # for no safety. This exempts type assertions only: errcheck reports
+      # those without a function name, so unchecked *errors* stay enforced
+      # in tests too.
+      - path: _test\.go
+        linters:
+          - errcheck
+        text: ^Error return value is not checked$
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
     - gofmt
     - goimports
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-
-run:
-  timeout: 5m
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/packetcode/packetcode
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

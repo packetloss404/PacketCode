@@ -6,9 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 // New and Load used to hand out the manager's own *Session, so a caller could

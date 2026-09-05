@@ -102,15 +102,6 @@ func (s *scriptedProvider) snapshotRequests() []provider.ChatRequest {
 	return out
 }
 
-// scriptedAlias registers the scripted provider under a custom slug.
-// Useful when tests need multiple providers with distinct slugs.
-type scriptedAlias struct {
-	*scriptedProvider
-	slug string
-}
-
-func (a *scriptedAlias) Slug() string { return a.slug }
-
 // fakeApprover records every approval call so tests can assert on
 // the prefixed tool-call name.
 type fakeApprover struct {

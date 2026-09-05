@@ -281,7 +281,7 @@ func TestFetch_StripsTerminalControlSequences(t *testing.T) {
 func TestFetch_RefusesBinaryContentTypes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01})
+		_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01})
 	}))
 	defer srv.Close()
 
@@ -295,7 +295,7 @@ func TestFetch_RefusesBinaryContentTypes(t *testing.T) {
 func TestFetch_RefusesBinaryBodyLabelledAsText(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte{'a', 0x00, 0xff, 0xfe, 'b'})
+		_, _ = w.Write([]byte{'a', 0x00, 0xff, 0xfe, 'b'})
 	}))
 	defer srv.Close()
 

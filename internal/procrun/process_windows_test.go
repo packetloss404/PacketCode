@@ -57,7 +57,7 @@ func windowsProcessAlive(pid uint32) bool {
 	if err != nil {
 		return false
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 	result, err := windows.WaitForSingleObject(handle, 0)
 	return err == nil && result == uint32(windows.WAIT_TIMEOUT)
 }

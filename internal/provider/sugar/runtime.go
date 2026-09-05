@@ -179,10 +179,10 @@ func (c *RuntimeClient) StartRun(ctx context.Context, start RuntimeRunStart) (*R
 		return nil, nil
 	}
 	if !validOpaqueID(start.IdempotencyKey, 128) {
-		return nil, fmt.Errorf("Conduit run idempotency key is invalid")
+		return nil, fmt.Errorf("invalid Conduit run idempotency key")
 	}
 	if start.Request.Model != DefaultModel {
-		return nil, fmt.Errorf("Conduit shadow runs require model %q", DefaultModel)
+		return nil, fmt.Errorf("a Conduit shadow run requires model %q", DefaultModel)
 	}
 	body, err := openaicompat.MarshalChatRequest(start.Request)
 	if err != nil {
@@ -240,7 +240,7 @@ func (c *RuntimeClient) Continue(ctx context.Context, runID, idempotencyKey stri
 		return nil, nil
 	}
 	if !validOpaqueID(runID, 128) || !validOpaqueID(idempotencyKey, 128) {
-		return nil, fmt.Errorf("Conduit continue identifiers are invalid")
+		return nil, fmt.Errorf("invalid Conduit continue identifiers")
 	}
 	path := "/conduit/runs/" + url.PathEscape(runID) + "/continue"
 	status, responseBody, err := c.postJSON(ctx, path, idempotencyKey, nil)
@@ -323,31 +323,31 @@ func runtimeStatusError(operation string, status int, body []byte) error {
 
 func validateRuntimeEvent(event RuntimeEvent) error {
 	if !validOpaqueID(event.RunID, 128) || !validOpaqueID(event.IdempotencyKey, 128) {
-		return fmt.Errorf("Conduit event identifiers are invalid")
+		return fmt.Errorf("invalid Conduit event identifiers")
 	}
 	if event.Seq < 1 || event.Seq > 1_000_000 {
-		return fmt.Errorf("Conduit event seq is invalid")
+		return fmt.Errorf("invalid Conduit event seq")
 	}
 	switch event.Type {
 	case RuntimeToolResult, RuntimeValidation, RuntimeProgress, RuntimeBlocked, RuntimeProvider:
 	default:
-		return fmt.Errorf("Conduit event type is invalid")
+		return fmt.Errorf("invalid Conduit event type")
 	}
 	if event.ToolCategory != "" && !validToolCategory(event.ToolCategory) {
-		return fmt.Errorf("Conduit event tool category is invalid")
+		return fmt.Errorf("invalid Conduit event tool category")
 	}
 	if event.FailureKind != "" && !validFailureKind(event.FailureKind) {
-		return fmt.Errorf("Conduit event failure kind is invalid")
+		return fmt.Errorf("invalid Conduit event failure kind")
 	}
 	providerFailure := event.FailureKind == RuntimeProviderRateLimited || event.FailureKind == RuntimeProviderUnavailable || event.FailureKind == RuntimeProviderAmbiguous
 	if (event.Type == RuntimeProvider) != providerFailure && event.FailureKind != "" {
-		return fmt.Errorf("Conduit provider failures require event type provider, and provider events accept provider failures only")
+		return fmt.Errorf("a Conduit provider failure requires event type provider, and provider events accept provider failures only")
 	}
 	if event.FailureFingerprint != "" && !validSHA256Fingerprint(event.FailureFingerprint) {
-		return fmt.Errorf("Conduit failure fingerprint must be sha256:<64 lowercase hex characters>")
+		return fmt.Errorf("a Conduit failure fingerprint must be sha256:<64 lowercase hex characters>")
 	}
 	if !validOptionalInt(event.ExitCode, -32_768, 32_767) || !validOptionalInt(event.NewFailures, 0, 100_000) || !validOptionalInt(event.FilesTouched, 0, 100_000) || !validOptionalInt(event.DurationMS, 0, 86_400_000) {
-		return fmt.Errorf("Conduit event counter is out of range")
+		return fmt.Errorf("the Conduit event counter is out of range")
 	}
 	if event.Type == RuntimeValidation && event.Success != nil && *event.Success {
 		if event.FailureKind != "" || (event.ExitCode != nil && *event.ExitCode != 0) || (event.NewFailures != nil && *event.NewFailures != 0) {

@@ -31,13 +31,14 @@ func killTree(cmd *exec.Cmd) (KillOutcome, error) {
 	}
 	pid := uint32(cmd.Process.Pid)
 	if value, ok := trackedJobs.LoadAndDelete(cmd); ok {
-		job := value.(windows.Handle)
-		err := windows.TerminateJobObject(job, 1)
-		_ = windows.CloseHandle(job)
-		if err == nil {
-			// The job contains the tree, so terminating it is proof rather
-			// than a best effort. This is the only Confirmed path here.
-			return KillOutcome{Method: KillMethodJobObject, Confirmed: true}, nil
+		if job, isHandle := value.(windows.Handle); isHandle {
+			err := windows.TerminateJobObject(job, 1)
+			_ = windows.CloseHandle(job)
+			if err == nil {
+				// The job contains the tree, so terminating it is proof rather
+				// than a best effort. This is the only Confirmed path here.
+				return KillOutcome{Method: KillMethodJobObject, Confirmed: true}, nil
+			}
 		}
 	}
 	out := KillOutcome{Method: KillMethodTreeWalk}
@@ -91,7 +92,7 @@ func trackTree(cmd *exec.Cmd) error {
 		_ = windows.CloseHandle(job)
 		return fmt.Errorf("open process for job: %w", err)
 	}
-	defer windows.CloseHandle(processHandle)
+	defer func() { _ = windows.CloseHandle(processHandle) }()
 	if err := windows.AssignProcessToJobObject(job, processHandle); err != nil {
 		_ = windows.CloseHandle(job)
 		return fmt.Errorf("assign process to job: %w", err)
@@ -112,7 +113,11 @@ func releaseTree(cmd *exec.Cmd) (KillOutcome, error) {
 	if !ok {
 		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
 	}
-	if err := windows.CloseHandle(value.(windows.Handle)); err != nil {
+	handle, isHandle := value.(windows.Handle)
+	if !isHandle {
+		return KillOutcome{Method: KillMethodNone, Confirmed: true}, nil
+	}
+	if err := windows.CloseHandle(handle); err != nil {
 		return KillOutcome{Method: KillMethodJobObject, Reason: err.Error()}, err
 	}
 	return KillOutcome{Method: KillMethodJobObject, Confirmed: true}, nil
@@ -145,7 +150,7 @@ func processChildren() (map[uint32][]uint32, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer windows.CloseHandle(snap)
+	defer func() { _ = windows.CloseHandle(snap) }()
 
 	children := map[uint32][]uint32{}
 	var pe windows.ProcessEntry32
@@ -192,7 +197,7 @@ func terminateProcess(pid uint32) (alive bool, err error) {
 		}
 		return false, fmt.Errorf("open process %d: %w", pid, err)
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 	if err := windows.TerminateProcess(h, 1); err != nil {
 		return true, fmt.Errorf("terminate process %d: %w", pid, err)
 	}

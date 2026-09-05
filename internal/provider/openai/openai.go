@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/provider/openaicompat"
 	"github.com/packetcode/packetcode/internal/provider/responses"

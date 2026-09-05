@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
-	"github.com/packetcode/packetcode/internal/provider"
 	"io"
 	"os"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"github.com/packetcode/packetcode/internal/git"
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/permissions"
+	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/theme"
 	"github.com/packetcode/packetcode/internal/workflow"
@@ -215,7 +215,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 	var runtimeBackend computers.RuntimeBackend
 	var activeComputer *computers.Computer
 	if !cfg.PacketComputers.IsEnabled() && computerName != "" {
-		return fmt.Errorf("Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
+		return fmt.Errorf("the Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
 	}
 	if computerName != "" {
 		computersDir, dirErr := config.ComputersDir()
@@ -328,7 +328,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		}
 	}
 	disabledComputersError := func() error {
-		return fmt.Errorf("Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
+		return fmt.Errorf("the Packet Computers integration is disabled; enable [packet_computers].enabled or set PACKETCODE_PACKET_COMPUTERS_ENABLED=true")
 	}
 	var resolveWorkspace jobs.WorkspaceResolver = func(string) (jobs.Workspace, error) {
 		return jobs.Workspace{}, disabledComputersError()
@@ -455,8 +455,7 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		return tools.NewCollectAgentResultsTool(jobsMgr.AsToolsSpawner(), parentJobID, parentDepth)
 	})
 	runtime.AddCleanup(func() error {
-		jobsMgr.Shutdown(5 * time.Second)
-		return nil
+		return jobsMgr.Shutdown(5 * time.Second)
 	})
 
 	toolReg.Register(tools.NewSpawnAgentTool(jobsMgr.AsToolsSpawner(), "", 0))

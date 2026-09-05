@@ -245,21 +245,3 @@ func NewClientWithStub(name string, stub *StubServer, info ClientInfo, timeoutSe
 		info,
 	)
 }
-
-// bytesReader is a tiny io.Reader over a []byte. We avoid importing
-// bytes here only to keep the test helper import set minimal.
-type bytesReader struct {
-	buf []byte
-	off int
-}
-
-func newBytesReader(b []byte) *bytesReader { return &bytesReader{buf: b} }
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.off >= len(r.buf) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.buf[r.off:])
-	r.off += n
-	return n, nil
-}

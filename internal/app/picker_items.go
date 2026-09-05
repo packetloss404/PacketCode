@@ -41,9 +41,10 @@ func providerItems(regs []provider.Provider, cfg *config.Config, activeSlug stri
 		slug := p.Slug()
 		defModel := ""
 		keyStatus := "(no key)"
-		if slug == "ollama" {
+		switch slug {
+		case "ollama":
 			keyStatus = "local"
-		} else if slug == "codex" {
+		case "codex":
 			keyStatus = "ChatGPT login"
 		}
 		if cfg != nil {

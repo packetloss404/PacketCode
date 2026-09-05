@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/testwait"
 )
 
 // exitingChild starts a real process that exits with the given status and

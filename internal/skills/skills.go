@@ -540,10 +540,6 @@ func (r *Registry) loadScopeDir(d skillScope) {
 	r.loadDirWith(d.path, d.source, d.origin, d.foreignProject)
 }
 
-func (r *Registry) loadDir(dir, source string) {
-	r.loadDirWith(dir, source, OriginNative, false)
-}
-
 func (r *Registry) loadDirWith(dir, source, origin string, foreignProject bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

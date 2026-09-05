@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestExpandFileMentions(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nfunc main(){}"), 0o644)
-	os.MkdirAll(filepath.Join(root, "internal"), 0o755)
-	os.WriteFile(filepath.Join(root, "internal", "util.go"), []byte("package internal"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nfunc main(){}"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "internal"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "internal", "util.go"), []byte("package internal"), 0o644))
 
 	prompt := "explain @main.go and @internal/util.go please"
 	expanded, attached := expandFileMentions(prompt, root)
@@ -32,7 +34,7 @@ func TestExpandFileMentions(t *testing.T) {
 
 func TestExpandFileMentions_TrailingPunctuationAndDedup(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "a.go"), []byte("AAA"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.go"), []byte("AAA"), 0o644))
 	// Same file twice + trailing period.
 	_, attached := expandFileMentions("look at @a.go. and again @a.go", root)
 	if len(attached) != 1 || attached[0] != "a.go" {
@@ -42,7 +44,7 @@ func TestExpandFileMentions_TrailingPunctuationAndDedup(t *testing.T) {
 
 func TestExpandFileMentions_IgnoresMissingAndEscapes(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "real.go"), []byte("X"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "real.go"), []byte("X"), 0o644))
 	prompt := "email me @someone and read @nope.go and @../../etc/passwd but also @real.go"
 	expanded, attached := expandFileMentions(prompt, root)
 	if len(attached) != 1 || attached[0] != "real.go" {
@@ -63,7 +65,7 @@ func TestExpandFileMentions_NoMentions(t *testing.T) {
 
 func TestExpandFileMentions_SkipsBinary(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "bin.dat"), []byte{1, 2, 0, 3, 4}, 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "bin.dat"), []byte{1, 2, 0, 3, 4}, 0o644))
 	_, attached := expandFileMentions("check @bin.dat", root)
 	if len(attached) != 0 {
 		t.Fatalf("binary file should not be attached: %v", attached)
@@ -72,8 +74,8 @@ func TestExpandFileMentions_SkipsBinary(t *testing.T) {
 
 func TestExpandFileMentions_RefusesDotEnv(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, ".env"), []byte("PACKETCODE_OPENAI_API_KEY=sk-secret"), 0o600)
-	os.WriteFile(filepath.Join(root, ".env.example"), []byte("PACKETCODE_OPENAI_API_KEY="), 0o600)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("PACKETCODE_OPENAI_API_KEY=sk-secret"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env.example"), []byte("PACKETCODE_OPENAI_API_KEY="), 0o600))
 	expanded, attached := expandFileMentions("keys in @.env and @.env.example", root)
 	if len(attached) != 1 || attached[0] != ".env.example" {
 		t.Fatalf("attached = %v, want only .env.example", attached)
@@ -87,7 +89,7 @@ func TestExpandFileMentions_RefusesSymlinkEscape(t *testing.T) {
 	outside := t.TempDir()
 	root := t.TempDir()
 	secret := filepath.Join(outside, "id_rsa")
-	os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600)
+	require.NoError(t, os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600))
 	link := filepath.Join(root, "notes.txt")
 	if err := os.Symlink(secret, link); err != nil {
 		t.Skipf("symlinks unavailable here: %v", err)
@@ -103,7 +105,7 @@ func TestExpandFileMentions_RefusesSymlinkEscape(t *testing.T) {
 
 func TestExpandFileMentions_AllowsSymlinkInsideRoot(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "real.go"), []byte("package real"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "real.go"), []byte("package real"), 0o644))
 	if err := os.Symlink(filepath.Join(root, "real.go"), filepath.Join(root, "alias.go")); err != nil {
 		t.Skipf("symlinks unavailable here: %v", err)
 	}

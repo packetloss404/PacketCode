@@ -148,7 +148,7 @@ func TestE2E_SpawnAgentToolViaSlashCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jobs.NewManager: %v", err)
 	}
-	defer mgr.Shutdown(2 * time.Second)
+	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
 
 	// Build a minimal App by hand so we don't have to stand up every
 	// Deps field. The fields we need for this test are: deps.Jobs,
@@ -192,10 +192,6 @@ func TestE2E_SpawnAgentToolViaSlashCommand(t *testing.T) {
 	appMu.Lock()
 	_, _ = app.handleSlashCommand(cmd, args, "/spawn hi")
 	appMu.Unlock()
-	if false {
-		// silence unused-result lint; return values are meaningful to
-		// the Bubble Tea loop but not to us here
-	}
 
 	// (1) Conversation got the queued echo.
 	appMu.Lock()
