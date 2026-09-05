@@ -720,12 +720,18 @@ def bug_log() -> list:
 
 def day31() -> list:
     rows = [
-        ("K-01", "DONE. ci.yml and release.yml pin Go 1.26.8, not the 1.26.6 this list "
-                 "first named: 1.26.8 was current when the change was made, and is past the "
-                 "version that clears the nine reachable stdlib advisories."),
-        ("K-02", "OPEN. Decide U-03. If yes, apply docs/audit/patches/P10b-*.patch and "
-                 "update the Go version in README.md and HANDOFF.md. Raising the language "
-                 "floor decides who can build the project."),
+        ("K-01", "DONE, and measured. ci.yml and release.yml pin Go 1.26.8, not the 1.26.6 "
+                 "this list first named. On main at 1.26.3 govulncheck reports 15 reachable "
+                 "vulnerabilities, 8 of them stdlib; on the branch at 1.26.8 it reports 7, "
+                 "none stdlib. The pin cleared 8 stdlib advisories, not 9, with no code "
+                 "change."),
+        ("K-02", "OPEN, and the blocker for a green CI. All 7 remaining reachable "
+                 "advisories are in x/crypto v0.43.0, reached through "
+                 "internal/computers/ssh_backend.go, so vulncheck fails on main too. Five "
+                 "of them (GO-2026-5013, 5017, 5018, 5019, 5020) are fixed in v0.52.0, "
+                 "which needs go 1.25.0. The other two (GO-2026-6354, 6355) need v0.56.0, "
+                 "which needs go 1.26.0: that is what P10b does. Raising the language floor "
+                 "decides who can build the project."),
         ("K-03", "DONE. smoke-e2e is in the ci target, and the CI smoke job runs smoke.sh "
                  "on ubuntu, macos and windows. The macOS and Linux runs are new; before "
                  "this it had only been exercised on Windows."),

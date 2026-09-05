@@ -324,14 +324,28 @@ The entries below record what the work turned out to involve rather than what
 was predicted. The rest are open, and K-02 and K-07 are decisions rather than
 tasks.
 
-1. **K-01** Done. `ci.yml` and `release.yml` pin Go 1.26.8, not the 1.26.6 this
-   list first named. 1.26.8 was the current patch release when the change was
-   made, and it is past the version the audit identified as clearing the nine
-   reachable stdlib advisories. No code change.
-2. **K-02** Open. Decide U-03. If yes, apply `docs/audit/patches/P10b-*.patch`
-   and update the Go version in `README.md` and `HANDOFF.md`. Left out of the
-   branch deliberately: raising the language floor to 1.26 decides who can
-   build the project, which is not an audit call to make.
+1. **K-01** Done, and measured. `ci.yml` and `release.yml` pin Go 1.26.8, not
+   the 1.26.6 this list first named: 1.26.8 was the current patch release when
+   the change was made. CI confirms the effect. On `main` at Go 1.26.3,
+   govulncheck reports 15 reachable vulnerabilities, 8 of them in the Go
+   standard library. On the branch at 1.26.8 it reports 7, none of them
+   stdlib. So the pin cleared 8 reachable stdlib advisories, not the 9 the
+   audit predicted, with no code change.
+2. **K-02** Open, and now the blocker for a green CI. All 7 remaining
+   reachable advisories are in `golang.org/x/crypto` v0.43.0, every one of
+   them reached through `internal/computers/ssh_backend.go`, so the
+   `vulncheck` job fails on `main` and on every branch until this is decided.
+   The fix splits in two, which the audit did not know:
+
+   - GO-2026-5013, 5017, 5018, 5019 and 5020 are fixed in x/crypto v0.52.0,
+     whose `go.mod` requires `go 1.25.0`. Five of seven for a one-minor
+     floor raise from the current `go 1.24.2`.
+   - GO-2026-6354 and 6355 need v0.56.0, which requires `go 1.26.0`. That is
+     what `docs/audit/patches/P10b-*.patch` does.
+
+   Either way the Go version in `README.md` and `HANDOFF.md` moves with it.
+   Left out of this branch deliberately: raising the language floor decides
+   who can build the project, which is not an audit call to make.
 3. **K-03** Done. `smoke-e2e` is in the `ci` target, and the CI smoke job runs
    `smoke.sh` on ubuntu, macos and windows. The macOS and Linux runs are new.
    Before this the script had only ever been exercised on Windows, so the
