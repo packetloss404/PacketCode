@@ -65,7 +65,7 @@ Windows) to make an unverifiable download an error rather than a note.
 See [docs/releases.md](docs/releases.md) for what is published, how to verify a
 download by hand, and how release signing is configured.
 
-Build from source with Go 1.24.2 or newer:
+Build from source with Go 1.26.0 or newer:
 
 ```bash
 make build

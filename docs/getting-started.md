@@ -2,7 +2,7 @@
 
 ## Build and Run
 
-packetcode requires Go 1.24.2 or newer.
+packetcode requires Go 1.26.0 or newer.
 
 ```bash
 make build
