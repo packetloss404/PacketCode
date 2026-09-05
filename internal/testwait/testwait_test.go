@@ -105,6 +105,25 @@ func TestTimeout_ScalesAndFloors(t *testing.T) {
 	}
 }
 
+func TestSeconds_RoundsUpAndNeverShortensTheBudget(t *testing.T) {
+	t.Setenv(ScaleEnv, "2")
+	if got := Seconds(10 * time.Second); got != 20 {
+		t.Fatalf("Seconds(10s) at scale 2 = %d, want 20", got)
+	}
+	// The floor applies before the conversion, so a small baseline still gets
+	// a usable whole number rather than zero.
+	if got := Seconds(time.Millisecond); got != int(minTimeout.Seconds()) {
+		t.Fatalf("Seconds(1ms) = %d, want the %s floor", got, minTimeout)
+	}
+	// A budget that does not land on a whole second must round up: truncating
+	// would hand back less time than the scale asked for, which is the defect
+	// this package exists to prevent.
+	t.Setenv(ScaleEnv, "1.05")
+	if got := Seconds(10 * time.Second); got != 11 {
+		t.Fatalf("Seconds(10s) at scale 1.05 = %d, want 11 (10.5s rounded up)", got)
+	}
+}
+
 func TestFactor_DefaultsWhenUnsetOrInvalid(t *testing.T) {
 	for _, raw := range []string{"", "not-a-number", "0", "-3"} {
 		t.Setenv(ScaleEnv, raw)

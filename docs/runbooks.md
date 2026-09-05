@@ -571,6 +571,19 @@ go test ./internal/jobs/ -count=1 -run <TestName> -timeout 240s
 git worktree remove /tmp/pc-bisect
 ```
 
+**If a Windows test that runs a hook or status line command fails on its
+timeout**, suspect the interpreter before the code. The first
+`powershell -Command` on a machine costs 4.3-4.9s on GitHub's `windows-latest`
+runners; every later one costs under 0.2s. `internal/hooks` pays that once in
+`TestMain` and every such budget scales through `internal/testwait`, so a
+failure here usually means either a new package spawned PowerShell before
+`internal/hooks` did, or a hook budget was written as a bare number instead of
+`testwait.Seconds(...)`. Confirm which before changing a timeout:
+
+```bash
+go test ./internal/hooks/ -count=1 -run TestRunUserPromptSubmit_CollectsStdout -v
+```
+
 ---
 
 ## R17. Reset to a known-good state

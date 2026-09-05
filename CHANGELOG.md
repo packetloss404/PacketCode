@@ -6,6 +6,25 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- `TestRunUserPromptSubmit_CollectsStdout` failed on `test (windows-latest)`
+  about two runs in three and never on a developer machine. The cause was
+  measured rather than guessed: on four GitHub `windows-latest` runners the
+  first `powershell -Command "exit 0"` in a job took 4.33-4.87s while every
+  later one took 0.16-0.19s, and a bare `cmd.exe` CreateProcess at the same
+  instant took 15-38ms. The machine was not busy, the stdin plumbing cost
+  nothing (170ms with no stdin, 175ms with it attached, 180ms running the full
+  hook script) and `internal/hooks` added nothing (184ms with the tree-cancel
+  wiring, 194ms end to end through `Runner`). It was Windows PowerShell's own
+  start-up, paid once per machine, and it landed entirely on whichever test
+  spawned first -- whose 5s budget sat a few hundred milliseconds above a 4.6s
+  constant. `internal/hooks` now pays that cost in `TestMain`, before any
+  test's budget is running, and the budgets themselves scale through
+  `internal/testwait` like every other deadline in the suite. `pwsh` was
+  measured as an alternative and is slower warm (265-285ms), so the tests still
+  run the interpreter production uses. The same trap was latent in
+  `internal/statusline` and `internal/jobs`, which spawn the same interpreter
+  and were surviving only because `internal/hooks` happened to run first; their
+  budgets scale now too.
 - Bugfix pass, 2026-09-03. Six read-only reviewers swept the packages and
   the confirmed findings were fixed with regression tests:
   - **Permissions.** A session or skill allow rule for `execute_command`
