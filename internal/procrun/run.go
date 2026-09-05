@@ -53,12 +53,19 @@ type KillOutcome struct {
 // possibly incomplete.
 func (o KillOutcome) Unconfirmed() bool { return !o.Confirmed }
 
+// ConfigureTreeCancel installs process-tree teardown on cancellation.
+//
+// cmd must have been created with exec.CommandContext. os/exec refuses to
+// start a command that has a Cancel func but no context, with "command with
+// a non-nil Cancel was not created with CommandContext", and that refusal
+// surfaces at Start rather than here.
 func ConfigureTreeCancel(cmd *exec.Cmd) {
 	_ = ConfigureTreeCancelRecorder(cmd)
 }
 
 // ConfigureTreeCancelRecorder is ConfigureTreeCancel that captures the
-// evidence from the teardown os/exec performs on cancellation.
+// evidence from the teardown os/exec performs on cancellation. The same
+// exec.CommandContext requirement applies.
 //
 // The teardown happens inside a callback os/exec owns, so without this the
 // outcome is produced and immediately discarded — which is why callers could

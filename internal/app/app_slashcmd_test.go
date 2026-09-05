@@ -350,10 +350,23 @@ func convText(a *App) string {
 	return a.conversation.View()
 }
 
+// flattenSpace collapses every run of whitespace into a single space.
+func flattenSpace(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// convContains asserts on the conversation without caring where the view
+// soft-wrapped.
+//
+// The pane wraps to its width and the break lands wherever the message
+// happens to run long, which depends on what the message embeds. A
+// t.TempDir() path is the usual culprit and its length differs per
+// platform, so a literal assertion straddling the break fails for a reason
+// unrelated to the behaviour under test. That is precisely how
+// "depth now: 0" failed on Linux while passing on Windows: every character
+// was present, with the wrap sitting between "depth" and "now:".
 func convContains(t *testing.T, a *App, needle string) {
 	t.Helper()
-	if !strings.Contains(convText(a), needle) {
-		t.Fatalf("conversation does not contain %q; got:\n%s", needle, convText(a))
+	if !strings.Contains(flattenSpace(convText(a)), flattenSpace(needle)) {
+		t.Fatalf("conversation does not contain %q (ignoring wrapping); got:\n%s", needle, convText(a))
 	}
 }
 

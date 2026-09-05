@@ -65,7 +65,7 @@ func TestTrackedTreeKillsDescendantAfterRootExits(t *testing.T) {
 // A group with nothing in it must report Confirmed rather than an error: the
 // caller asked for the tree to be gone and it is gone.
 func TestKillTreeOnExitedProcessIsConfirmed(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^$")
 	ConfigureTreeCancel(cmd)
 	require.NoError(t, cmd.Start())
 	require.NoError(t, cmd.Wait())
@@ -79,7 +79,7 @@ func TestKillTreeOnExitedProcessIsConfirmed(t *testing.T) {
 // A live tree torn down before the root is reaped cannot be confirmed, and the
 // reason must say why rather than leaving the caller to guess.
 func TestKillTreeBeforeReapIsUnconfirmedWithReason(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTrackedTreeKillsDescendantAfterRootExits$")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestTrackedTreeKillsDescendantAfterRootExits$")
 	cmd.Env = append(os.Environ(), "PACKETCODE_PROCRUN_TEST_ROLE=sleeper")
 	ConfigureTreeCancel(cmd)
 	require.NoError(t, cmd.Start())
