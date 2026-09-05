@@ -42,14 +42,32 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// TimingEnv opts a run in to the spawn-cost measurement in
+// spawncost_windows_test.go, which is skipped by default.
+const TimingEnv = "PACKETCODE_HOOK_TIMING"
+
+// timingRequested reports whether this run is a measurement run rather than an
+// ordinary one.
+func timingRequested() bool { return os.Getenv(TimingEnv) == "1" }
+
 // warmShellInterpreter runs the cheapest possible command through the same
 // shellCommand the hooks use, so the warm-up covers whatever interpreter
 // production actually picks rather than a copy of that choice that can drift.
+//
+// It stands down on a measurement run. The first-start cost this exists to
+// absorb is the single most useful number the spawn-cost measurement reports,
+// and warming first would quietly turn it into a second reading of the warm
+// case -- an instrument that always agrees with itself and never says anything.
+// The other tests in such a run then pay that cost themselves, which their
+// scaled budgets already cover.
 //
 // Its result is deliberately ignored. It asserts nothing, and a machine where
 // it fails is one where the tests below should report the problem themselves
 // against their own scaled budgets -- not one where the suite refuses to start.
 func warmShellInterpreter() {
+	if timingRequested() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), testwait.Timeout(5*time.Second))
 	defer cancel()
 	cmd := shellCommand(ctx, "exit 0")
