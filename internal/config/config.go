@@ -354,6 +354,14 @@ type BehaviorConfig struct {
 	// operator who finds it noisy must be able to silence it without a
 	// rebuild.
 	PostEditDiagnosticsDisabled bool `toml:"post_edit_diagnostics_disabled"`
+
+	// BackupRetentionDays bounds how long a previous session's undo backups
+	// stay on disk. The undo stack is in-memory and reset per run, so a tree
+	// from an exited session can never be undone again and is pure disk cost.
+	// Zero uses the built-in default of fourteen days, like every other cap
+	// here; BackupPruneDisabled is the switch for keeping everything.
+	BackupRetentionDays int  `toml:"backup_retention_days"`
+	BackupPruneDisabled bool `toml:"backup_prune_disabled"`
 }
 
 // PermissionConfig controls the approval policy applied to tool calls.

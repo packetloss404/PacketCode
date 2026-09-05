@@ -83,3 +83,21 @@ func TestValidationProblems_BehaviorRanges(t *testing.T) {
 	assert.Contains(t, problems, "provider_max_retries -1")
 	assert.Contains(t, problems, "background_max_depth -2")
 }
+
+func TestValidationProblems_BackupRetention(t *testing.T) {
+	cfg := Default()
+	cfg.Behavior.BackupRetentionDays = -1
+	problems := strings.Join(cfg.ValidationProblems(), "\n")
+	assert.Contains(t, problems, "backup_retention_days")
+	assert.Contains(t, problems, "backup_prune_disabled")
+
+	// Turning pruning off is a legitimate choice, not something to warn about.
+	disabled := Default()
+	disabled.Behavior.BackupPruneDisabled = true
+	assert.Empty(t, disabled.ValidationProblems())
+
+	// So is a positive window.
+	configured := Default()
+	configured.Behavior.BackupRetentionDays = 30
+	assert.Empty(t, configured.ValidationProblems())
+}

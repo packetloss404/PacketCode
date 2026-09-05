@@ -79,6 +79,8 @@ background_token_budget = 0
 workflow_token_budget = 0
 provider_max_retries = 3
 provider_stall_timeout = 60
+backup_retention_days = 14
+backup_prune_disabled = false
 
 [packet_computers]
 enabled = true # set false to disable registry loading, SSH, and remote placement
@@ -213,6 +215,13 @@ Provider resilience settings:
 
 - `provider_max_retries` — how many times to retry a failed provider request (default 3).
 - `provider_stall_timeout` — abort a provider stream that goes silent for this many seconds (default 60).
+
+Undo backup retention:
+
+- `backup_retention_days` — how long a previous session's undo backups stay under `~/.packetcode/backups/` (default 14). Stale trees are removed once at startup. The session that is starting is never pruned, however old it is, so resuming an old session keeps its tree.
+- `backup_prune_disabled` — set true to keep every backup tree forever. A negative `backup_retention_days` is treated as unset and reported by `packetcode doctor`; this switch is the supported way to turn pruning off.
+
+Undo only reaches backups made during the current run: the undo stack is held in memory and reset on start. Trees left by earlier runs cannot be restored from and are only occupying disk, which is what pruning reclaims.
 
 Write-capable background agents create git worktrees under `~/.packetcode/worktrees/<repo-key>/<job-id>` using branch `packetcode-job-<job-id>` and the current `HEAD` commit as the base. This state directory is internal; there is no config key for it yet. Read-only jobs do not create worktrees.
 
