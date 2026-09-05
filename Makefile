@@ -51,8 +51,9 @@ smoke: build
 # provider (tools/smokestub) with an isolated home, asserting credential
 # resolution, an approved write, the fail-closed approval path, the dotenv
 # secret refusal, and the compound-command deny floor. No credentials, no
-# network, no new dependencies. Deliberately not part of `ci` yet; add it there
-# once it has run green on all three runners.
+# network, no new dependencies. The CI smoke job runs the same script on
+# ubuntu, macos and windows, and the script exits nonzero if any assertion
+# fails, so it gates rather than reports.
 smoke-e2e:
 	bash smoke.sh
 
@@ -76,7 +77,7 @@ tui-golden-check: build
 run: build
 	./$(BINARY)
 
-ci: verify lint test vulncheck build smoke goreleaser-check release-dry-run install-test
+ci: verify lint test vulncheck build smoke smoke-e2e goreleaser-check release-dry-run install-test
 
 clean:
 	rm -rf bin/ dist/

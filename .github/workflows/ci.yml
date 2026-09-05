@@ -132,6 +132,15 @@ jobs:
         run: ${{ matrix.binary }} --help
       - name: Smoke headless run help
         run: ${{ matrix.binary }} run --help
+      # The checks above prove the binary starts. This one drives the real
+      # agent loop against a stdlib-only stub provider on loopback: credential
+      # resolution, an approved write, the fail-closed approval path, the
+      # dotenv secret refusal, and the compound-command deny floor. It needs no
+      # credentials and no network. bash is explicit because the Windows runner
+      # would otherwise use PowerShell.
+      - name: End-to-end smoke
+        shell: bash
+        run: bash smoke.sh
 
   # The release pipeline, exercised on every push rather than first exercised
   # by tagging.
