@@ -333,7 +333,7 @@ func TestTruncate_MeasuresDisplayWidthNotRunes(t *testing.T) {
 	// when there is no TTY, so styled output in a test would carry no escapes
 	// at all and the regression could not be expressed. The goldens hit this
 	// path because they are captured through a real PTY.
-	styled := "[38;5;33ma1b2c3d4[0m  [38;5;250mrunning focused tests[0m"
+	styled := "\x1b[38;5;33ma1b2c3d4\x1b[0m  \x1b[38;5;250mrunning focused tests\x1b[0m"
 	width := ansi.StringWidth(styled)
 	if width >= len([]rune(styled)) {
 		t.Fatalf("precondition: styled string should carry invisible escapes, width=%d runes=%d", width, len([]rune(styled)))

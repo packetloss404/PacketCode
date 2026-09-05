@@ -25,11 +25,7 @@ func CachePrefixFingerprint(systemPrompt string, tools []ToolDefinition) string 
 
 	canonical := make([]canonicalTool, 0, len(canonicalDefinitions))
 	for _, tool := range canonicalDefinitions {
-		canonical = append(canonical, canonicalTool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  tool.Parameters,
-		})
+		canonical = append(canonical, canonicalTool(tool))
 	}
 
 	payload, err := json.Marshal(struct {

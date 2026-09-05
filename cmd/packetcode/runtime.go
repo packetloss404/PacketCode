@@ -179,7 +179,7 @@ func buildPacketRuntime(ctx context.Context, opts packetRuntimeConfig) (_ *packe
 		activeModel = opts.ModelOverride
 	}
 	if activeProvider == "sugar" && !opts.Config.SugarIsEnabled() && !opts.Config.SugarUsesCustomProvider() {
-		return nil, fmt.Errorf("Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
+		return nil, fmt.Errorf("the Sugar integration is disabled; enable [sugar].enabled or set PACKETCODE_SUGAR_ENABLED=true")
 	}
 	if activeProvider == "" {
 		return nil, fmt.Errorf("no default provider is configured; configure PacketCode before creating a session")

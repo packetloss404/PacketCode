@@ -192,10 +192,6 @@ func TestE2E_SpawnAgentToolViaSlashCommand(t *testing.T) {
 	appMu.Lock()
 	_, _ = app.handleSlashCommand(cmd, args, "/spawn hi")
 	appMu.Unlock()
-	if false {
-		// silence unused-result lint; return values are meaningful to
-		// the Bubble Tea loop but not to us here
-	}
 
 	// (1) Conversation got the queued echo.
 	appMu.Lock()

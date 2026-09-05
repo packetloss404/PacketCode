@@ -135,12 +135,13 @@ func (m *tuiFixtureModel) View() string {
 	}
 	status := m.topbar.View() + "\n  " + renderPermModeHint(m.mode)
 	in := m.input.View()
-	if m.state == "approval" {
+	switch m.state {
+	case "approval":
 		in = m.input.ViewBlurred()
-	} else if m.state == "agents" {
+	case "agents":
 		in = m.input.ViewWithPlaceholder("press n to dispatch a new agent")
 		status = ""
-	} else if m.state == "workflows" {
+	case "workflows":
 		in = ""
 		status = ""
 	}

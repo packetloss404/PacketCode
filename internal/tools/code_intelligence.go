@@ -280,10 +280,7 @@ func (t *FindReferencesTool) Execute(ctx context.Context, raw json.RawMessage) (
 		return ToolResult{Content: "find_references: " + inferErr.Error(), IsError: true}, nil
 	}
 	limit := boundedInt(p.MaxResults, defaultReferenceLimit, maxReferenceLimit)
-	includeDeclaration := true
-	if rawContainsFalse(raw, "include_declaration") {
-		includeDeclaration = false
-	}
+	includeDeclaration := !rawContainsFalse(raw, "include_declaration")
 	matches, truncated, err := collectReferences(ctx, t.Root, p.ScopePath, symbol, p.FileGlob, includeDeclaration, limit)
 	if err != nil {
 		return ToolResult{Content: "find_references: " + err.Error(), IsError: true}, nil

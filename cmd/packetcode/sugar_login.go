@@ -405,7 +405,7 @@ func validateSugarLoginURL(raw string) error {
 	if parsed.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1") {
 		return nil
 	}
-	return fmt.Errorf("Sugar server must use HTTPS unless it is localhost")
+	return fmt.Errorf("the Sugar server must use HTTPS unless it is localhost")
 }
 
 func validateSugarVerificationURL(baseURL, verificationURL string) error {

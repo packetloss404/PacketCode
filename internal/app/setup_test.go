@@ -58,7 +58,7 @@ func TestPromptProvider_UsesCanonicalDisplayOrder(t *testing.T) {
 	openAI := strings.Index(text, "openai")
 	anthropic := strings.Index(text, "anthropic")
 	custom := strings.Index(text, "aa-custom")
-	if openAI < 0 || anthropic < 0 || custom < 0 || !(openAI < anthropic && anthropic < custom) {
+	if openAI < 0 || anthropic < 0 || custom < 0 || openAI >= anthropic || anthropic >= custom {
 		t.Fatalf("unexpected provider order:\n%s", text)
 	}
 }
