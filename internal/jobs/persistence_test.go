@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/testwait"
 )
 
 // TestSaveSnapshot_AtomicWrite confirms the temp-file-then-rename
@@ -175,7 +177,7 @@ func TestManagerPersistenceDebouncesNonterminalUpdates(t *testing.T) {
 	dir := t.TempDir()
 	mgr, _, err := NewManager(Config{JobsDir: dir})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = mgr.Shutdown(time.Second) })
+	t.Cleanup(func() { _ = mgr.Shutdown(testwait.Timeout(time.Second)) })
 	mgr.persistDelay = time.Hour
 
 	for seq := int64(1); seq <= 3; seq++ {
@@ -197,7 +199,7 @@ func TestManagerPersistenceTerminalFlushIsSynchronous(t *testing.T) {
 	dir := t.TempDir()
 	mgr, _, err := NewManager(Config{JobsDir: dir})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = mgr.Shutdown(time.Second) })
+	t.Cleanup(func() { _ = mgr.Shutdown(testwait.Timeout(time.Second)) })
 	mgr.persistDelay = time.Hour
 	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "terminal", State: "running", Seq: 1}))
 	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "terminal", State: "completed", Seq: 2, Summary: "done"}))
@@ -219,7 +221,7 @@ func TestManagerShutdownFlushesPendingSnapshots(t *testing.T) {
 	mgr.persistDelay = time.Hour
 	require.NoError(t, mgr.savePersistedSnapshot(persistedJob{ID: "shutdown", State: "running", Seq: 7, LastMessage: "latest"}))
 
-	require.NoError(t, mgr.Shutdown(time.Second))
+	require.NoError(t, mgr.Shutdown(testwait.Timeout(time.Second)))
 	got, ok := readPersistedJob(filepath.Join(dir, "shutdown.json"))
 	require.True(t, ok)
 	assert.Equal(t, int64(7), got.Seq)

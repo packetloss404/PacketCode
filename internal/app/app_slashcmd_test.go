@@ -22,6 +22,7 @@ import (
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
 	"github.com/packetcode/packetcode/internal/statusline"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 	"github.com/packetcode/packetcode/internal/ui/components/agentview"
 	"github.com/packetcode/packetcode/internal/ui/components/approval"
@@ -1459,7 +1460,7 @@ func TestApp_Queue_ListDropAndClear(t *testing.T) {
 func TestApp_Agents_ListUsesBackgroundJobs(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
+	defer func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) }()
 
 	snap, spawnErr := mgr.Spawn(jobs.SpawnRequest{
 		Prompt:   "audit fixtures",
@@ -1483,7 +1484,7 @@ func TestApp_Agents_ListUsesBackgroundJobs(t *testing.T) {
 func TestApp_Agents_DetailOpensJobsPanel(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
+	defer func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) }()
 
 	snap, spawnErr := mgr.Spawn(jobs.SpawnRequest{
 		Prompt:   "inspect flaky test",
@@ -1503,7 +1504,7 @@ func TestApp_Agents_DetailOpensJobsPanel(t *testing.T) {
 func TestApp_Agents_NotFoundUsesAgentLabel(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
+	defer func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) }()
 
 	r.app.handleSlashCommand("agents", []string{"missing"}, "/agents missing")
 	convContains(t, r.app, "[agent:missing not found]")
@@ -1512,7 +1513,7 @@ func TestApp_Agents_NotFoundUsesAgentLabel(t *testing.T) {
 func TestApp_Agents_ViewDoesNotOverrideJobsPanelOverlay(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
+	defer func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) }()
 
 	snap, spawnErr := mgr.Spawn(jobs.SpawnRequest{
 		Prompt:   "inspect overlay",
@@ -1646,7 +1647,7 @@ func TestApp_ResizeRecomposesBuiltInStatusLine(t *testing.T) {
 func TestApp_HandleJobUpdate_IgnoresStaleSeqAndDedupesTerminal(t *testing.T) {
 	r := newTestApp(t)
 	mgr := wireJobsManagerForSlashTest(t, r)
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
+	defer func() { _ = mgr.Shutdown(testwait.Timeout(2 * time.Second)) }()
 
 	snap, spawnErr := mgr.Spawn(jobs.SpawnRequest{
 		Prompt:   "finish once",
