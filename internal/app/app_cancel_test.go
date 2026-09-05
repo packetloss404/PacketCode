@@ -87,35 +87,6 @@ func (r *releaseProvider) ChatCompletion(ctx context.Context, _ provider.ChatReq
 	return ch, nil
 }
 
-// approvalProvider emits a write_file tool call on turn 0 — used to
-// drive the App into a state where the approval modal is visible.
-type approvalProvider struct {
-	turnIdx int32
-}
-
-func (approvalProvider) Name() string                                         { return "appr" }
-func (approvalProvider) Slug() string                                         { return "appr" }
-func (approvalProvider) BrandColor() lipgloss.Color                           { return lipgloss.Color("#000000") }
-func (approvalProvider) ValidateKey(context.Context, string) error            { return nil }
-func (approvalProvider) ListModels(context.Context) ([]provider.Model, error) { return nil, nil }
-func (approvalProvider) Pricing(string) (float64, float64)                    { return 0, 0 }
-func (approvalProvider) ContextWindow(string) int                             { return 100_000 }
-func (approvalProvider) SupportsTools(string) bool                            { return true }
-
-func (a *approvalProvider) ChatCompletion(ctx context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
-	atomic.AddInt32(&a.turnIdx, 1)
-	ch := make(chan provider.StreamEvent, 8)
-	go func() {
-		defer close(ch)
-		ch <- provider.StreamEvent{Type: provider.EventToolCallStart, ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "fake_write"}}
-		ch <- provider.StreamEvent{Type: provider.EventToolCallDelta, ToolCall: &provider.ToolCallDelta{Index: 0, ArgumentsDelta: `{}`}}
-		ch <- provider.StreamEvent{Type: provider.EventToolCallEnd, ToolCall: &provider.ToolCallDelta{Index: 0}}
-		ch <- provider.StreamEvent{Type: provider.EventDone, Usage: &provider.Usage{InputTokens: 1, OutputTokens: 1}}
-		<-ctx.Done()
-	}()
-	return ch, nil
-}
-
 // fakeWriteTool requires approval so the agent's approver.Approve path
 // fires. Execute blocks on ctx so the test can verify the approval
 // modal's Hide on cancel without the tool ever running.

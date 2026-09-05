@@ -269,7 +269,6 @@ type App struct {
 	width     int
 	height    int
 	streaming bool
-	err       string
 
 	// Coalesced live tool-output streaming. Chunks (EventToolOutputChunk)
 	// land in toolOutputPending keyed by the running call id; a single
@@ -1572,12 +1571,6 @@ func (a *App) resolveApprovalResult(msg approval.ResultMsg) {
 
 func (a *App) startTurn(text string, emitUser bool) (tea.Model, tea.Cmd) {
 	return a.startTurnWith(turnOptions{display: text, text: text, emitUser: emitUser})
-}
-
-// startTurnDisplaying starts a turn whose transcript line is not the text the
-// model receives, for text the user typed.
-func (a *App) startTurnDisplaying(display, text string, emitUser bool) (tea.Model, tea.Cmd) {
-	return a.startTurnWith(turnOptions{display: display, text: text, emitUser: emitUser})
 }
 
 // turnOptions describes one turn's two texts and where its text came from.
