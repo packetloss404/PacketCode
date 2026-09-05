@@ -1,4 +1,4 @@
-.PHONY: build test lint verify vulncheck goreleaser-check release-dry-run release-check install-test smoke run clean ci tui-deps tui-snapshots tui-snapshots-claude tui-golden-update tui-golden-check
+.PHONY: build test lint verify vulncheck goreleaser-check release-dry-run release-check install-test smoke smoke-e2e run clean ci tui-deps tui-snapshots tui-snapshots-claude tui-golden-update tui-golden-check
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -46,6 +46,15 @@ install-test:
 smoke: build
 	./$(BINARY) --version
 	./$(BINARY) run --help
+
+# End-to-end smoke: drives the real agent loop against a stdlib-only stub
+# provider (tools/smokestub) with an isolated home, asserting credential
+# resolution, an approved write, the fail-closed approval path, the dotenv
+# secret refusal, and the compound-command deny floor. No credentials, no
+# network, no new dependencies. Deliberately not part of `ci` yet; add it there
+# once it has run green on all three runners.
+smoke-e2e:
+	bash smoke.sh
 
 tui-snapshots: build
 	sh scripts/tui_snapshot_suite.sh packetcode
