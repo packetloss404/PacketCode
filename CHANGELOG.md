@@ -4,153 +4,7 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ## [Unreleased]
 
-### Fixed
-
-- `TestStallGuard_TickKeepsAlive` and `TestStallGuard_ConcurrentTicks` blamed
-  the stall guard for working. Both assert a negative — that the guard does not
-  fire while Ticks keep arriving — which holds only while the ticking goroutine
-  is scheduled inside the guard's window. The windows were 30ms and 40ms, so a
-  loaded machine could starve a ticker past one, at which point the guard fired
-  and the test reported a bug in code that had just done its job. Reproduced at
-  3 failures in a batch of 25 under load. The windows now scale with
-  `testwait.Factor` (the multiplier without `Timeout`'s five-second floor,
-  which would turn a millisecond-scale test into a ten-second one), and the
-  tests now measure the widest gap between their own Ticks: a cancellation is a
-  failure only when every Tick was demonstrably inside the window, and is
-  otherwise reported as the machine being slow. Verified both ways — with Tick
-  stubbed out both tests fail and name the gap, and under an impossibly narrow
-  window they skip rather than lie. 900 executions under six concurrent suite
-  runs are clean.
-- **Job records could silently disappear on Windows.** Windows opens deny by
-  default, and Go's `os.ReadFile` asks for `FILE_SHARE_READ|WRITE` but not
-  `FILE_SHARE_DELETE`. So while any reader holds a job record open, the rename
-  that publishes a new version of it fails with `ERROR_ACCESS_DENIED`, and
-  while that rename is in flight a reader fails with
-  `ERROR_SHARING_VIOLATION`. Both are "try again in a moment", which is what
-  POSIX does implicitly; both were being treated as permanent. Measured on one
-  contended path: 809 of 2000 renames and 857 concurrent reads failed. The
-  consequences were real — a terminal job state whose write failed is
-  discarded silently by every `_ = m.savePersistedSnapshot...` call site, and a
-  record whose read failed is reported as *malformed* by `decodeRecordFile` and
-  dropped from the reload entirely. `atomicfile` now waits such a collision out
-  (ten attempts, 10ms apart, Windows only; the loops compile to a single pass
-  everywhere else) and exposes `atomicfile.ReadFile` for the read half, which
-  the job record readers use. A regression test contends a reader and a writer
-  on one path and fails without the retry.
-- `TestResubmit_SpawnsNewJobAndLinksBothWays` was flaky on Windows CI as a
-  result of the above, plus a mistake of its own: it waited for `Manager.Get`
-  to report a terminal state and then read the record off disk, but
-  `markTerminalCause` flips the in-memory state under the manager lock and
-  persists only after releasing it. Reading inside that window found the
-  successor still `running`, which sent the loader down its reconcile-and-
-  rewrite path against a file the manager was writing at the same instant. It
-  now waits for the record itself, and asserts the loader reported nothing
-  unreadable — the discarded `unreadable` return is why the failure only ever
-  said "map does not contain <id>".
-- `TestRunUserPromptSubmit_CollectsStdout` failed on `test (windows-latest)`
-  about two runs in three and never on a developer machine. The cause was
-  measured rather than guessed: on four GitHub `windows-latest` runners the
-  first `powershell -Command "exit 0"` in a job took 4.33-4.87s while every
-  later one took 0.16-0.19s, and a bare `cmd.exe` CreateProcess at the same
-  instant took 15-38ms. The machine was not busy, the stdin plumbing cost
-  nothing (170ms with no stdin, 175ms with it attached, 180ms running the full
-  hook script) and `internal/hooks` added nothing (184ms with the tree-cancel
-  wiring, 194ms end to end through `Runner`). It was Windows PowerShell's own
-  start-up, paid once per machine, and it landed entirely on whichever test
-  spawned first -- whose 5s budget sat a few hundred milliseconds above a 4.6s
-  constant. `internal/hooks` now pays that cost in `TestMain`, before any
-  test's budget is running, and the budgets themselves scale through
-  `internal/testwait` like every other deadline in the suite. `pwsh` was
-  measured as an alternative and is slower warm (265-285ms), so the tests still
-  run the interpreter production uses. The same trap was latent in
-  `internal/statusline` and `internal/jobs`, which spawn the same interpreter
-  and were surviving only because `internal/hooks` happened to run first; their
-  budgets scale now too.
-- Bugfix pass, 2026-09-03. Six read-only reviewers swept the packages and
-  the confirmed findings were fixed with regression tests:
-  - **Permissions.** A session or skill allow rule for `execute_command`
-    returned before the deny-floor check ran, so `sh -c 'git push'` was
-    allowed outright under a configured `git push` deny once any allow rule
-    existed. Escalation now runs on every allow, whichever path produced it.
-    Deny prefixes also compared raw words, so `"git" push`, `gi""t push`, and
-    `git -C . push` were clean misses; quotes are now seen through, an
-    unresolvable word or an option between the prefix words escalates when
-    the denied word is still ahead, and the scripting interpreters and
-    Windows shells count as indirection like `sh -c`.
-  - **Approval prompt.** Tool arguments were rendered without the terminal
-    sanitizer the conversation already uses, so an escape sequence inside a
-    proposed command could erase the part of the line being approved.
-  - **Cost.** `cost.Tracker` still billed cached input at the full rate after
-    sessions and jobs were corrected, so `/cost` and the statusline disagreed
-    with the session total by ~6x on cache-heavy runs. It now shares
-    `provider.EstimateCost`, with provider-specific cache rates plumbed to the
-    tally and to background jobs.
-  - **Providers.** Anthropic never read `stop_reason`, so a reply cut off by
-    `max_tokens` was persisted as complete and a truncated tool call surfaced
-    as "arguments are invalid JSON"; it is now an error naming the cause, as
-    it is for the other adapters. Gemini `SAFETY`/`RECITATION`/`MAX_TOKENS`
-    finishes and prompt-level blocks ended as a silent empty turn; they are
-    errors too. The one bare channel send left in the Responses parser goes
-    through `StreamSink`. `/compact` no longer sends an empty summary request
-    when the cut lands inside the first tool group.
-  - **Config.** `PACKETCODE_CONDUIT_SHADOW` and the three
-    `PACKETCODE_SUGAR_*` envelope variables were written into the stored
-    fields, so the next `/provider`, `/effort`, or key save made a one-off
-    environment override permanent in `config.toml`. They are held as
-    overrides now, like the enabled flags already were.
-  - **Jobs.** A write job launched from a repository sub-directory got the
-    worktree top level as its root while a read-only sibling kept the
-    sub-directory, so relative paths in the prompt resolved differently by
-    mode. `Spawn` now counts its worker before releasing the lock `Shutdown`
-    checks, closing a WaitGroup ordering race that could start a worker
-    nothing waited for.
-  - **Persistence.** `config.toml`, job sub-session transcripts, and the
-    computers registry are written through `atomicfile` with fsync, like
-    sessions and job records. The registry also keeps rows this build cannot
-    read and writes them back, instead of deleting a newer build's record the
-    first time an older build saves.
-  - **Local shell on Windows.** os/exec re-quoted the `cmd /C` argument, so
-    `echo "hi"` printed `\"hi\"` and the PowerShell invocation the tool
-    describes ran nothing; cmd.exe now receives the line verbatim via
-    `/S /C`. A command that exits 0 but leaves a background child holding the
-    pipe is reported with its real exit status rather than `-1` and a
-    "WaitDelay expired" error.
-  - **Tools.** `read_file` on an empty file is no longer an error. The
-    Go-fallback search no longer follows file symlinks out of the root. An
-    unterminated tag in `fetch` HTML extraction was rescanned from every
-    later `<`, quadratic to ~48 s of CPU at the body cap; it now ends the
-    scan.
-  - **TUI.** A self-paced `/loop` restarted immediately after Ctrl+C or a
-    provider error; it now stops. An interval loop no longer queues another
-    body on every tick while the previous one is still streaming. `/clear`
-    sized the fresh conversation at width 0, wrapping at 78 columns. Releasing
-    a skill grant restores the pre-grant rules at the profile in force now, so
-    a mid-turn switch to plan mode is not reverted underneath the plan flag.
-  - **MCP and run.** `/mcp restart` gave up when closing the old process
-    returned an error, which is exactly the hung server a restart is for.
-    `packetcode run` no longer turns a slow MCP shutdown into exit 1 with the
-    answer withheld, prints flag-error usage to stderr, and reports an unknown
-    `--provider` as unknown rather than "no model is configured".
-- `packetcode --help` now lists all commands. It printed flags and nothing
-  else, so the four pre-existing commands — `doctor`, `skills`, `acp` and
-  `sugar` — were reachable only by reading the source — a diagnostic command
-  nobody can find is not much of a
-  diagnostic. `help`, `-h` and `--help` now exit 0 rather than 2, since asking
-  for help is not an error.
-  Dispatch and help read one table instead of two hand-maintained lists, which
-  is how they came to disagree; a command can no longer exist in one and be
-  missing from the other.
-- Cost estimates no longer bill cached input at the full input rate. Every
-  provider serves cached tokens at a fraction of fresh ones and reports how
-  many; packetcode recorded that number faithfully and then multiplied the
-  whole cache-inclusive input count by the standard price. Measured over a
-  six-task benchmark where 93% of input came from cache, the displayed figure
-  was roughly **6x the real bill** — a tool that is cheap reporting itself as
-  expensive. The counts were always there; only the arithmetic was wrong.
-  Fixed in `internal/session` and `internal/jobs`, which carried independent
-  copies of the same formula, through one shared `provider.EstimateCost`.
-  Cache reads default to a tenth of the input rate and writes to par;
-  Anthropic states its own, since it charges a premium for cache writes.
+## [0.6.0] - 2026-09-05
 
 ### Added
 
@@ -551,6 +405,153 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
   content beneath a visible modal or workspace.
 
 ### Fixed
+
+- `TestStallGuard_TickKeepsAlive` and `TestStallGuard_ConcurrentTicks` blamed
+  the stall guard for working. Both assert a negative — that the guard does not
+  fire while Ticks keep arriving — which holds only while the ticking goroutine
+  is scheduled inside the guard's window. The windows were 30ms and 40ms, so a
+  loaded machine could starve a ticker past one, at which point the guard fired
+  and the test reported a bug in code that had just done its job. Reproduced at
+  3 failures in a batch of 25 under load. The windows now scale with
+  `testwait.Factor` (the multiplier without `Timeout`'s five-second floor,
+  which would turn a millisecond-scale test into a ten-second one), and the
+  tests now measure the widest gap between their own Ticks: a cancellation is a
+  failure only when every Tick was demonstrably inside the window, and is
+  otherwise reported as the machine being slow. Verified both ways — with Tick
+  stubbed out both tests fail and name the gap, and under an impossibly narrow
+  window they skip rather than lie. 900 executions under six concurrent suite
+  runs are clean.
+- **Job records could silently disappear on Windows.** Windows opens deny by
+  default, and Go's `os.ReadFile` asks for `FILE_SHARE_READ|WRITE` but not
+  `FILE_SHARE_DELETE`. So while any reader holds a job record open, the rename
+  that publishes a new version of it fails with `ERROR_ACCESS_DENIED`, and
+  while that rename is in flight a reader fails with
+  `ERROR_SHARING_VIOLATION`. Both are "try again in a moment", which is what
+  POSIX does implicitly; both were being treated as permanent. Measured on one
+  contended path: 809 of 2000 renames and 857 concurrent reads failed. The
+  consequences were real — a terminal job state whose write failed is
+  discarded silently by every `_ = m.savePersistedSnapshot...` call site, and a
+  record whose read failed is reported as *malformed* by `decodeRecordFile` and
+  dropped from the reload entirely. `atomicfile` now waits such a collision out
+  (ten attempts, 10ms apart, Windows only; the loops compile to a single pass
+  everywhere else) and exposes `atomicfile.ReadFile` for the read half, which
+  the job record readers use. A regression test contends a reader and a writer
+  on one path and fails without the retry.
+- `TestResubmit_SpawnsNewJobAndLinksBothWays` was flaky on Windows CI as a
+  result of the above, plus a mistake of its own: it waited for `Manager.Get`
+  to report a terminal state and then read the record off disk, but
+  `markTerminalCause` flips the in-memory state under the manager lock and
+  persists only after releasing it. Reading inside that window found the
+  successor still `running`, which sent the loader down its reconcile-and-
+  rewrite path against a file the manager was writing at the same instant. It
+  now waits for the record itself, and asserts the loader reported nothing
+  unreadable — the discarded `unreadable` return is why the failure only ever
+  said "map does not contain <id>".
+- `TestRunUserPromptSubmit_CollectsStdout` failed on `test (windows-latest)`
+  about two runs in three and never on a developer machine. The cause was
+  measured rather than guessed: on four GitHub `windows-latest` runners the
+  first `powershell -Command "exit 0"` in a job took 4.33-4.87s while every
+  later one took 0.16-0.19s, and a bare `cmd.exe` CreateProcess at the same
+  instant took 15-38ms. The machine was not busy, the stdin plumbing cost
+  nothing (170ms with no stdin, 175ms with it attached, 180ms running the full
+  hook script) and `internal/hooks` added nothing (184ms with the tree-cancel
+  wiring, 194ms end to end through `Runner`). It was Windows PowerShell's own
+  start-up, paid once per machine, and it landed entirely on whichever test
+  spawned first -- whose 5s budget sat a few hundred milliseconds above a 4.6s
+  constant. `internal/hooks` now pays that cost in `TestMain`, before any
+  test's budget is running, and the budgets themselves scale through
+  `internal/testwait` like every other deadline in the suite. `pwsh` was
+  measured as an alternative and is slower warm (265-285ms), so the tests still
+  run the interpreter production uses. The same trap was latent in
+  `internal/statusline` and `internal/jobs`, which spawn the same interpreter
+  and were surviving only because `internal/hooks` happened to run first; their
+  budgets scale now too.
+- Bugfix pass, 2026-09-03. Six read-only reviewers swept the packages and
+  the confirmed findings were fixed with regression tests:
+  - **Permissions.** A session or skill allow rule for `execute_command`
+    returned before the deny-floor check ran, so `sh -c 'git push'` was
+    allowed outright under a configured `git push` deny once any allow rule
+    existed. Escalation now runs on every allow, whichever path produced it.
+    Deny prefixes also compared raw words, so `"git" push`, `gi""t push`, and
+    `git -C . push` were clean misses; quotes are now seen through, an
+    unresolvable word or an option between the prefix words escalates when
+    the denied word is still ahead, and the scripting interpreters and
+    Windows shells count as indirection like `sh -c`.
+  - **Approval prompt.** Tool arguments were rendered without the terminal
+    sanitizer the conversation already uses, so an escape sequence inside a
+    proposed command could erase the part of the line being approved.
+  - **Cost.** `cost.Tracker` still billed cached input at the full rate after
+    sessions and jobs were corrected, so `/cost` and the statusline disagreed
+    with the session total by ~6x on cache-heavy runs. It now shares
+    `provider.EstimateCost`, with provider-specific cache rates plumbed to the
+    tally and to background jobs.
+  - **Providers.** Anthropic never read `stop_reason`, so a reply cut off by
+    `max_tokens` was persisted as complete and a truncated tool call surfaced
+    as "arguments are invalid JSON"; it is now an error naming the cause, as
+    it is for the other adapters. Gemini `SAFETY`/`RECITATION`/`MAX_TOKENS`
+    finishes and prompt-level blocks ended as a silent empty turn; they are
+    errors too. The one bare channel send left in the Responses parser goes
+    through `StreamSink`. `/compact` no longer sends an empty summary request
+    when the cut lands inside the first tool group.
+  - **Config.** `PACKETCODE_CONDUIT_SHADOW` and the three
+    `PACKETCODE_SUGAR_*` envelope variables were written into the stored
+    fields, so the next `/provider`, `/effort`, or key save made a one-off
+    environment override permanent in `config.toml`. They are held as
+    overrides now, like the enabled flags already were.
+  - **Jobs.** A write job launched from a repository sub-directory got the
+    worktree top level as its root while a read-only sibling kept the
+    sub-directory, so relative paths in the prompt resolved differently by
+    mode. `Spawn` now counts its worker before releasing the lock `Shutdown`
+    checks, closing a WaitGroup ordering race that could start a worker
+    nothing waited for.
+  - **Persistence.** `config.toml`, job sub-session transcripts, and the
+    computers registry are written through `atomicfile` with fsync, like
+    sessions and job records. The registry also keeps rows this build cannot
+    read and writes them back, instead of deleting a newer build's record the
+    first time an older build saves.
+  - **Local shell on Windows.** os/exec re-quoted the `cmd /C` argument, so
+    `echo "hi"` printed `\"hi\"` and the PowerShell invocation the tool
+    describes ran nothing; cmd.exe now receives the line verbatim via
+    `/S /C`. A command that exits 0 but leaves a background child holding the
+    pipe is reported with its real exit status rather than `-1` and a
+    "WaitDelay expired" error.
+  - **Tools.** `read_file` on an empty file is no longer an error. The
+    Go-fallback search no longer follows file symlinks out of the root. An
+    unterminated tag in `fetch` HTML extraction was rescanned from every
+    later `<`, quadratic to ~48 s of CPU at the body cap; it now ends the
+    scan.
+  - **TUI.** A self-paced `/loop` restarted immediately after Ctrl+C or a
+    provider error; it now stops. An interval loop no longer queues another
+    body on every tick while the previous one is still streaming. `/clear`
+    sized the fresh conversation at width 0, wrapping at 78 columns. Releasing
+    a skill grant restores the pre-grant rules at the profile in force now, so
+    a mid-turn switch to plan mode is not reverted underneath the plan flag.
+  - **MCP and run.** `/mcp restart` gave up when closing the old process
+    returned an error, which is exactly the hung server a restart is for.
+    `packetcode run` no longer turns a slow MCP shutdown into exit 1 with the
+    answer withheld, prints flag-error usage to stderr, and reports an unknown
+    `--provider` as unknown rather than "no model is configured".
+- `packetcode --help` now lists all commands. It printed flags and nothing
+  else, so the four pre-existing commands — `doctor`, `skills`, `acp` and
+  `sugar` — were reachable only by reading the source — a diagnostic command
+  nobody can find is not much of a
+  diagnostic. `help`, `-h` and `--help` now exit 0 rather than 2, since asking
+  for help is not an error.
+  Dispatch and help read one table instead of two hand-maintained lists, which
+  is how they came to disagree; a command can no longer exist in one and be
+  missing from the other.
+- Cost estimates no longer bill cached input at the full input rate. Every
+  provider serves cached tokens at a fraction of fresh ones and reports how
+  many; packetcode recorded that number faithfully and then multiplied the
+  whole cache-inclusive input count by the standard price. Measured over a
+  six-task benchmark where 93% of input came from cache, the displayed figure
+  was roughly **6x the real bill** — a tool that is cheap reporting itself as
+  expensive. The counts were always there; only the arithmetic was wrong.
+  Fixed in `internal/session` and `internal/jobs`, which carried independent
+  copies of the same formula, through one shared `provider.EstimateCost`.
+  Cache reads default to a tenth of the input rate and writes to par;
+  Anthropic states its own, since it charges a premium for cache writes.
+
 
 - Session and job records are fsynced before the rename that publishes them.
   The rename alone is atomic for a reader, but it could reach the disk ahead of
