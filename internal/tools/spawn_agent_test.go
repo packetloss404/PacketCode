@@ -428,10 +428,19 @@ func TestCollectAgentResultsTool_ScopeAndManifest(t *testing.T) {
 	}
 }
 
-func TestCollectAgentResultsTool_ForegroundRequiresApproval(t *testing.T) {
-	tool := NewCollectAgentResultsTool(&fakeSpawner{}, "", 0)
-	if !tool.RequiresApproval() {
-		t.Fatalf("foreground collect_agent_results should require approval")
+// Collection is classified read-only by the permission policy, which allows
+// it before RequiresApproval is consulted;
+// TestPolicy_SafeProfileDeniesDestructiveAndAllowsRead pins that from the
+// other side. The method answering true for the foreground tool
+// therefore never produced a prompt, and a tool must not claim a gate the
+// policy does not give it. Both constructions are covered because the
+// foreground one, with no parent job id, is the one that used to differ.
+func TestCollectAgentResultsTool_NeverRequiresApproval(t *testing.T) {
+	for _, parentJobID := range []string{"", "job-1"} {
+		tool := NewCollectAgentResultsTool(&fakeSpawner{}, parentJobID, 0)
+		if tool.RequiresApproval() {
+			t.Errorf("RequiresApproval() = true for parent job %q, want false", parentJobID)
+		}
 	}
 }
 
