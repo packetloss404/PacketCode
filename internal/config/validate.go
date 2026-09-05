@@ -100,6 +100,9 @@ func (c *Config) ValidationProblems() []string {
 	if b.ProviderStallTimeout < 0 {
 		problems = append(problems, fmt.Sprintf("[behavior] provider_stall_timeout %d is negative; the default of 60 is used", b.ProviderStallTimeout))
 	}
+	if b.BackupRetentionDays < 0 {
+		problems = append(problems, fmt.Sprintf("[behavior] backup_retention_days %d is negative; the default of 14 is used. Set backup_prune_disabled to keep backups forever", b.BackupRetentionDays))
+	}
 	for _, cap := range []struct {
 		name  string
 		value int

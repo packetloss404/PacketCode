@@ -319,18 +319,50 @@ was expected, runbook. A reproduction is worth more than a judgement.
 
 ## Day 31 backlog
 
-1. **K-01** Move CI to Go 1.26.6: one line in `ci.yml` and `release.yml`. Clears
-   nine reachable stdlib advisories with no code change.
-2. **K-02** Decide U-03. If yes, apply `docs/audit/patches/P10b-*.patch` and
-   update the Go version in `README.md` and `HANDOFF.md`.
-3. **K-03** Add `smoke-e2e` to the `ci` target and to `ci.yml`. Watch the first
-   macOS and Linux runs; it has only been exercised on Windows.
-4. **K-04** Answer U-01 and U-02. Each closes an open medium finding or produces
-   a small patch.
-5. **K-05** Prune backups on startup. `$PC/backups` grows without bound and
-   `BackupManager.Cleanup` has no production caller.
-6. **K-06** Decide F-11: `collect_agent_results` either prompts or is read-only.
-7. **K-07** Route code intelligence through `LocalBackend.Resolve` and retire
-   `internal/tools/safefs.go`. A security boundary: needs its own review.
-8. **K-08** Do not start Streamable HTTP MCP or the Packet Computers daemon in a
-   low-capability window. Both have written contracts to build against later.
+K-01, K-03, K-05 and K-06 were carried out on branch `chore/day-31-backlog`.
+The entries below record what the work turned out to involve rather than what
+was predicted. The rest are open, and K-02 and K-07 are decisions rather than
+tasks.
+
+1. **K-01** Done, and measured. `ci.yml` and `release.yml` pin Go 1.26.8, not
+   the 1.26.6 this list first named: 1.26.8 was the current patch release when
+   the change was made. CI confirms the effect. On `main` at Go 1.26.3,
+   govulncheck reports 15 reachable vulnerabilities, 8 of them in the Go
+   standard library. On the branch at 1.26.8 it reports 7, none of them
+   stdlib. So the pin cleared 8 reachable stdlib advisories, not the 9 the
+   audit predicted, with no code change.
+2. **K-02** Open, and now the blocker for a green CI. All 7 remaining
+   reachable advisories are in `golang.org/x/crypto` v0.43.0, every one of
+   them reached through `internal/computers/ssh_backend.go`, so the
+   `vulncheck` job fails on `main` and on every branch until this is decided.
+   The fix splits in two, which the audit did not know:
+
+   - GO-2026-5013, 5017, 5018, 5019 and 5020 are fixed in x/crypto v0.52.0,
+     whose `go.mod` requires `go 1.25.0`. Five of seven for a one-minor
+     floor raise from the current `go 1.24.2`.
+   - GO-2026-6354 and 6355 need v0.56.0, which requires `go 1.26.0`. That is
+     what `docs/audit/patches/P10b-*.patch` does.
+
+   Either way the Go version in `README.md` and `HANDOFF.md` moves with it.
+   Left out of this branch deliberately: raising the language floor decides
+   who can build the project, which is not an audit call to make.
+3. **K-03** Done. `smoke-e2e` is in the `ci` target, and the CI smoke job runs
+   `smoke.sh` on ubuntu, macos and windows. The macOS and Linux runs are new.
+   Before this the script had only ever been exercised on Windows, so the
+   first CI run is the evidence the Makefile comment asked for.
+4. **K-04** Partly done. U-02 is answered: no provider `base_url` is set
+   anywhere in the tree, so there is no plain-http endpoint to find. U-01 is
+   still open.
+5. **K-05** Done. `session.PruneBackups` removes backup trees that no run can
+   reach, once per start, with `backup_retention_days` and
+   `backup_prune_disabled` to configure it. `BackupManager.Cleanup` still has
+   no production caller and is now the redundant path.
+6. **K-06** Done. `collect_agent_results` is read-only on both sides:
+   `RequiresApproval` returns false and no longer contradicts
+   `permissions.readOnlyTool`. No profile changes its decision.
+7. **K-07** Open. Route code intelligence through `LocalBackend.Resolve` and
+   retire `internal/tools/safefs.go`. A security boundary: it needs its own
+   review and does not belong in a batch of small changes.
+8. **K-08** Open. Do not start Streamable HTTP MCP or the Packet Computers
+   daemon in a low-capability window. Both have written contracts to build
+   against later. This is a warning, not a task.

@@ -242,6 +242,10 @@ func buildPacketRuntime(ctx context.Context, opts packetRuntimeConfig) (_ *packe
 	}
 
 	rt.Backups = session.NewBackupManager(opts.BackupsDir, rt.SessionID)
+	// Undo cannot reach a previous run's backups, so they are dead weight on
+	// disk. Reclaim the stale ones once per start, before anything writes new
+	// ones, and never touch the tree this session is about to use.
+	session.PruneBackups(opts.BackupsDir, rt.SessionID, backupRetention(opts.Config.Behavior))
 	rt.Skills = skills.Load(opts.Root)
 	// Spilled tool output is per-session state, like the todo store: a
 	// background job must not be able to read or evict what the foreground
@@ -473,4 +477,21 @@ func (rt *packetRuntime) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// backupRetention resolves the configured backup window into a duration.
+//
+// Zero or negative days selects the built-in default, which is how every
+// other [behavior] cap reads a nonsensical value, and the explicit disable
+// switch is what turns pruning off. That split matches
+// loop_detection_disabled and post_edit_diagnostics_disabled rather than
+// overloading the sign of a count.
+func backupRetention(b config.BehaviorConfig) time.Duration {
+	if b.BackupPruneDisabled {
+		return 0
+	}
+	if b.BackupRetentionDays <= 0 {
+		return session.DefaultBackupMaxAge
+	}
+	return time.Duration(b.BackupRetentionDays) * 24 * time.Hour
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,4 +282,86 @@ func pathWithinDir(base, target string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel))
+}
+
+// DefaultBackupMaxAge is how long a session backup tree is kept when the
+// operator has not configured a retention window.
+const DefaultBackupMaxAge = 14 * 24 * time.Hour
+
+// PruneBackups removes session backup trees under backupsDir that have not
+// been written to for maxAge, and reports how many trees it removed. A
+// maxAge of zero or less prunes nothing.
+//
+// A backup exists only to serve /undo, and the undo stack lives in memory and
+// is reset whenever a BackupManager is constructed (see the type comment).
+// A tree left by a run that has already exited is therefore unreachable by any
+// future undo: it is disk cost with no recovery value. Age is the whole of the
+// policy because nothing else reads these files.
+//
+// keepSessionID is never removed whatever its age. It is the tree the caller
+// is about to write into, and a resumed session can easily be older than the
+// window.
+//
+// Pruning is best effort and silent. A tree that cannot be read or removed is
+// left in place, because failing to reclaim disk is not a reason to fail a
+// startup. Only names that pass the session-id check are joined onto the base,
+// so a candidate path can never escape the backups directory.
+func PruneBackups(backupsDir, keepSessionID string, maxAge time.Duration) int {
+	if maxAge <= 0 {
+		return 0
+	}
+	base := cleanBackupBase(backupsDir)
+	listing, err := os.ReadDir(base)
+	if err != nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for _, item := range listing {
+		if !item.IsDir() || item.Name() == keepSessionID {
+			continue
+		}
+		root, err := backupRoot(base, item.Name())
+		if err != nil {
+			continue
+		}
+		newest, ok := newestModTime(root)
+		if !ok || !newest.Before(cutoff) {
+			continue
+		}
+		if os.RemoveAll(root) == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+// newestModTime reports the most recent modification time anywhere under dir,
+// including dir itself.
+//
+// Taking the maximum over the whole tree is what makes the age check honest:
+// backups are written into a mirror of the original source tree, so a write
+// several levels down does not necessarily touch the session directory's own
+// mtime. A tree that cannot be walked reports no time, which keeps it.
+func newestModTime(dir string) (time.Time, bool) {
+	var newest time.Time
+	found := false
+	err := filepath.WalkDir(dir, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if mod := info.ModTime(); mod.After(newest) {
+			newest = mod
+		}
+		found = true
+		return nil
+	})
+	if err != nil {
+		return time.Time{}, false
+	}
+	return newest, found
 }

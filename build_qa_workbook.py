@@ -720,22 +720,34 @@ def bug_log() -> list:
 
 def day31() -> list:
     rows = [
-        ("K-01", "Move CI to Go 1.26.6: one line in ci.yml and release.yml. Clears nine "
-                 "reachable stdlib advisories with no code change."),
-        ("K-02", "Decide U-03. If yes, apply docs/audit/patches/P10b-*.patch and update the "
-                 "Go version in README.md and HANDOFF.md."),
-        ("K-03", "Add smoke-e2e to the ci target and to ci.yml. Watch the first macOS and "
-                 "Linux runs; it has only been exercised on Windows."),
-        ("K-04", "Answer U-01 and U-02. Each closes an open medium finding or produces a "
-                 "small patch."),
-        ("K-05", "Prune backups on startup. $PC/backups grows without bound and "
-                 "BackupManager.Cleanup has no production caller."),
-        ("K-06", "Decide F-11: collect_agent_results either prompts or is read-only. "
-                 "One line either way."),
-        ("K-07", "Route code intelligence through LocalBackend.Resolve and retire "
+        ("K-01", "DONE, and measured. ci.yml and release.yml pin Go 1.26.8, not the 1.26.6 "
+                 "this list first named. On main at 1.26.3 govulncheck reports 15 reachable "
+                 "vulnerabilities, 8 of them stdlib; on the branch at 1.26.8 it reports 7, "
+                 "none stdlib. The pin cleared 8 stdlib advisories, not 9, with no code "
+                 "change."),
+        ("K-02", "OPEN, and the blocker for a green CI. All 7 remaining reachable "
+                 "advisories are in x/crypto v0.43.0, reached through "
+                 "internal/computers/ssh_backend.go, so vulncheck fails on main too. Five "
+                 "of them (GO-2026-5013, 5017, 5018, 5019, 5020) are fixed in v0.52.0, "
+                 "which needs go 1.25.0. The other two (GO-2026-6354, 6355) need v0.56.0, "
+                 "which needs go 1.26.0: that is what P10b does. Raising the language floor "
+                 "decides who can build the project."),
+        ("K-03", "DONE. smoke-e2e is in the ci target, and the CI smoke job runs smoke.sh "
+                 "on ubuntu, macos and windows. The macOS and Linux runs are new; before "
+                 "this it had only been exercised on Windows."),
+        ("K-04", "PARTLY DONE. U-02 is answered: no provider base_url is set anywhere, so "
+                 "there is no plain-http endpoint to find. U-01 is still open."),
+        ("K-05", "DONE. session.PruneBackups removes backup trees no run can reach, once "
+                 "per start, configured by backup_retention_days and "
+                 "backup_prune_disabled."),
+        ("K-06", "DONE. collect_agent_results is read-only on both sides: RequiresApproval "
+                 "returns false and no longer contradicts permissions.readOnlyTool. No "
+                 "profile changes its decision."),
+        ("K-07", "OPEN. Route code intelligence through LocalBackend.Resolve and retire "
                  "internal/tools/safefs.go. Security boundary: needs its own review."),
-        ("K-08", "Do not start Streamable HTTP MCP or the Packet Computers daemon in a "
-                 "low-capability window. Both have written contracts to build against later."),
+        ("K-08", "OPEN. Do not start Streamable HTTP MCP or the Packet Computers daemon in "
+                 "a low-capability window. Both have written contracts to build against "
+                 "later. A warning, not a task."),
     ]
     return [
         para("Day 31 backlog", H1),

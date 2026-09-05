@@ -28,11 +28,15 @@ func NewCollectAgentResultsTool(spawner JobSpawner, parentJobID string, parentDe
 }
 
 func (*CollectAgentResultsTool) Name() string { return "collect_agent_results" }
-func (t *CollectAgentResultsTool) RequiresApproval() bool {
-	// Foreground collection changes the active model's context, so keep
-	// the user's explicit approval gate there. Background parents can
-	// collect their own children without interrupting the user.
-	return t.ParentJobID == ""
+func (*CollectAgentResultsTool) RequiresApproval() bool {
+	// Every built-in profile classifies collection as read-only
+	// (permissions.readOnlyTool), and that check allows the call before
+	// RequiresApproval is ever consulted. Returning true for the foreground
+	// case therefore never produced a prompt -- it only made the two sources
+	// disagree about what the tool does, which is worse than either answer.
+	// The documented behaviour is that collection is automatic, and that an
+	// explicit session rule is how an operator re-adds a gate, so say that.
+	return false
 }
 func (*CollectAgentResultsTool) Schema() json.RawMessage {
 	return json.RawMessage(collectAgentResultsSchema)

@@ -16,7 +16,7 @@ permissions:
   attestations: write
 
 env:
-  GO_VERSION: '1.26.3'
+  GO_VERSION: '1.26.8'
   GORELEASER_VERSION: v2.9.0
   COSIGN_VERSION: v2.4.1
 
