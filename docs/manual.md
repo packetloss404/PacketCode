@@ -6,7 +6,7 @@ This manual starts with the shortest path to a useful session, then introduces t
 
 ## 1. Install and Start
 
-packetcode requires Go 1.24.2 or newer when building from source.
+packetcode requires Go 1.26.0 or newer when building from source.
 
 ### macOS or Linux release install
 
