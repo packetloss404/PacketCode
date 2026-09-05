@@ -7,6 +7,9 @@ dist/
 __pycache__/
 *.py[cod]
 
+# Generated QA workbook (regenerate with: python build_qa_workbook.py)
+packetcode-qa-workbook.pdf
+
 # Coverage
 *.out
 coverage.out

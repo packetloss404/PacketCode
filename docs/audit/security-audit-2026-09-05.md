@@ -5,9 +5,15 @@ Date: 2026-09-05. Baseline audited: commit `c1bca77` on branch
 (the module declares `go 1.24.2`; CI pins Go 1.26.3).
 
 This document is deliverables 0 through 8 of the one-shot audit. Deliverables 9
-through 12 (smoke test, runbooks, handoff brief, QA workbook) are deliberately
-not produced yet: the brief says to stop after 8, apply the patches in batches,
-and report what breaks.
+through 12 were produced after the patches were applied and verified, and live
+alongside it:
+
+| Deliverable | Where |
+| --- | --- |
+| 9. Smoke test | `smoke.sh` and `tools/smokestub` at the repository root; `make smoke-e2e` |
+| 10. Ops runbooks | [docs/runbooks.md](../runbooks.md) |
+| 11. Handoff brief | [docs/handoff.md](../handoff.md) |
+| 12. QA workbook | `build_qa_workbook.py` and [workbook.md](../../workbook.md) at the repository root |
 
 Every behavioural claim cites `file:line`. Line numbers are against the baseline
 `c1bca77` unless marked "(patched)". Where a patch moved lines, the patch commit
