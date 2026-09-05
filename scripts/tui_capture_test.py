@@ -81,5 +81,38 @@ class SnapshotStyleTests(unittest.TestCase):
         self.assertIn("bold", snapshot)
 
 
+class ChildEnvTests(unittest.TestCase):
+    def test_ci_is_removed_so_termenv_sees_a_terminal(self):
+        # termenv reports "not a TTY" whenever CI is set, whatever the file
+        # descriptor actually is, which strips every style span from the
+        # capture and makes every golden look changed.
+        env = tui_capture.child_env({"CI": "true", "PATH": "/usr/bin"})
+        self.assertNotIn("CI", env)
+        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_no_color_is_removed_even_when_zero(self):
+        env = tui_capture.child_env({"NO_COLOR": "0"})
+        self.assertNotIn("NO_COLOR", env)
+
+    def test_colour_capability_is_pinned(self):
+        env = tui_capture.child_env({"TERM": "dumb", "COLORTERM": ""})
+        self.assertEqual(env["TERM"], "xterm-256color")
+        self.assertEqual(env["COLORTERM"], "truecolor")
+        self.assertEqual(env["CLICOLOR"], "1")
+
+
+class AssertStyledTests(unittest.TestCase):
+    def test_styled_capture_is_accepted(self):
+        snapshot = "hi" + chr(10) + chr(10) + "-- cell styles --" + chr(10) + "1:1-2 fg=010203" + chr(10)
+        tui_capture.assert_styled(snapshot, "packetcode", "plan")
+
+    def test_styleless_capture_is_rejected(self):
+        # Colour switched off yields text and no spans. Without this guard
+        # `update` would promote that into the reviewed goldens.
+        with self.assertRaises(RuntimeError) as caught:
+            tui_capture.assert_styled("hi" + chr(10), "packetcode", "plan")
+        self.assertIn("packetcode/plan", str(caught.exception))
+        self.assertIn("colour disabled", str(caught.exception))
+
 if __name__ == "__main__":
     unittest.main()
