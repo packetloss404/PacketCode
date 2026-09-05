@@ -172,6 +172,13 @@ func run(providerOverride, modelOverride, resumeID string, trust bool, permissio
 		}
 	}
 
+	// Settings that will fail or do nothing once running, each naming the
+	// setting and any environment variable it needs. After setup, so a first
+	// run is not warned about the key it is about to be asked for.
+	for _, p := range cfg.ValidationProblems() {
+		fmt.Fprintf(os.Stderr, "packetcode: config %s\n", p)
+	}
+
 	if trust {
 		cfg.Behavior.TrustMode = true
 	}

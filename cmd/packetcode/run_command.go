@@ -178,6 +178,9 @@ func executeRunWithRuntime(ctx context.Context, opts runCommandOptions, stderr i
 	for _, problem := range cfg.CompatProblems() {
 		fmt.Fprintf(stderr, "packetcode run: config %s\n", problem)
 	}
+	for _, problem := range cfg.ValidationProblems() {
+		fmt.Fprintf(stderr, "packetcode run: config %s\n", problem)
+	}
 	if opts.PermissionMode != "" {
 		profile, parseErr := permissions.ParseProfile(opts.PermissionMode)
 		if parseErr != nil {

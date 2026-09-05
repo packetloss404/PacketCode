@@ -197,6 +197,7 @@ func buildDoctorReport() doctorReport {
 	}
 
 	addConfigCompatCheck(&r, cfg)
+	addConfigValidationCheck(&r, cfg)
 	addProviderChecks(&r, cfg)
 	addStateDirCheck(&r, "state.sessions", "sessions dir", config.SessionsDir)
 	addStateDirCheck(&r, "state.backups", "backups dir", config.BackupsDir)
@@ -340,6 +341,23 @@ func addConfigCompatCheck(r *doctorReport, cfg *config.Config) {
 		fmt.Sprintf("%d config setting(s) ignored by this build", len(problems)),
 		strings.Join(problems, "; "),
 		"Upgrade packetcode, or remove the setting", "docs/compatibility.md")
+}
+
+// addConfigValidationCheck is the same list the TUI, run, and acp print at
+// startup, so doctor and the running program cannot disagree about which
+// settings are inert. Warn, not fail: every item here is one the program
+// starts in spite of.
+func addConfigValidationCheck(r *doctorReport, cfg *config.Config) {
+	problems := cfg.ValidationProblems()
+	if len(problems) == 0 {
+		r.add("config.validation", "config", doctorOK,
+			"config settings validate", "", "", "docs/configuration.md")
+		return
+	}
+	r.add("config.validation", "config", doctorWarn,
+		fmt.Sprintf("%d config setting(s) will fail or do nothing", len(problems)),
+		strings.Join(problems, "; "),
+		"Correct the named settings in "+doctorConfigPath()+" or set the named environment variables", "docs/configuration.md")
 }
 
 func addStateDirCheck(r *doctorReport, id, message string, fn func() (string, error)) {

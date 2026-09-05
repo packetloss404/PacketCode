@@ -136,6 +136,15 @@ func runACPCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintln(stderr, "packetcode acp: ACP integration is disabled; enable [acp].enabled or set PACKETCODE_ACP_ENABLED=true")
 		return 1
 	}
+	for _, problem := range cfg.DotEnvProblems() {
+		fmt.Fprintf(stderr, "packetcode acp: .env %s\n", problem)
+	}
+	for _, problem := range cfg.CompatProblems() {
+		fmt.Fprintf(stderr, "packetcode acp: config %s\n", problem)
+	}
+	for _, problem := range cfg.ValidationProblems() {
+		fmt.Fprintf(stderr, "packetcode acp: config %s\n", problem)
+	}
 	if *permissionFlag != "" {
 		profile, err := permissions.ParseProfile(*permissionFlag)
 		if err != nil {
