@@ -136,6 +136,31 @@ type drainPump struct {
 	cmds []tea.Cmd
 }
 
+// drainCancelledTurn cancels the in-flight turn and pumps until it has
+// actually finished.
+//
+// Starting a turn starts a real agent goroutine, and that goroutine writes
+// the session into a directory under t.TempDir(). Cancelling only signals
+// it, so a test that returns straight after cancelling leaves its last
+// write racing the TempDir cleanup. That is how
+// TestLoopSelfPaced_StartedWhileStreamingKeepsOwnership failed on macOS,
+// with "TempDir RemoveAll cleanup: ... sessions: directory not empty" and no
+// mention of the test's own assertions.
+//
+// Draining cannot start a second turn: a cancelled turn ends its loop
+// through stopLoopAfterFailedTurn rather than re-running the body.
+func drainCancelledTurn(t *testing.T, a *App, cmd tea.Cmd) {
+	t.Helper()
+	pump := newDrainPump(t, a, cmd)
+	if a.cancelTurn != nil {
+		a.cancelTurn()
+	}
+	pump.RunUntil(2*time.Second, func() bool { return !a.streaming })
+	if a.streaming {
+		t.Fatalf("turn did not finish after cancellation; its goroutine may still be writing into t.TempDir()")
+	}
+}
+
 func newDrainPump(t *testing.T, a *App, initial tea.Cmd) *drainPump {
 	t.Helper()
 	return &drainPump{t: t, app: a, cmds: []tea.Cmd{initial}}

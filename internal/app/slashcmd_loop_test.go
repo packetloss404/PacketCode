@@ -275,13 +275,11 @@ func TestLoopSelfPaced_StartedWhileStreamingKeepsOwnership(t *testing.T) {
 	// hangs rather than completing: the claim happens as the turn begins.
 	wireAgent(r, &hangingProvider{})
 	r.app.streaming = false
-	r.app.startNextQueuedInput()
-	if r.app.cancelTurn != nil {
-		defer r.app.cancelTurn()
-	}
+	_, cmd := r.app.startNextQueuedInput()
 	if r.app.activeLoopID != "loop1" {
 		t.Fatalf("activeLoopID = %q after the queued turn started; the loop is orphaned", r.app.activeLoopID)
 	}
+	drainCancelledTurn(t, r.app, cmd)
 }
 
 // The immediate path must behave identically -- one builder, two callers.
@@ -295,10 +293,7 @@ func TestLoopSelfPaced_StartedIdleClaimsOwnership(t *testing.T) {
 
 	wireAgent(r, &hangingProvider{})
 	r.app.streaming = false
-	r.app.runLoopBody(ls)
-	if r.app.cancelTurn != nil {
-		defer r.app.cancelTurn()
-	}
+	cmd := r.app.runLoopBody(ls)
 
 	if r.app.activeLoopID != "loop2" {
 		t.Fatalf("activeLoopID = %q, want loop2", r.app.activeLoopID)
@@ -306,6 +301,7 @@ func TestLoopSelfPaced_StartedIdleClaimsOwnership(t *testing.T) {
 	if len(r.app.queuedInputs) != 0 {
 		t.Fatalf("an idle start should not queue: %d queued", len(r.app.queuedInputs))
 	}
+	drainCancelledTurn(t, r.app, cmd)
 }
 
 // An interval loop is driven by its ticker, not by turn completion, so it must
