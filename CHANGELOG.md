@@ -6,6 +6,21 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- `TestStallGuard_TickKeepsAlive` and `TestStallGuard_ConcurrentTicks` blamed
+  the stall guard for working. Both assert a negative — that the guard does not
+  fire while Ticks keep arriving — which holds only while the ticking goroutine
+  is scheduled inside the guard's window. The windows were 30ms and 40ms, so a
+  loaded machine could starve a ticker past one, at which point the guard fired
+  and the test reported a bug in code that had just done its job. Reproduced at
+  3 failures in a batch of 25 under load. The windows now scale with
+  `testwait.Factor` (the multiplier without `Timeout`'s five-second floor,
+  which would turn a millisecond-scale test into a ten-second one), and the
+  tests now measure the widest gap between their own Ticks: a cancellation is a
+  failure only when every Tick was demonstrably inside the window, and is
+  otherwise reported as the machine being slow. Verified both ways — with Tick
+  stubbed out both tests fail and name the gap, and under an impossibly narrow
+  window they skip rather than lie. 900 executions under six concurrent suite
+  runs are clean.
 - **Job records could silently disappear on Windows.** Windows opens deny by
   default, and Go's `os.ReadFile` asks for `FILE_SHARE_READ|WRITE` but not
   `FILE_SHARE_DELETE`. So while any reader holds a job record open, the rename
