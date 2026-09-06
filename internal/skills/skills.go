@@ -158,14 +158,20 @@ func (s Skill) ModelInvocable() bool { return !s.Invocation.DisableModelInvocati
 //
 // A skill that asked and was refused is reported rather than silently ignored,
 // because its author will otherwise wonder why the prompts kept coming.
-func (s Skill) AllowedTools() (tools []string, refused bool) {
+func (s Skill) AllowedTools() (grants []ToolGrant, refused bool) {
 	if len(s.Invocation.AllowedTools) == 0 {
 		return nil, false
 	}
 	if !s.Trusted() {
 		return nil, true
 	}
-	return append([]string(nil), s.Invocation.AllowedTools...), false
+	out := make([]ToolGrant, 0, len(s.Invocation.AllowedTools))
+	for _, g := range s.Invocation.AllowedTools {
+		// Deep, because a ToolGrant carries a slice: a shallow copy would let
+		// a caller rewrite the command prefix every later reader sees.
+		out = append(out, g.clone())
+	}
+	return out, false
 }
 
 // UserInvocable reports whether a person may trigger this skill directly.

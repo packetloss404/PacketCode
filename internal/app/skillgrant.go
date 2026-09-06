@@ -30,6 +30,10 @@ import (
 //     written for that ecosystem lands here with names that match nothing;
 //     silently granting the closest-looking tool would be guessing about
 //     exactly the thing that must not be guessed.
+//   - A grant narrowed to particular commands -- `Bash(gh:*)` -- becomes a
+//     command-prefix or exact-command rule rather than a grant of the whole
+//     shell. That is the one case where a foreign tool name is translated,
+//     because the scope travels with it: see skills.shellToolName.
 type skillGrant struct {
 	skill    string
 	tools    []string
@@ -85,17 +89,33 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 
 	base := a.currentPermissionPolicy()
 	policy := base
-	var applied, unknown []string
-	for _, name := range granted {
+	var applied, unknown, inexpressible []string
+	for _, g := range granted {
 		if a.deps.Tools == nil {
 			break
 		}
-		if _, ok := a.deps.Tools.Get(name); !ok {
-			unknown = append(unknown, name)
+		if _, ok := a.deps.Tools.Get(g.Tool); !ok {
+			unknown = append(unknown, g.Tool)
 			continue
 		}
-		policy = policy.WithRule(name, permissions.DecisionAllow)
-		applied = append(applied, name)
+		if g.Scoped() && g.Tool != skills.ShellTool {
+			// Unreachable from a file on disk -- the parser only attaches a
+			// scope to the shell tool, because it is the only tool whose
+			// parameters carry a command for a rule to match. Granting the
+			// bare tool instead would be the widening this whole path exists
+			// to refuse, so a scope that cannot be expressed grants nothing.
+			inexpressible = append(inexpressible, g.Label())
+			continue
+		}
+		switch {
+		case len(g.CommandPrefix) > 0:
+			policy = policy.WithCommandPrefixRule(g.CommandPrefix, permissions.DecisionAllow)
+		case g.Command != "":
+			policy = policy.WithCommandRule(g.Command, permissions.DecisionAllow)
+		default:
+			policy = policy.WithRule(g.Tool, permissions.DecisionAllow)
+		}
+		applied = append(applied, g.Label())
 	}
 
 	var note strings.Builder
@@ -114,6 +134,15 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 			s.Name, strings.Join(unknown, ", "),
 			map[bool]string{true: "is", false: "are"}[len(unknown) == 1],
 			map[bool]string{true: "it", false: "them"}[len(unknown) == 1])
+	}
+	if len(inexpressible) > 0 {
+		if note.Len() > 0 {
+			note.WriteString("\n")
+		}
+		fmt.Fprintf(&note, "%s narrowed %s to particular arguments, which packetcode can express only "+
+			"for %s; nothing was granted for %s.",
+			s.Name, strings.Join(inexpressible, ", "), skills.ShellTool,
+			map[bool]string{true: "it", false: "them"}[len(inexpressible) == 1])
 	}
 	return note.String()
 }
