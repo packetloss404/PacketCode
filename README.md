@@ -54,6 +54,20 @@ The Windows installer defaults to
 `%LOCALAPPDATA%\Programs\PacketCode\bin` and does not silently modify `PATH`.
 PacketADE also checks that documented location.
 
+Install a specific release rather than whatever is newest:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/packetloss404/packetcode/main/install.sh | VERSION=v0.6.0 bash
+```
+
+```powershell
+& ([scriptblock]::Create((Invoke-WebRequest https://raw.githubusercontent.com/packetloss404/packetcode/main/install.ps1).Content)) -Version v0.6.0
+```
+
+Worth doing for anything unattended. `latest` is whatever the repository
+publishes at the moment the script happens to run, which is the opposite of a
+reproducible install.
+
 Both installers check the download against `checksums.txt`, and check
 `checksums.txt` itself against its Sigstore signature when `cosign` is on
 `PATH` — the second is the one that matters, since anyone who could serve you a
@@ -61,6 +75,13 @@ modified archive could serve the matching checksum file beside it. They say so
 plainly when `cosign` is absent, and refuse outright when a signature is present
 and does not verify. Pass `REQUIRE_SIGNATURE=1` (or `-RequireSignature` on
 Windows) to make an unverifiable download an error rather than a note.
+
+Signing starts at v0.6.0. Earlier releases publish no signature at all, so
+requiring one against those fails rather than passing quietly — which is the
+right outcome, and worth knowing before you pin an older version in something
+unattended. From v0.6.0 the release also carries a SLSA build-provenance
+attestation covering every archive, verifiable with
+`gh attestation verify <archive> --repo packetloss404/packetcode`.
 
 See [docs/releases.md](docs/releases.md) for what is published, how to verify a
 download by hand, and how release signing is configured.
