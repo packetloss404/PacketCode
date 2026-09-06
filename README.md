@@ -68,6 +68,35 @@ Worth doing for anything unattended. `latest` is whatever the repository
 publishes at the moment the script happens to run, which is the opposite of a
 reproducible install.
 
+### Download a binary directly
+
+Every release publishes a static binary for each supported platform. These
+links resolve to whatever the newest release is, so they do not go stale:
+
+| Platform | Download |
+| --- | --- |
+| Linux x86-64 | [packetcode-linux-amd64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-linux-amd64.tar.gz) |
+| Linux arm64 | [packetcode-linux-arm64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-linux-arm64.tar.gz) |
+| macOS Apple silicon | [packetcode-darwin-arm64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-darwin-arm64.tar.gz) |
+| macOS Intel | [packetcode-darwin-amd64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-darwin-amd64.tar.gz) |
+| Windows x86-64 | [packetcode-windows-amd64.zip](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-windows-amd64.zip) |
+| Windows arm64 | [packetcode-windows-arm64.zip](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-windows-arm64.zip) |
+
+Older versions, release notes, and the checksum and signature files are on the
+[releases page](https://github.com/packetloss404/packetcode/releases).
+
+Downloading by hand skips the verification the installers do for you. Nothing
+about a release makes that safe to omit, so run the checks yourself —
+[docs/releases.md](docs/releases.md) gives the two commands.
+
+The checksum file is signed, but the binaries themselves are not: packetcode
+publishes no Apple Developer ID or Authenticode certificate yet. A macOS
+download from a browser therefore arrives quarantined and Gatekeeper will
+refuse to run it until you clear the flag with
+`xattr -d com.apple.quarantine ./packetcode`, and Windows shows a SmartScreen
+warning. `install.sh` avoids the macOS case entirely, because a file fetched
+with `curl` is never marked quarantined in the first place.
+
 Both installers check the download against `checksums.txt`, and check
 `checksums.txt` itself against its Sigstore signature when `cosign` is on
 `PATH` — the second is the one that matters, since anyone who could serve you a
@@ -527,14 +556,28 @@ stop to ask for each:
 allowed-tools: read_file, execute_command
 ```
 
+A grant can be narrowed to particular commands, in the form the wider ecosystem
+uses. `execute_command` is the only tool this works for, because it is the only
+one whose parameters carry a command for a rule to match:
+
+```yaml
+allowed-tools: Bash(gh:*), Bash(npm run test:*), execute_command(git status)
+```
+
+`Bash(gh:*)` pre-approves commands starting with `gh` and nothing else;
+`execute_command(git status)` matches that program byte-for-byte. A prefix grant
+never authorises a larger shell program that merely starts with the right word,
+so `gh pr list && rm -rf .` still asks.
+
 This is honoured only for **your own** skills — builtin and `~/` scope — never
 for a repository's. A project skill pre-approving the tools it then tells the
 model to use would be a repo granting itself permission. It converts "ask" to
 "allow" and nothing else, so an explicit deny still applies; it lasts only the
 turn that invoked the skill; and names that are not packetcode tools grant
 nothing and are reported. (packetcode's tool names are its own — `execute_command`,
-not `Bash` — so a skill written for another agent will usually need its list
-translated.)
+not `Bash` — so a bare name written for another agent will usually need
+translating. A scoped `Bash(...)` does not: the scope bounds what the
+translation can produce, so that one is read as `execute_command`.)
 
 `/skills` lists what resolved, with a leading slash on the ones you can type,
 and `/skills <name>` says who can reach a particular skill and what resource
@@ -589,10 +632,13 @@ though it had worked:
   a project one is repository content.
 - `${CLAUDE_PLUGIN_ROOT}` is not substituted: it names a plugin bundle, and
   packetcode has no plugin bundles.
-- `allowed-tools` narrowed to particular arguments — `Bash(git status:*)` — is
-  refused rather than widened to the bare tool, and the refusal is reported.
-  Claude Code's tool names are not packetcode's, so a name that matches no
-  registered tool grants nothing and says so instead of guessing.
+- `allowed-tools` narrowed to particular arguments works for the shell tool and
+  nothing else. `Bash(gh:*)` becomes a command-prefix rule; `Read(src/**)` is a
+  path glob, which packetcode's policy has no rule shaped like, so it is refused
+  rather than widened to the bare tool and the refusal is reported. That scope is
+  also the only reason a foreign tool name is translated at all: a bare `Bash`
+  carries no bound, matches no registered tool, and grants nothing instead of
+  handing a ported skill the whole shell on a guess.
 - packetcode refuses a skill with no `description`, which upstream loads by
   falling back to the first paragraph.
 

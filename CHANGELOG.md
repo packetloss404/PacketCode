@@ -4,6 +4,31 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ## [Unreleased]
 
+### Changed
+
+- `allowed-tools` narrowed to particular commands is now honoured for the
+  shell tool instead of refused. `Bash(gh:*)` becomes a command-prefix rule on
+  `execute_command` and `execute_command(git status)` an exact-command rule, so
+  a skill published for the wider ecosystem pre-approves what its author wrote
+  rather than nothing. The refusal claimed packetcode "does not support"
+  narrowing a grant to particular arguments, which was not true —
+  `permissions.Policy` has had `WithCommandPrefixRule` and `WithCommandRule`
+  all along; the skill loader simply never reached them. Three of the skills in
+  one real `~/.agents/skills` use this form and every one of them printed a
+  warning on every startup while granting nothing.
+  The scope is also the only reason a foreign tool name is translated. A bare
+  `Bash` still matches no registered tool and grants nothing, because turning
+  it into `execute_command` would hand a ported skill the whole shell on a
+  guess; `Bash(gh:*)` is not that guess, and the most it can produce is
+  permission to run `gh …` — strictly less than the bare-name grant that is
+  refused. Every containment around the feature is unchanged: a project skill's
+  list is still refused outright, the grant still converts ask to allow and
+  never lifts a deny floor, it is still torn down when the turn ends, and a
+  prefix rule still refuses to authorise a compound program, so `gh pr list &&
+  rm -rf .` asks. A scope packetcode has no rule shape for — `Read(src/**)` is
+  a path glob — is still refused and reported, now saying where narrowing does
+  work instead of denying it exists.
+
 ## [0.6.0] - 2026-09-05
 
 ### Added

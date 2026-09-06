@@ -25,10 +25,10 @@ type Frontmatter struct {
 	// AllowedTools mirrors `allowed-tools`, the ecosystem's way of saying which
 	// tools a skill expects to use so the turn does not stop to ask for each.
 	//
-	// Parsed here; whether any of it is honoured is decided elsewhere, because
-	// this is the one skill field that widens authority rather than describing
-	// content. See Skill.AllowedTools.
-	AllowedTools []string
+	// Parsed here, scope and all; whether any of it is honoured is decided
+	// elsewhere, because this is the one skill field that widens authority
+	// rather than describing content. See Skill.AllowedTools and ToolGrant.
+	AllowedTools []ToolGrant
 	// Warnings names header values that were not understood.
 	//
 	// A flag whose value does not parse keeps its default, and for both of
@@ -117,56 +117,6 @@ func ParseFrontmatterFields(raw string) (body string, fm Frontmatter) {
 		}
 	}
 	return body, fm
-}
-
-// parseAllowedTools splits the comma-separated list.
-//
-// A name carrying a parenthesised specifier -- `Bash(git status)`, the
-// ecosystem's way of narrowing a grant to particular commands -- is refused
-// rather than reduced to its bare name. Dropping the parentheses would turn
-// permission to run one command into permission to run any, which is the
-// opposite of what the author wrote; refusing it grants nothing and says so.
-func (fm *Frontmatter) parseAllowedTools(val string) []string {
-	var out, scoped []string
-	for _, raw := range strings.Split(val, ",") {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
-		}
-		if strings.ContainsAny(name, "()") {
-			scoped = append(scoped, name)
-			continue
-		}
-		out = append(out, name)
-	}
-	// One line per skill, not per grant. A skill listing eight `Bash(cmd:*)`
-	// entries -- which is what a real ported skill looks like -- otherwise
-	// produced eight identical warnings on every startup, and a warning
-	// repeated eight times is one nobody reads the ninth time.
-	if len(scoped) > 0 {
-		shown := scoped
-		const cap = 3
-		suffix := ""
-		if len(shown) > cap {
-			shown = shown[:cap]
-			suffix = fmt.Sprintf(" and %d more", len(scoped)-cap)
-		}
-		fm.Warnings = append(fm.Warnings, fmt.Sprintf(
-			"allowed-tools: %s%s %s a grant to particular arguments, which packetcode does "+
-				"not support; nothing was granted for %s",
-			strings.Join(quoteAll(shown), ", "), suffix,
-			map[bool]string{true: "narrows", false: "narrow"}[len(scoped) == 1],
-			map[bool]string{true: "it", false: "them"}[len(scoped) == 1]))
-	}
-	return out
-}
-
-func quoteAll(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		out = append(out, fmt.Sprintf("%q", s))
-	}
-	return out
 }
 
 // parseFlag reads one boolean header value, recording anything it could not

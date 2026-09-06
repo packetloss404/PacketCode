@@ -500,10 +500,19 @@ published [Claude Code skills docs](https://code.claude.com/docs/en/skills) and
   files. Measured a third time, from Python, reading each file:
   **3 of the 37 skills packetcode loads set `allowed-tools`** — `companion-clis`,
   `runpod-mcp`, `runpodctl` — and 7 of the 28 in `~/.claude/plugins` do.
-  All three loaded ones use `Bash(cmd:*)`, so in practice they grant nothing
-  here twice over: the argument-scoped form is refused, and `Bash` is not a
-  packetcode tool name. That is the correct outcome, and it is the case the
-  implementation was built for even when the count said it could not happen.
+  All three loaded ones use `Bash(cmd:*)`. **That last sentence was wrong, and
+  it was corrected on 2026-09-06.** The entry said they grant nothing here
+  twice over — the argument-scoped form refused, `Bash` not a packetcode tool
+  name — and called that the correct outcome. It was not: the refusal message
+  told the user packetcode "does not support" narrowing a grant to particular
+  arguments, while `permissions.Policy.WithCommandPrefixRule` and
+  `WithCommandRule` had supported exactly that all along. The loader had simply
+  never been wired to them, and the visible result was three warnings on every
+  startup for skills that work everywhere else. A scoped grant now becomes the
+  rule it describes. The bare-name half of the old reasoning survives and is
+  the reason the two halves are treated differently: a bare `Bash` still grants
+  nothing, because the scope is what bounds the translation. Widening it to
+  packetcode's shell tool would be the guess; `Bash(gh:*)` is not.
 - ~~Decide on `` !`command` `` dynamic context injection.~~ **Half shipped
   2026-08-30.** Execution is still refused, and that stays the position: it runs
   shell text out of a skill body before the model sees the result, and upstream
