@@ -68,6 +68,35 @@ Worth doing for anything unattended. `latest` is whatever the repository
 publishes at the moment the script happens to run, which is the opposite of a
 reproducible install.
 
+### Download a binary directly
+
+Every release publishes a static binary for each supported platform. These
+links resolve to whatever the newest release is, so they do not go stale:
+
+| Platform | Download |
+| --- | --- |
+| Linux x86-64 | [packetcode-linux-amd64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-linux-amd64.tar.gz) |
+| Linux arm64 | [packetcode-linux-arm64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-linux-arm64.tar.gz) |
+| macOS Apple silicon | [packetcode-darwin-arm64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-darwin-arm64.tar.gz) |
+| macOS Intel | [packetcode-darwin-amd64.tar.gz](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-darwin-amd64.tar.gz) |
+| Windows x86-64 | [packetcode-windows-amd64.zip](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-windows-amd64.zip) |
+| Windows arm64 | [packetcode-windows-arm64.zip](https://github.com/packetloss404/packetcode/releases/latest/download/packetcode-windows-arm64.zip) |
+
+Older versions, release notes, and the checksum and signature files are on the
+[releases page](https://github.com/packetloss404/packetcode/releases).
+
+Downloading by hand skips the verification the installers do for you. Nothing
+about a release makes that safe to omit, so run the checks yourself —
+[docs/releases.md](docs/releases.md) gives the two commands.
+
+The checksum file is signed, but the binaries themselves are not: packetcode
+publishes no Apple Developer ID or Authenticode certificate yet. A macOS
+download from a browser therefore arrives quarantined and Gatekeeper will
+refuse to run it until you clear the flag with
+`xattr -d com.apple.quarantine ./packetcode`, and Windows shows a SmartScreen
+warning. `install.sh` avoids the macOS case entirely, because a file fetched
+with `curl` is never marked quarantined in the first place.
+
 Both installers check the download against `checksums.txt`, and check
 `checksums.txt` itself against its Sigstore signature when `cosign` is on
 `PATH` — the second is the one that matters, since anyone who could serve you a
