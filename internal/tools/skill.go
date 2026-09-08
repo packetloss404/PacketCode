@@ -35,11 +35,11 @@ type SkillTool struct {
 	// The App wires it. Optional -- a nil hook means a skill body still loads,
 	// it just pre-approves nothing, which is the safe direction for a seam that
 	// might not be wired.
-	onLoad func(skills.Skill)
+	onLoad func(context.Context, skills.Skill)
 }
 
 // SetOnLoad registers the callback invoked when a skill body is served.
-func (t *SkillTool) SetOnLoad(fn func(skills.Skill)) { t.onLoad = fn }
+func (t *SkillTool) SetOnLoad(fn func(context.Context, skills.Skill)) { t.onLoad = fn }
 
 // NewSkillTool builds the tool over an already-resolved registry. Resolution
 // happens once at startup rather than per call so the index in the system
@@ -60,7 +60,7 @@ type skillParams struct {
 	File string `json:"file,omitempty"`
 }
 
-func (t *SkillTool) Execute(_ context.Context, params json.RawMessage) (ToolResult, error) {
+func (t *SkillTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var p skillParams
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -120,14 +120,14 @@ func (t *SkillTool) Execute(_ context.Context, params json.RawMessage) (ToolResu
 	if file := strings.TrimSpace(p.File); file != "" {
 		return t.readResource(skill, file)
 	}
-	return t.readBody(skill)
+	return t.readBody(ctx, skill)
 }
 
-func (t *SkillTool) readBody(skill skills.Skill) (ToolResult, error) {
+func (t *SkillTool) readBody(ctx context.Context, skill skills.Skill) (ToolResult, error) {
 	// Announced before the body is returned, so a grant is in force for the
 	// tool calls the body is about to prompt rather than one call too late.
 	if t.onLoad != nil {
-		t.onLoad(skill)
+		t.onLoad(ctx, skill)
 	}
 	body := skill.Block()
 	resources, truncated := t.registry.Resources(skill.Name)

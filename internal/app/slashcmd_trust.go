@@ -18,14 +18,14 @@ func (a *App) handleTrustCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 	if !set {
 		state := "off"
-		if a.currentPermissionPolicy().Profile() == permissions.ProfileFull {
+		if a.sessionPermissionPolicy().Profile() == permissions.ProfileFull {
 			state = "on"
 		}
 		a.conversation.AppendSystem("trust mode: " + state)
 		return a, nil
 	}
 	if value {
-		restore := a.currentPermissionPolicy()
+		restore := a.sessionPermissionPolicy()
 		if a.planMode {
 			restore = restore.WithProfile(a.planPrevProfile)
 			a.planMode = false
@@ -34,17 +34,17 @@ func (a *App) handleTrustCommand(args []string) (tea.Model, tea.Cmd) {
 			a.preTrustPolicy = restore
 		}
 		a.approver.SetTrust(false)
-		a.setPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
+		a.setSessionPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
 		a.conversation.AppendSystem("trust mode enabled — prompted tools will auto-approve unless policy denies them")
 	} else {
-		if a.currentPermissionPolicy().Profile() != permissions.ProfileFull && !a.approver.IsTrusted() && a.preTrustPolicy == nil {
+		if a.sessionPermissionPolicy().Profile() != permissions.ProfileFull && !a.approver.IsTrusted() && a.preTrustPolicy == nil {
 			a.conversation.AppendSystem("trust mode already disabled")
 			return a, nil
 		}
 		a.approver.SetTrust(false)
 		restore := a.trustOffPolicy()
 		a.preTrustPolicy = nil
-		a.setPermissionPolicy(restore)
+		a.setSessionPermissionPolicy(restore)
 		a.conversation.AppendSystem("trust mode disabled — restored permission profile: " + permissions.ProfileConfigName(restore.Profile()))
 	}
 	return a, nil
@@ -56,7 +56,7 @@ func (a *App) trustOffPolicy() *permissions.Policy {
 		restore = a.permissionBase
 	}
 	if restore == nil {
-		restore = a.currentPermissionPolicy().WithProfile(permissions.ProfileAsk)
+		restore = a.sessionPermissionPolicy().WithProfile(permissions.ProfileAsk)
 	}
 	if restore.Profile() == permissions.ProfileFull {
 		restore = restore.WithProfile(permissions.ProfileAsk)

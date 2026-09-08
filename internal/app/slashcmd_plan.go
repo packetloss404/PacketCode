@@ -42,18 +42,18 @@ func (a *App) handlePlanCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 
 	if want {
-		a.planPrevProfile = a.currentPermissionPolicy().Profile()
+		a.planPrevProfile = a.sessionPermissionPolicy().Profile()
 		if a.planPrevProfile != permissions.ProfileFull {
 			a.preTrustPolicy = nil
 		}
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileSafe))
+		a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(permissions.ProfileSafe))
 		a.planMode = true
 		a.refreshTopBar()
 		a.conversation.AppendSystem("plan mode ON — read-only. The model will research and propose a plan; edits and commands are disabled. Type /plan off to approve and execute.")
 		return a, nil
 	}
 
-	a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(a.planPrevProfile))
+	a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(a.planPrevProfile))
 	a.planMode = false
 	a.refreshTopBar()
 	a.conversation.AppendSystem("plan mode OFF — editing enabled (profile: " + permissions.ProfileConfigName(a.planPrevProfile) + ")")

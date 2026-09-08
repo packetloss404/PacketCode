@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -39,6 +40,7 @@ type skillGrant struct {
 	skills   []string
 	tools    []string
 	previous *permissions.Policy
+	rules    []skills.ToolGrant
 }
 
 // skillLoadedMsg carries a model-selected skill from the agent's goroutine into
@@ -48,7 +50,14 @@ type skillGrant struct {
 // the policy lives on the App, whose fields are only safe to touch inside
 // Update. Posting a message is how every other off-thread callback in this
 // package reaches the same place.
-type skillLoadedMsg struct{ skill skills.Skill }
+type skillTurnKey struct{}
+
+type skillLoadedMsg struct {
+	skill   skills.Skill
+	turnID  uint64
+	applied chan struct{}
+	ctx     context.Context
+}
 
 // wireSkillGrants connects the skill tool's load hook to the Update loop, so a
 // skill the model selects can widen the turn the same way one the user typed
@@ -65,11 +74,64 @@ func (a *App) wireSkillGrants() {
 	if !ok {
 		return
 	}
-	st.SetOnLoad(func(s skills.Skill) {
-		if a.sendMsg != nil {
-			a.sendMsg(skillLoadedMsg{skill: s})
+	st.SetOnLoad(func(ctx context.Context, s skills.Skill) {
+		turnID, ok := ctx.Value(skillTurnKey{}).(uint64)
+		if !ok || a.sendMsg == nil || ctx.Err() != nil {
+			return // Background agents sharing this tool cannot grant foreground authority.
+		}
+		applied := make(chan struct{})
+		a.sendMsg(skillLoadedMsg{skill: s, turnID: turnID, applied: applied, ctx: ctx})
+		// The next tool must not race ahead of the Update loop's policy change.
+		select {
+		case <-applied:
+		case <-ctx.Done():
 		}
 	})
+}
+
+// sessionPermissionPolicy excludes temporary skill grants. User decisions and
+// trust snapshots must be based on this policy so grants cannot become permanent.
+func (a *App) sessionPermissionPolicy() *permissions.Policy {
+	if a.activeSkillGrant != nil {
+		return a.activeSkillGrant.previous.WithProfile(a.currentPermissionPolicy().Profile())
+	}
+	return a.currentPermissionPolicy()
+}
+
+// setSessionPermissionPolicy preserves session changes across grant teardown,
+// then reapplies only the temporary overlay to the running turn.
+func (a *App) setSessionPermissionPolicy(policy *permissions.Policy) {
+	if grant := a.activeSkillGrant; grant != nil {
+		grant.previous = policy
+		for _, rule := range grant.rules {
+			policy = withSkillRule(policy, rule)
+		}
+	}
+	a.setPermissionPolicy(policy)
+}
+
+// revokeSkillGrants makes a newly requested Ask take effect immediately. An
+// existing temporary Allow must not win over a later explicit user revocation.
+func (a *App) revokeSkillGrants(pattern string) {
+	grant := a.activeSkillGrant
+	if grant == nil {
+		return
+	}
+	matcher := permissions.DefaultPolicy().WithRule(pattern, permissions.DecisionDeny)
+	grant.rules = slices.DeleteFunc(grant.rules, func(rule skills.ToolGrant) bool {
+		return matcher.Decide(permissions.Request{ToolName: rule.Tool, RequiresApproval: true}).Decision == permissions.DecisionDeny
+	})
+}
+
+func withSkillRule(policy *permissions.Policy, g skills.ToolGrant) *permissions.Policy {
+	switch {
+	case len(g.CommandPrefix) > 0:
+		return policy.WithCommandPrefixRule(g.CommandPrefix, permissions.DecisionAllow)
+	case g.Command != "":
+		return policy.WithCommandRule(g.Command, permissions.DecisionAllow)
+	default:
+		return policy.WithRule(g.Tool, permissions.DecisionAllow)
+	}
 }
 
 // applySkillGrant widens the policy for the turn a skill is invoked in and
@@ -91,6 +153,7 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 	base := a.currentPermissionPolicy()
 	policy := base
 	var applied, unknown, inexpressible []string
+	var rules []skills.ToolGrant
 	for _, g := range granted {
 		if a.deps.Tools == nil {
 			break
@@ -108,14 +171,8 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 			inexpressible = append(inexpressible, g.Label())
 			continue
 		}
-		switch {
-		case len(g.CommandPrefix) > 0:
-			policy = policy.WithCommandPrefixRule(g.CommandPrefix, permissions.DecisionAllow)
-		case g.Command != "":
-			policy = policy.WithCommandRule(g.Command, permissions.DecisionAllow)
-		default:
-			policy = policy.WithRule(g.Tool, permissions.DecisionAllow)
-		}
+		policy = withSkillRule(policy, g)
+		rules = append(rules, g)
 		applied = append(applied, g.Label())
 	}
 
@@ -128,6 +185,7 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 			a.activeSkillGrant = &skillGrant{previous: base}
 		}
 		grant := a.activeSkillGrant
+		grant.rules = append(grant.rules, rules...)
 		if !slices.Contains(grant.skills, s.Name) {
 			grant.skills = append(grant.skills, s.Name)
 		}

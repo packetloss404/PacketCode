@@ -18,7 +18,7 @@ import (
 // job had already gone away grants it for a request nobody made.
 func (a *App) rememberApproval(call provider.ToolCall) {
 	call.Name = stripJobApprovalPrefix(call.Name)
-	base := a.currentPermissionPolicy()
+	base := a.sessionPermissionPolicy()
 	if call.Name == "execute_command" {
 		if command, ok := commandFromArgs(call.Arguments); ok {
 			if base.Profile() == permissions.ProfileFull {
@@ -26,7 +26,7 @@ func (a *App) rememberApproval(call provider.ToolCall) {
 			} else {
 				a.preTrustPolicy = nil
 			}
-			a.setPermissionPolicy(base.WithCommandRule(command, permissions.DecisionAllow))
+			a.setSessionPermissionPolicy(base.WithCommandRule(command, permissions.DecisionAllow))
 			a.conversation.AppendSystem("won't ask again for this exact command this session (/permissions to review; /permissions reset to revoke)")
 		}
 		return
@@ -36,7 +36,7 @@ func (a *App) rememberApproval(call provider.ToolCall) {
 	} else {
 		a.preTrustPolicy = nil
 	}
-	a.setPermissionPolicy(base.WithRule(call.Name, permissions.DecisionAllow))
+	a.setSessionPermissionPolicy(base.WithRule(call.Name, permissions.DecisionAllow))
 	a.conversation.AppendSystem("won't ask again for " + call.Name + " this session (/permissions to review; /permissions reset to revoke)")
 }
 
