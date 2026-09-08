@@ -667,14 +667,8 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body interf
 		}
 		return
 	}
-	// Stream ended without an explicit completed/failed event.
-	if len(calls) > 0 {
-		if !sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s stream ended before completion", backend.name())}) {
-			return
-		}
-		return
-	}
-	if !sink.Send(provider.StreamEvent{Type: provider.EventDone}) {
-		return
-	}
+	// Individual output items can finish before the response itself fails or
+	// becomes incomplete. Only response.completed authorizes success, even if
+	// every tool item's arguments have already arrived.
+	sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("%s stream ended before completion (missing response.completed)", backend.name())})
 }

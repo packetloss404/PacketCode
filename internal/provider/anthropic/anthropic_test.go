@@ -283,7 +283,8 @@ func TestProvider_MessageDeltaKeepsCacheInsideInputTokens(t *testing.T) {
 		`"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}}` + "\n\n" +
 		"event: message_delta\n" +
 		`data: {"type":"message_delta","usage":{"input_tokens":25,"output_tokens":4,` +
-		`"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}` + "\n\n"
+		`"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}` + "\n\n" +
+		"event: message_stop\ndata: " + `{"type":"message_stop"}` + "\n\n"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
