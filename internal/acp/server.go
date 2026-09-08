@@ -1336,12 +1336,13 @@ func (s *Server) runPrompt(ctx context.Context, requestID json.RawMessage, sessi
 	//
 	// Each terminal path below calls this immediately before its response. The
 	// defer stays as a safety net for any future path that returns without
-	// sending one; clearing twice is harmless.
-	clearActive := func() {
+	// sending one. Clear only once: after the response is delivered, another
+	// prompt may own the active flag before this worker runs its defer.
+	clearActive := sync.OnceFunc(func() {
 		state.mu.Lock()
 		state.active = false
 		state.mu.Unlock()
-	}
+	})
 	defer clearActive()
 
 	if cancelled || runErr != nil {
