@@ -38,7 +38,7 @@ func (a *App) currentPermMode() permMode {
 	if a.planMode {
 		return modePlan
 	}
-	switch a.currentPermissionPolicy().Profile() {
+	switch a.sessionPermissionPolicy().Profile() {
 	case permissions.ProfileEdit:
 		return modeAcceptEdits
 	case permissions.ProfileAuto:
@@ -107,28 +107,28 @@ func (a *App) applyPermMode(target permMode) {
 	switch target {
 	case modeNormal:
 		a.preTrustPolicy = nil
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileAsk))
+		a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(permissions.ProfileAsk))
 	case modeAcceptEdits:
 		a.preTrustPolicy = nil
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileEdit))
+		a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(permissions.ProfileEdit))
 	case modeAuto:
 		a.preTrustPolicy = nil
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileAuto))
+		a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(permissions.ProfileAuto))
 	case modePlan:
-		a.planPrevProfile = a.currentPermissionPolicy().Profile()
+		a.planPrevProfile = a.sessionPermissionPolicy().Profile()
 		a.preTrustPolicy = nil
-		a.setPermissionPolicy(a.currentPermissionPolicy().WithProfile(permissions.ProfileSafe))
+		a.setSessionPermissionPolicy(a.sessionPermissionPolicy().WithProfile(permissions.ProfileSafe))
 		a.planMode = true
 		a.refreshTopBar()
 	case modeBypass:
-		restore := a.currentPermissionPolicy()
+		restore := a.sessionPermissionPolicy()
 		if wasPlan {
 			restore = restore.WithProfile(a.planPrevProfile)
 		}
 		if restore.Profile() != permissions.ProfileFull {
 			a.preTrustPolicy = restore
 		}
-		a.setPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
+		a.setSessionPermissionPolicy(restore.WithProfile(permissions.ProfileFull))
 	}
 }
 

@@ -14,6 +14,18 @@ copy its code or prompt text.
 
 ## v1 Release Readiness
 
+- Preserve per-model usage in cost tallies. Verified 2026-09-08:
+  `RecordUsageWithCache` changes the model label on all cumulative session
+  tokens, so switching models reprices earlier usage. A synthetic $10 + $1
+  session reports $2 at the cheaper model's rate. Store per-model deltas with
+  legacy-tally migration and cache-token coverage; old records cannot recover
+  attribution they never stored. Workaround: start a new session when switching
+  models. See [the hardening review](docs/audit/hardening-2026-09-08.md).
+- Bound local backend file reads by size and regular-file type, and make SFTP
+  I/O cancellation-aware. Identified by code inspection in the September 8
+  review; reproduce the large/special-file and stalled-connection cases before
+  implementing. Preserve backend parity and avoid closing shared connections
+  without accounting for other active calls.
 - Make `internal/jobs` survive CPU pressure. The package runs in ~3.4s idle
   and took 88s with `TestManager_ReadOnlyJobWithoutVerifyRootCannotSeeWorktree`
   failing outright when three `golangci-lint` passes ran alongside it. It

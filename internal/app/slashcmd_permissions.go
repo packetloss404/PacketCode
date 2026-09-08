@@ -29,10 +29,11 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 		a.planMode = false
 		a.preTrustPolicy = nil
+		a.activeSkillGrant = nil
 		if a.approver != nil {
 			a.approver.SetTrust(false)
 		}
-		a.setPermissionPolicy(policy)
+		a.setSessionPermissionPolicy(policy)
 		a.conversation.AppendSystem("permission policy reset to startup configuration; session rules revoked")
 		return a, nil
 	case "profile", "use":
@@ -45,7 +46,7 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("permissions: " + err.Error())
 			return a, nil
 		}
-		base := a.currentPermissionPolicy()
+		base := a.sessionPermissionPolicy()
 		if profile == permissions.ProfileFull {
 			restore := base
 			if a.planMode {
@@ -60,7 +61,7 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 		a.planMode = false
 		policy := base.WithProfile(profile)
-		a.setPermissionPolicy(policy)
+		a.setSessionPermissionPolicy(policy)
 		a.conversation.AppendSystem("permission profile: " + permissions.ProfileConfigName(profile) + " (session)")
 		return a, nil
 	case "explain":
@@ -80,14 +81,17 @@ func (a *App) handlePermissionsCommand(args []string) (tea.Model, tea.Cmd) {
 			a.conversation.AppendSystem("permissions: " + err.Error())
 			return a, nil
 		}
-		base := a.currentPermissionPolicy()
+		base := a.sessionPermissionPolicy()
 		policy := base.WithRule(args[1], action)
+		if action == permissions.DecisionAsk {
+			a.revokeSkillGrants(args[1])
+		}
 		if base.Profile() == permissions.ProfileFull {
 			a.preTrustPolicy = a.trustOffPolicy().WithRule(args[1], action)
 		} else {
 			a.preTrustPolicy = nil
 		}
-		a.setPermissionPolicy(policy)
+		a.setSessionPermissionPolicy(policy)
 		a.conversation.AppendSystem(fmt.Sprintf("permission rule: %s = %s (session)", args[1], action))
 		return a, nil
 	default:
@@ -118,7 +122,9 @@ func (a *App) setPermissionPolicy(policy *permissions.Policy) {
 		a.agent.SetPolicy(policy)
 	}
 	if a.jobs != nil {
-		a.jobs.SetPermissionPolicy(policy)
+		// A background job can outlive this turn. Its initial policy must not
+		// capture a foreground skill's temporary pre-approval.
+		a.jobs.SetPermissionPolicy(a.sessionPermissionPolicy())
 	}
 	a.refreshTopBar()
 }

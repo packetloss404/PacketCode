@@ -164,7 +164,10 @@ func (e *Engine) StartWithOptions(ctx context.Context, wf Workflow, opts RunOpti
 	e.mu.Unlock()
 
 	e.emit(run)
-	go e.drive(driverCtx, run, wf)
+	go func() {
+		defer cancel()
+		e.drive(driverCtx, run, wf)
+	}()
 	return run, nil
 }
 

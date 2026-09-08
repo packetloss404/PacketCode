@@ -200,7 +200,7 @@ func (c *Client) handshake(ctx context.Context, timeout time.Duration, info Clie
 	c.serverInfo = ir.ServerInfo
 
 	// notifications/initialized — fire-and-forget.
-	if err := c.sendNotification("notifications/initialized", map[string]any{}); err != nil {
+	if err := c.writeContext(initCtx, newNotification("notifications/initialized", map[string]any{})); err != nil {
 		return fmt.Errorf("notifications/initialized: %w", err)
 	}
 
@@ -335,7 +335,10 @@ func (c *Client) callTimed(ctx context.Context, method string, params any) (json
 	defer c.pending.Delete(id)
 
 	req := newRequest(id, method, params)
-	if err := c.write(req); err != nil {
+	if err := c.writeContext(ctx, req); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if !c.IsAlive() {
 			return nil, ErrServerExited
 		}
@@ -353,28 +356,48 @@ func (c *Client) callTimed(ctx context.Context, method string, params any) (json
 	}
 }
 
-// sendNotification writes a notification (no response expected). If the
-// underlying writer is closed because the server is dead, that's
-// reported as ErrServerExited.
-func (c *Client) sendNotification(method string, params any) error {
-	if !c.IsAlive() {
-		return ErrServerExited
+// write bounds notifications and server-request replies as well as calls.
+func (c *Client) write(msg any) error {
+	timeout := c.callTimeout
+	if timeout <= 0 {
+		timeout = defaultInitTimeoutSec * time.Second
 	}
-	n := newNotification(method, params)
-	if err := c.write(n); err != nil {
-		if !c.IsAlive() {
-			return ErrServerExited
-		}
-		return err
-	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.writeContext(ctx, msg)
 }
 
-// write serialises stdin under wmu.
-func (c *Client) write(msg any) error {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	return writeLine(c.stdin, msg)
+// A server that stops reading stdin can fill its pipe before the response
+// wait begins. Cancellation must cover both the write lock and the write.
+// A partial JSON frame cannot safely be retried, so abort that transport.
+func (c *Client) writeContext(ctx context.Context, msg any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() {
+		c.wmu.Lock()
+		defer c.wmu.Unlock()
+		if err := ctx.Err(); err != nil {
+			done <- err
+			return
+		}
+		done <- writeLine(c.stdin, msg)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		if c.cmd != nil && c.cmd.Process != nil {
+			_ = procrun.KillTree(c.cmd)
+		}
+		c.markDead(eofExit(ctx.Err()))
+		if c.stdout != nil {
+			_ = c.stdout.Close()
+		}
+		c.flushPendingExited()
+		return ctx.Err()
+	}
 }
 
 // readerLoop is the per-client reader goroutine. It dispatches responses

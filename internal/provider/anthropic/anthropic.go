@@ -619,9 +619,10 @@ func parseSSE(ctx, sctx context.Context, guard *provider.StallGuard, body io.Rea
 			return
 		}
 	}
-	if !sink.Send(provider.StreamEvent{Type: provider.EventDone, Usage: toProviderUsage(rawUsage)}) {
-		return
-	}
+	// EOF is not a Messages API completion marker. In particular, a partial
+	// tool proposal can already contain valid JSON, so promoting EOF to Done
+	// would let the agent execute it before the provider finished its reply.
+	sink.Send(provider.StreamEvent{Type: provider.EventError, Error: fmt.Errorf("anthropic stream ended before completion (missing message_stop)"), Usage: toProviderUsage(rawUsage)})
 }
 
 // mergeAnthropicUsage folds one event's usage into the running raw totals.

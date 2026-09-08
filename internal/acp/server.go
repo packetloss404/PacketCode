@@ -1214,6 +1214,7 @@ func (s *Server) handlePrompt(msg rpcMessage) {
 	go func() {
 		defer s.wg.Done()
 		defer state.workers.Done()
+		defer cancel()
 		s.runPrompt(turnCtx, msg.ID, params.SessionID, prompt, state)
 	}()
 }

@@ -252,20 +252,28 @@ func TestManager_Restart_RejectsUnknownAndDisabledServers(t *testing.T) {
 	require.ErrorContains(t, err, "disabled")
 }
 
-// TestManager_Start_ParallelSpawn uses a short delay on each stub so we
-// can prove they spawn concurrently. With 4 stubs each at 200 ms delay,
-// serial would take ~800 ms; parallel should finish well under 600 ms.
+// Every stub must enter initialize before any may finish it. Serial startup
+// cannot reach the barrier, regardless of the speed of the test machine.
 func TestManager_Start_ParallelSpawn(t *testing.T) {
 	requireStub(t)
 	logDir := t.TempDir()
+	barrierDir := t.TempDir()
+	release := filepath.Join(barrierDir, "release")
+	var readyFiles []string
 
 	servers := []ServerConfig{}
 	for i := 0; i < 4; i++ {
+		name := "p" + string(rune('a'+i))
+		ready := filepath.Join(barrierDir, name+".ready")
+		readyFiles = append(readyFiles, ready)
 		servers = append(servers, ServerConfig{
-			Name:    "p" + string(rune('a'+i)),
+			Name:    name,
 			Command: stubBinaryPath,
-			Env:     map[string]string{"PACKETCODE_STUB_DELAY_MS": "200"},
-			Enabled: true, TimeoutSec: 5,
+			Env: map[string]string{
+				"PACKETCODE_STUB_READY_FILE":   ready,
+				"PACKETCODE_STUB_RELEASE_FILE": release,
+			},
+			Enabled: true, TimeoutSec: testwait.Seconds(5 * time.Second),
 		})
 	}
 	mgr := NewManager(Config{
@@ -273,19 +281,38 @@ func TestManager_Start_ParallelSpawn(t *testing.T) {
 		LogDir:     logDir,
 		ClientInfo: ClientInfo{Name: "packetcode-test", Version: "0.0.0"},
 	})
-	defer func() { _ = mgr.Shutdown(2 * time.Second) }()
-
-	start := time.Now()
-	reports := mgr.Start(context.Background())
-	elapsed := time.Since(start)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		require.NoError(t, mgr.Shutdown(testwait.Timeout(2*time.Second)))
+	}()
+	done := make(chan []StartupReport, 1)
+	go func() { done <- mgr.Start(ctx) }()
+	testwait.For(t, 2*time.Second, "all MCP handshakes reached startup barrier", func() bool {
+		for _, ready := range readyFiles {
+			if _, err := os.Stat(ready); err != nil {
+				return false
+			}
+		}
+		return true
+	})
+	select {
+	case <-done:
+		t.Fatal("startup returned before blocked handshakes were released")
+	default:
+	}
+	require.NoError(t, os.WriteFile(release, []byte("release"), 0o600))
+	var reports []StartupReport
+	select {
+	case reports = <-done:
+	case <-time.After(testwait.Timeout(2 * time.Second)):
+		t.Fatal("startup did not finish after releasing all handshakes")
+	}
 
 	require.Len(t, reports, 4)
 	for _, r := range reports {
 		assert.Equal(t, "running", r.Status, "expected all running, got %+v", r)
 	}
-	// 4 × 200ms parallel ≈ 200-400 ms; serial would be > 800ms. Use a
-	// generous 700 ms ceiling so a slow CI machine doesn't flake.
-	assert.Less(t, elapsed, 700*time.Millisecond, "parallel spawn took %s — likely serial", elapsed)
 }
 
 // TestManager_Shutdown_AllClients confirms Shutdown closes every alive

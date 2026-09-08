@@ -21,6 +21,7 @@ import (
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/session"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -1409,7 +1410,7 @@ func (c *testClient) receive() map[string]any {
 	case err := <-c.errors:
 		require.NoError(c.t, err)
 		return nil
-	case <-time.After(3 * time.Second):
+	case <-time.After(testwait.Timeout(3 * time.Second)):
 		c.t.Fatal("timed out waiting for ACP message")
 		return nil
 	}
@@ -1431,7 +1432,7 @@ func (c *testClient) close() {
 	select {
 	case err := <-c.done:
 		require.NoError(c.t, err)
-	case <-time.After(3 * time.Second):
+	case <-time.After(testwait.Timeout(3 * time.Second)):
 		c.t.Fatal("ACP server did not stop after stdin closed")
 	}
 }
@@ -1541,7 +1542,7 @@ func (f *closingFactory) closedIDs() []string {
 // session; the close reply is deliberately not blocked on it.
 func (f *closingFactory) awaitClosed(t *testing.T, id string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testwait.Timeout(3 * time.Second))
 	for time.Now().Before(deadline) {
 		for _, closed := range f.closedIDs() {
 			if closed == id {
@@ -1714,7 +1715,7 @@ func TestServerCloseSessionUnblocksOutstandingPermission(t *testing.T) {
 	select {
 	case decision := <-decisions:
 		assert.False(t, decision.Approved, "an unanswered request must never resolve to allow")
-	case <-time.After(3 * time.Second):
+	case <-time.After(testwait.Timeout(3 * time.Second)):
 		t.Fatal("the approver never returned; callClient stayed blocked after session/close")
 	}
 	factory.inner.awaitClosed(t, sessionID)
@@ -1877,7 +1878,7 @@ func TestServerContextCancellationRunsShutdown(t *testing.T) {
 		"params": map[string]any{"cwd": workspace, "mcpServers": []any{}},
 	})
 	// The session must exist before cancelling, or the test proves nothing.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testwait.Timeout(3 * time.Second))
 	for {
 		server.stateMu.Lock()
 		count := len(server.sessions)
@@ -1893,7 +1894,7 @@ func TestServerContextCancellationRunsShutdown(t *testing.T) {
 	select {
 	case err := <-done:
 		require.NoError(t, err)
-	case <-time.After(3 * time.Second):
+	case <-time.After(testwait.Timeout(3 * time.Second)):
 		t.Fatal("Serve did not return after its context was cancelled")
 	}
 	assert.Equal(t, []string{"closable-session-1"}, factory.closedIDs(),

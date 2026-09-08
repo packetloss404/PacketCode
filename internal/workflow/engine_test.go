@@ -21,6 +21,7 @@ import (
 	"github.com/packetcode/packetcode/internal/cost"
 	"github.com/packetcode/packetcode/internal/jobs"
 	"github.com/packetcode/packetcode/internal/provider"
+	"github.com/packetcode/packetcode/internal/testwait"
 	"github.com/packetcode/packetcode/internal/tools"
 )
 
@@ -181,12 +182,17 @@ func newTestManager(t *testing.T, prov provider.Provider, opts ...func(*jobs.Con
 	}
 	mgr, _, err := jobs.NewManager(cfg)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = mgr.Shutdown(2 * time.Second) })
+	t.Cleanup(func() {
+		if err := mgr.Shutdown(testwait.Timeout(2 * time.Second)); err != nil {
+			t.Errorf("jobs manager did not shut down cleanly: %v", err)
+		}
+	})
 	return mgr
 }
 
 func waitRun(t *testing.T, e *Engine, id string, want RunState, timeout time.Duration) RunSnapshot {
 	t.Helper()
+	timeout = testwait.Timeout(timeout)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if snap, ok := e.Get(id); ok && snap.State == want {

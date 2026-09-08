@@ -101,8 +101,9 @@ type queuedInput struct {
 	Authored bool
 	Attached []string
 	// LoopID is the self-paced loop that owns this turn. See turnOptions.
-	LoopID string
-	At     time.Time
+	LoopID     string
+	SkillGrant *skills.Skill
+	At         time.Time
 }
 
 // Label is what a human should be shown for this entry. Never Text: for a
@@ -306,6 +307,7 @@ type App struct {
 	// activeSkillGrant is the permission widening skills asked for, held only
 	// for the turn that invoked it. See skillgrant.go.
 	activeSkillGrant   *skillGrant
+	skillTurnID        uint64
 	lastAgentText      string // accumulated assistant text for the current turn (loop sentinel check)
 	statusSeq          int
 	statusLineInFlight int
@@ -655,6 +657,12 @@ func (a *App) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.startNextQueuedInput()
 
 	case skillLoadedMsg:
+		if msg.applied != nil {
+			defer close(msg.applied)
+		}
+		if !a.streaming || msg.turnID != a.skillTurnID || (msg.ctx != nil && msg.ctx.Err() != nil) {
+			return a, nil
+		}
 		// The model selected a skill mid-turn. Same containment as the typed
 		// path: trusted scopes only, deny floors intact, released when the turn
 		// ends. Applied here rather than in the tool because this is the
@@ -1602,7 +1610,8 @@ type turnOptions struct {
 	// and claiming it nowhere -- which is what happened -- left agentDoneMsg
 	// with nothing to re-run, so the loop registered, listed forever, and did
 	// nothing.
-	loopID string
+	loopID     string
+	skillGrant *skills.Skill
 }
 
 func (a *App) startTurnWith(opt turnOptions) (tea.Model, tea.Cmd) {
@@ -1665,6 +1674,12 @@ func (a *App) startTurnResolved(opt turnOptions) (tea.Model, tea.Cmd) {
 	}
 
 	a.streaming = true
+	a.skillTurnID++
+	if opt.skillGrant != nil {
+		if note := a.applySkillGrant(*opt.skillGrant); note != "" {
+			a.conversation.AppendSystem("skills: " + note)
+		}
+	}
 	a.turnFailed = false
 	a.lastAgentText = ""
 	a.setOperation("thinking")
@@ -1674,6 +1689,7 @@ func (a *App) startTurnResolved(opt turnOptions) (tea.Model, tea.Cmd) {
 	// pending approval prompt. The CancelFunc is stashed on App so the
 	// key handler and EventError / agentDoneMsg paths can reach it.
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, skillTurnKey{}, a.skillTurnID)
 	a.cancelTurn = cancel
 	stream := a.agent.Run(ctx, turnText)
 
@@ -1725,12 +1741,13 @@ func (a *App) queueTurn(opt turnOptions) {
 	}
 	a.input.Reset()
 	q := queuedInput{
-		Text:     opt.text,
-		Display:  opt.display,
-		Authored: opt.authored,
-		Attached: opt.attached,
-		LoopID:   opt.loopID,
-		At:       time.Now(),
+		Text:       opt.text,
+		Display:    opt.display,
+		Authored:   opt.authored,
+		Attached:   opt.attached,
+		LoopID:     opt.loopID,
+		SkillGrant: opt.skillGrant,
+		At:         time.Now(),
 	}
 	a.queuedInputs = append(a.queuedInputs, q)
 	a.conversation.AppendQueuedUser(q.Label())
@@ -1771,12 +1788,13 @@ func (a *App) startNextQueuedInput() (tea.Model, tea.Cmd) {
 	// whole body into the pane, which is the exact thing Display exists to
 	// prevent.
 	return a.startTurnWith(turnOptions{
-		display:  next.Label(),
-		text:     next.Text,
-		emitUser: false,
-		authored: next.Authored,
-		attached: next.Attached,
-		loopID:   next.LoopID,
+		display:    next.Label(),
+		text:       next.Text,
+		emitUser:   false,
+		authored:   next.Authored,
+		attached:   next.Attached,
+		loopID:     next.LoopID,
+		skillGrant: next.SkillGrant,
 	})
 }
 
@@ -2333,13 +2351,10 @@ func (a *App) startCustomCommand(custom SlashCommand, original, cmd string) (tea
 		opt.display = opt.text
 	}
 	if custom.Skill {
-		// A human typed this, which is the consent the widening rests on. The
-		// grant is applied before the turn starts so the first tool call in it
-		// is already covered, and released when the turn ends.
+		// Carry consent with its turn through queueing and auto-compaction.
+		// Applying it here would widen an unrelated turn already running.
 		if s, ok := a.skillsRegistry().Lookup(custom.Name); ok {
-			if note := a.applySkillGrant(s); note != "" {
-				a.conversation.AppendSystem("skills: " + note)
-			}
+			opt.skillGrant = &s
 		}
 	}
 	if a.streaming {
