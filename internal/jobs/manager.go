@@ -581,18 +581,18 @@ func (m *Manager) cancelAllWithRequest(req CancelRequest, message string) int {
 
 // Shutdown cancels every active job and waits up to timeout for the
 // workers to exit. Returns an error if any worker is still running when
-// the timeout elapses (the manager still considers itself closed).
+// the timeout elapses or a job record could not be persisted. The manager
+// remains closed, but later calls still wait for workers and retry writes.
 func (m *Manager) Shutdown(timeout time.Duration) error {
 	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return m.flushAllPendingSnapshots()
-	}
+	wasClosed := m.closed
 	m.closed = true
 	m.mu.Unlock()
 
-	m.cancelAllWithRequest(CancelRequestShutdown, "app shutdown")
-	m.cancelBase()
+	if !wasClosed {
+		m.cancelAllWithRequest(CancelRequestShutdown, "app shutdown")
+		m.cancelBase()
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -1065,6 +1065,15 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 		todos: tools.NewTodoStore(),
 	}
 	m.stampSnapshotLocked(job, now, "queued", req.Prompt, false, false)
+	// Do not start work that cannot be recovered. Keep the job private until
+	// its initial record is durable, while the manager lock excludes shutdown.
+	if err := m.savePersistedSnapshotImmediate(toPersisted(job)); err != nil {
+		m.persistMu.Lock()
+		delete(m.persistPending, id)
+		m.persistMu.Unlock()
+		m.mu.Unlock()
+		return Snapshot{}, &SpawnError{Code: "persistence_failed", Reason: err.Error()}
+	}
 	// Allocate the per-job ctx and cancel func eagerly so /cancel works
 	// while the job is still in StateQueued (i.e. before its worker has
 	// acquired the semaphore).
@@ -1077,7 +1086,6 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 	m.totalSpawned++
 	m.terminalCh[id] = make(chan struct{})
 	snap := snapshotOf(job)
-	persisted := toPersisted(job)
 	subscribers := snapshotCallbacks(m.subscribers)
 	// Counted while the lock that guards m.closed is still held. Shutdown
 	// sets closed under the same lock and then calls wg.Wait, so ordering
@@ -1086,10 +1094,6 @@ func (m *Manager) Spawn(req SpawnRequest) (Snapshot, *SpawnError) {
 	// context that nothing waits for or flushes.
 	m.wg.Add(1)
 	m.mu.Unlock()
-
-	// Lifecycle transitions are sparse and recovery-critical, so persist the
-	// queued state immediately. High-frequency activity updates are coalesced.
-	_ = m.savePersistedSnapshotImmediate(persisted)
 
 	m.fanOut(snap, subscribers)
 
@@ -1415,7 +1419,6 @@ func (m *Manager) savePersistedSnapshotImmediate(p persistedJob) error {
 		p = pending
 	}
 	delete(m.persistTimers, p.ID)
-	delete(m.persistPending, p.ID)
 	err := m.savePersistedSnapshotLocked(p)
 	m.persistMu.Unlock()
 	return err
@@ -1446,7 +1449,6 @@ func (m *Manager) flushAllPendingSnapshots() error {
 		if err := m.savePersistedSnapshotLocked(p); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		delete(m.persistPending, id)
 	}
 	return firstErr
 }
@@ -1454,7 +1456,6 @@ func (m *Manager) flushAllPendingSnapshots() error {
 func (m *Manager) flushPendingSnapshot(id string) {
 	m.persistMu.Lock()
 	p, ok := m.persistPending[id]
-	delete(m.persistPending, id)
 	delete(m.persistTimers, id)
 	if ok {
 		_ = m.savePersistedSnapshotLocked(p)
@@ -1464,12 +1465,27 @@ func (m *Manager) flushPendingSnapshot(id string) {
 
 func (m *Manager) savePersistedSnapshotLocked(p persistedJob) error {
 	if p.Seq > 0 && p.Seq < m.persistSeq[p.ID] {
+		if pending, ok := m.persistPending[p.ID]; ok && pending.Seq <= m.persistSeq[p.ID] {
+			delete(m.persistPending, p.ID)
+		}
 		return nil
+	}
+	if err := savePersistedSnapshot(m.cfg.JobsDir, p); err != nil {
+		// Retain the newest failed write for the next update or shutdown to
+		// retry. A failed write must not advance the durable sequence or be
+		// forgotten before Shutdown can report the outstanding failure.
+		if pending, ok := m.persistPending[p.ID]; !ok || p.Seq >= pending.Seq {
+			m.persistPending[p.ID] = p
+		}
+		return fmt.Errorf("persist job %s: %w", p.ID, err)
 	}
 	if p.Seq > m.persistSeq[p.ID] {
 		m.persistSeq[p.ID] = p.Seq
 	}
-	return savePersistedSnapshot(m.cfg.JobsDir, p)
+	if pending, ok := m.persistPending[p.ID]; ok && pending.Seq <= p.Seq {
+		delete(m.persistPending, p.ID)
+	}
+	return nil
 }
 
 // acquirePathLock returns (creating if needed) the mutex guarding the
