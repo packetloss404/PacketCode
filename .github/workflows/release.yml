@@ -112,18 +112,7 @@ jobs:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           WINDOWS_SIGN_P12: ${{ secrets.WINDOWS_SIGN_P12 }}
           REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
-        run: |
-          {
-            echo "### Signing configuration"
-            echo
-            echo "| artifact | signed |"
-            echo "| --- | --- |"
-            echo "| checksums.txt (Sigstore) | yes — keyless, always available in this workflow |"
-            echo "| macOS binaries (Developer ID + notarization) | ${MACOS_SIGN_P12:+yes}${MACOS_SIGN_P12:-no — MACOS_SIGN_P12 is not set} |"
-            echo "| Windows binaries (Authenticode) | ${WINDOWS_SIGN_P12:+yes}${WINDOWS_SIGN_P12:-no — WINDOWS_SIGN_P12 is not set} |"
-            echo
-            echo "REQUIRE_SIGNING=${REQUIRE_SIGNING:-0}. Set the repository variable to 1 once certificates exist, and a missing one fails the release instead of shipping unsigned."
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: sh scripts/report-signing-config.sh >> "$GITHUB_STEP_SUMMARY"
 
       - uses: goreleaser/goreleaser-action@v7.2.1
         with:

@@ -175,6 +175,8 @@ jobs:
       - run: ./scripts/check-release-artifacts.sh dist
       - name: Installer signature logic
         run: bash scripts/test-install-verify.sh
+      - name: Signing summary never exposes certificates
+        run: sh scripts/test-signing-config.sh
       # Prove the built binary runs, not merely that it was produced. A
       # cross-compile that emits a broken amd64 Linux binary passes every other
       # check in this job.
