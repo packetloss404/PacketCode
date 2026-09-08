@@ -1,6 +1,12 @@
 # Packetcode Maintainer Handoff
 
-Updated: 2026-08-31
+Updated: 2026-09-08
+
+The latest security and lifecycle hardening is documented in
+[the September 8 review](docs/audit/hardening-2026-09-08.md). For routine fixes,
+test commands, and recovery during the next month, start with
+[the maintenance guide](docs/maintenance.md). The architecture notes below
+remain useful; Git and the current CI run are authoritative for shipped work.
 
 Audit baseline: `main` and `origin/main` began at `d646094` (`Merge
 fix/help-lists-commands: help names what dispatch runs`), version

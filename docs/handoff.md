@@ -1,5 +1,20 @@
 # Audit handoff
 
+## September 8 maintenance update
+
+The September 5 narrative below is historical. Its advice to upgrade the Go
+floor, wire smoke tests into CI, and resolve `collect_agent_results` approval
+metadata has already been implemented. Do not apply the old audit patches.
+CI now pins Go 1.26.8, the module floor is Go 1.26.0, and smoke tests run on all
+three supported operating systems.
+
+The [September 8 hardening review](audit/hardening-2026-09-08.md) covers the new
+permission, persistence, MCP, and secret-file regression tests. Use
+[the maintenance guide](maintenance.md) for routine work and recovery during
+the next month; use `BACKLOG.md` for larger feature decisions.
+
+## September 5 historical handoff
+
 Written 2026-09-05, at the end of the one-shot security, correctness, and
 half-built-feature audit. It covers what changed, what is deliberately still
 open, and what to do about each of those without a high-capability model

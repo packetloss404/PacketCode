@@ -3,8 +3,9 @@ package responses
 import (
 	"testing"
 
-	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 func TestStreamRequiresResponseCompleted(t *testing.T) {

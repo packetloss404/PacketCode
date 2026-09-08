@@ -6,6 +6,26 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ### Fixed
 
+- Skill grants apply when their foreground turn starts, survive session-policy
+  changes without losing user decisions, and cannot leak from queued or
+  background skill loads. Trust toggles and permission resets no longer restore
+  expired grants.
+- Command-prefix permissions handle CMD expansion and executable aliases
+  conservatively, and explicit option tokens in deny prefixes are preserved.
+- Code-intelligence tools refuse dotenv secret files, including symbol lookup
+  and discovered source files, using the same policy as native file reads.
+- MCP restart and shutdown coordinate ownership of replacement processes.
+  Blocked protocol writes honor cancellation and abort partial transports.
+- Anthropic and Responses streams require their explicit completion markers;
+  an early EOF no longer turns partial text or tool proposals into success.
+- Completed ACP prompts and workflow drivers release their child contexts.
+- Jobs reject new work when its initial record cannot be saved. Failed writes
+  remain pending for retry, and shutdown reports unresolved persistence errors
+  and still waits for workers on repeated calls.
+- Workflow and ACP tests scale asynchronous waits; MCP parallel-startup tests
+  prove overlapping handshakes with a barrier rather than an elapsed-time limit.
+- Release signing summaries report whether certificates are configured without
+  writing certificate contents into the GitHub Actions job summary.
 - Loading multiple skills, or reloading the same skill, in one turn now releases
   all skill permission grants when the turn ends. Teardown preserves the policy
   from before the first grant and the current permission profile.

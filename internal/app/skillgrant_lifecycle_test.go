@@ -8,11 +8,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/require"
+
 	"github.com/packetcode/packetcode/internal/permissions"
 	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/packetcode/packetcode/internal/skills"
 	"github.com/packetcode/packetcode/internal/tools"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSkillGrantLifecyclePreservesSessionChanges(t *testing.T) {

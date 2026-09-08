@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/packetcode/packetcode/internal/provider"
 	"github.com/stretchr/testify/require"
+
+	"github.com/packetcode/packetcode/internal/provider"
 )
 
 func TestStreamRequiresMessageStop(t *testing.T) {

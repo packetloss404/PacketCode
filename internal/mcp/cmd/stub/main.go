@@ -12,6 +12,8 @@
 //   - PACKETCODE_STUB_NAME=<name> — serverInfo.name (default "stub").
 //   - PACKETCODE_STUB_PROTOCOL_VERSION=<version> — initialize protocol version.
 //   - PACKETCODE_STUB_EXIT_AFTER_TOOLS=<code> — exit after replying tools/list.
+//   - PACKETCODE_STUB_READY_FILE / PACKETCODE_STUB_RELEASE_FILE — publish a
+//     ready marker during initialize, then wait for the release marker.
 package main
 
 import (
@@ -85,6 +87,21 @@ func main() {
 		}
 		switch r.Method {
 		case "initialize":
+			if ready, release := os.Getenv("PACKETCODE_STUB_READY_FILE"), os.Getenv("PACKETCODE_STUB_RELEASE_FILE"); ready != "" && release != "" {
+				if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(2)
+				}
+				for {
+					if _, err := os.Stat(release); err == nil {
+						break
+					} else if !os.IsNotExist(err) {
+						fmt.Fprintln(os.Stderr, err)
+						os.Exit(2)
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
 			if delayMS > 0 {
 				time.Sleep(time.Duration(delayMS) * time.Millisecond)
 			}
