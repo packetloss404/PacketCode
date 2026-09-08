@@ -22,18 +22,27 @@ const shutdownExtraTimeout = time.Second
 // the app via a name-keyed map. It is safe for concurrent use after
 // Start has returned.
 type Manager struct {
-	cfg     Config
-	mu      sync.RWMutex
-	clients map[string]*Client
-	reports []StartupReport
+	cfg        Config
+	mu         sync.RWMutex
+	clients    map[string]*Client
+	reports    []StartupReport
+	closed     bool
+	restarting map[string]bool
+	operations sync.WaitGroup
+	stopCtx    context.Context
+	stop       context.CancelFunc
 }
 
 // NewManager constructs a Manager. Start() must be called before
 // Clients() / Client() will return anything useful.
 func NewManager(cfg Config) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		cfg:     cfg,
-		clients: map[string]*Client{},
+		cfg:        cfg,
+		clients:    map[string]*Client{},
+		restarting: map[string]bool{},
+		stopCtx:    ctx,
+		stop:       cancel,
 	}
 }
 
@@ -47,6 +56,21 @@ func (m *Manager) Start(ctx context.Context) []StartupReport {
 	servers := m.cfg.Servers
 	reports := make([]StartupReport, len(servers))
 	clients := make([]*Client, len(servers))
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		for i, sc := range servers {
+			reports[i] = startupReportFor(sc, "failed", nil, fmt.Errorf("mcp: manager is shut down"))
+		}
+		return reports
+	}
+	m.operations.Add(1)
+	m.mu.Unlock()
+	defer m.operations.Done()
+	ctx, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(m.stopCtx, cancel)
+	defer stopCancel()
+	defer cancel()
 
 	sem := make(chan struct{}, maxParallelStartup)
 	var wg sync.WaitGroup
@@ -95,6 +119,16 @@ func (m *Manager) Start(ctx context.Context) []StartupReport {
 	wg.Wait()
 
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		for i, c := range clients {
+			if c != nil {
+				_ = c.Close(2 * time.Second)
+			}
+			reports[i] = startupReportFor(servers[i], "failed", nil, fmt.Errorf("mcp: manager shut down during startup"))
+		}
+		return reports
+	}
 	oldClients := make([]*Client, 0, len(m.clients))
 	for _, c := range m.clients {
 		if c != nil {
@@ -167,9 +201,28 @@ func (m *Manager) Restart(ctx context.Context, name string) (StartupReport, *Cli
 	}
 
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return StartupReport{}, nil, nil, fmt.Errorf("mcp: manager is shut down")
+	}
+	if m.restarting[name] {
+		m.mu.Unlock()
+		return StartupReport{}, nil, nil, fmt.Errorf("mcp: server %s is already restarting", name)
+	}
+	m.restarting[name] = true
+	m.operations.Add(1)
 	previous := m.clients[name]
-	delete(m.clients, name)
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.restarting, name)
+		m.mu.Unlock()
+		m.operations.Done()
+	}()
+	ctx, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(m.stopCtx, cancel)
+	defer stopCancel()
+	defer cancel()
 
 	if previous != nil {
 		// A close error here means the old process would not exit on its
@@ -187,6 +240,11 @@ func (m *Manager) Restart(ctx context.Context, name string) (StartupReport, *Cli
 	}
 	report := startupReportFor(*server, "running", client, nil)
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		_ = client.Close(2 * time.Second)
+		return StartupReport{}, nil, previous, fmt.Errorf("mcp: manager shut down during restart")
+	}
 	m.clients[name] = client
 	m.mu.Unlock()
 	m.replaceReport(report)
@@ -300,24 +358,26 @@ func looksSecretKey(k string) bool {
 // error listing per-client failures, or nil if every client closed
 // cleanly.
 func (m *Manager) Shutdown(timeout time.Duration) error {
-	m.mu.RLock()
+	m.mu.Lock()
+	m.closed = true
+	m.stop()
 	clients := make([]*Client, 0, len(m.clients))
 	for _, c := range m.clients {
 		if c != nil {
 			clients = append(clients, c)
 		}
 	}
-	m.mu.RUnlock()
-
-	if len(clients) == 0 {
-		return nil
-	}
+	m.mu.Unlock()
 
 	type result struct {
 		name string
 		err  error
 	}
-	resCh := make(chan result, len(clients))
+	resCh := make(chan result, len(clients)+1)
+	go func() {
+		m.operations.Wait()
+		resCh <- result{name: "restarts"}
+	}()
 	for _, c := range clients {
 		c := c
 		go func() {
@@ -329,7 +389,7 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	deadline := time.After(timeout + shutdownExtraTimeout)
 	var errs []string
 	collected := 0
-	for collected < len(clients) {
+	for collected < len(clients)+1 {
 		select {
 		case r := <-resCh:
 			collected++
@@ -337,8 +397,8 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 				errs = append(errs, fmt.Sprintf("%s: %v", r.name, r.err))
 			}
 		case <-deadline:
-			errs = append(errs, fmt.Sprintf("%d client(s) did not close within %s", len(clients)-collected, timeout+shutdownExtraTimeout))
-			collected = len(clients) // bail
+			errs = append(errs, fmt.Sprintf("MCP shutdown did not finish within %s", timeout+shutdownExtraTimeout))
+			collected = len(clients) + 1 // bail
 		}
 	}
 	if len(errs) > 0 {
