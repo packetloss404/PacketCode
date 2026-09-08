@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/packetcode/packetcode/internal/permissions"
@@ -35,7 +36,7 @@ import (
 //     shell. That is the one case where a foreign tool name is translated,
 //     because the scope travels with it: see skills.shellToolName.
 type skillGrant struct {
-	skill    string
+	skills   []string
 	tools    []string
 	previous *permissions.Policy
 }
@@ -120,7 +121,21 @@ func (a *App) applySkillGrant(s skills.Skill) string {
 
 	var note strings.Builder
 	if len(applied) > 0 {
-		a.activeSkillGrant = &skillGrant{skill: s.Name, tools: applied, previous: base}
+		// All grants in a turn share the original policy snapshot. Capturing
+		// an already-widened policy on a later load would restore an earlier
+		// skill's permissions at teardown, leaving them active indefinitely.
+		if a.activeSkillGrant == nil {
+			a.activeSkillGrant = &skillGrant{previous: base}
+		}
+		grant := a.activeSkillGrant
+		if !slices.Contains(grant.skills, s.Name) {
+			grant.skills = append(grant.skills, s.Name)
+		}
+		for _, label := range applied {
+			if !slices.Contains(grant.tools, label) {
+				grant.tools = append(grant.tools, label)
+			}
+		}
 		a.setPermissionPolicy(policy)
 		fmt.Fprintf(&note, "%s pre-approved %s for this turn (an explicit deny still applies)",
 			s.Name, strings.Join(applied, ", "))
@@ -164,6 +179,6 @@ func (a *App) releaseSkillGrant() string {
 	}
 	a.activeSkillGrant = nil
 	a.setPermissionPolicy(grant.previous.WithProfile(a.currentPermissionPolicy().Profile()))
-	return fmt.Sprintf("%s's pre-approval of %s has ended with the turn",
-		grant.skill, strings.Join(grant.tools, ", "))
+	return fmt.Sprintf("pre-approval from %s for %s has ended with the turn",
+		strings.Join(grant.skills, ", "), strings.Join(grant.tools, ", "))
 }

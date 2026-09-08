@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -239,6 +240,50 @@ func TestSkillGrant_ScopedGrantReleasedWhenTheTurnEnds(t *testing.T) {
 
 	assert.Equal(t, permissions.DecisionAsk, decisionForCommand(r.app, "gh pr list"),
 		"a scoped grant outlived its turn")
+}
+
+func TestSkillGrant_MultipleLoadsReleasedTogether(t *testing.T) {
+	for _, repeat := range []bool{false, true} {
+		t.Run(fmt.Sprintf("repeat=%v", repeat), func(t *testing.T) {
+			r := grantRig(t, "execute_command", "write_file")
+			base := permissions.DefaultPolicy().WithProfile(permissions.ProfileAsk).
+				WithRule("read_file", permissions.DecisionDeny)
+			r.app.setPermissionPolicy(base)
+			r.app.applySkillGrant(userSkill("github", "Bash(gh:*)"))
+			if repeat {
+				r.app.applySkillGrant(userSkill("github", "Bash(gh:*)"))
+			} else {
+				r.app.applySkillGrant(userSkill("build", "Bash(npm:*)", "write_file"))
+				require.Equal(t, permissions.DecisionAllow, decisionForCommand(r.app, "npm test"))
+				require.Equal(t, permissions.DecisionAllow, decisionFor(r.app, "write_file"))
+			}
+			require.Equal(t, permissions.DecisionAllow, decisionForCommand(r.app, "gh pr list"))
+			note := r.app.releaseSkillGrant()
+			assert.Contains(t, note, "github")
+			if !repeat {
+				assert.Contains(t, note, "build")
+				assert.Contains(t, note, "write_file")
+			}
+			assert.Equal(t, base.Rules(), r.app.currentPermissionPolicy().Rules())
+			assert.Equal(t, permissions.DecisionAsk, decisionForCommand(r.app, "gh pr list"))
+			assert.Equal(t, permissions.DecisionAsk, decisionForCommand(r.app, "npm test"))
+			assert.Equal(t, permissions.DecisionAsk, decisionFor(r.app, "write_file"))
+			assert.Nil(t, r.app.activeSkillGrant)
+			assert.Empty(t, r.app.releaseSkillGrant())
+		})
+	}
+}
+
+func TestSkillGrant_MultipleLoadsPreserveCurrentProfile(t *testing.T) {
+	r := grantRig(t, "execute_command")
+	r.app.setPermissionPolicy(permissions.DefaultPolicy())
+	r.app.applySkillGrant(userSkill("github", "Bash(gh:*)"))
+	r.app.applySkillGrant(userSkill("build", "Bash(npm:*)"))
+	r.app.setPermissionPolicy(r.app.currentPermissionPolicy().WithProfile(permissions.ProfileSafe))
+	r.app.releaseSkillGrant()
+	assert.Equal(t, permissions.ProfileSafe, r.app.currentPermissionPolicy().Profile())
+	assert.Empty(t, r.app.currentPermissionPolicy().Rules())
+	assert.Equal(t, permissions.DecisionDeny, decisionForCommand(r.app, "gh pr list"))
 }
 
 // A scope this file cannot turn into a rule grants nothing rather than falling

@@ -303,7 +303,7 @@ type App struct {
 	// cancellation. A self-paced loop reads it to stop rather than re-run:
 	// Ctrl+C could not end a loop, and a 401 became 25 back-to-back retries.
 	turnFailed bool
-	// activeSkillGrant is the permission widening a skill asked for, held only
+	// activeSkillGrant is the permission widening skills asked for, held only
 	// for the turn that invoked it. See skillgrant.go.
 	activeSkillGrant   *skillGrant
 	lastAgentText      string // accumulated assistant text for the current turn (loop sentinel check)

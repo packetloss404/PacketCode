@@ -4,6 +4,15 @@ All notable packetcode changes are recorded here. The project is pre-1.0; `Unrel
 
 ## [Unreleased]
 
+### Fixed
+
+- Loading multiple skills, or reloading the same skill, in one turn now releases
+  all skill permission grants when the turn ends. Teardown preserves the policy
+  from before the first grant and the current permission profile.
+- ACP prompt cleanup now clears the active flag only once. A completed prompt
+  can no longer clear a subsequent prompt's flag after sending its response,
+  which could admit overlapping prompts or cause cancellation to be ignored.
+
 ### Changed
 
 - `allowed-tools` narrowed to particular commands is now honoured for the
