@@ -397,7 +397,7 @@ func collectSymbols(ctx context.Context, root, targetPath, glob, query string, l
 	}
 	start := rootAbs
 	if strings.TrimSpace(targetPath) != "" {
-		start, err = resolveExistingInRoot(root, targetPath)
+		start, err = resolveCodeIntelPath(root, targetPath)
 		if err != nil {
 			return nil, false, err
 		}
@@ -629,7 +629,7 @@ func collectReferences(ctx context.Context, root, targetPath, symbol, glob strin
 	}
 	start := rootAbs
 	if strings.TrimSpace(targetPath) != "" {
-		start, err = resolveExistingInRoot(root, targetPath)
+		start, err = resolveCodeIntelPath(root, targetPath)
 		if err != nil {
 			return nil, false, err
 		}
@@ -721,7 +721,7 @@ func collectDiagnostics(ctx context.Context, root, targetPath, glob string, limi
 	engines := codeIntelEngines{Diagnostics: make(map[string]bool)}
 	start := rootAbs
 	if strings.TrimSpace(targetPath) != "" {
-		start, err = resolveExistingInRoot(root, targetPath)
+		start, err = resolveCodeIntelPath(root, targetPath)
 		if err != nil {
 			return nil, engines, false, err
 		}
@@ -885,7 +885,7 @@ func resolveSymbolAtPosition(root, symbol, path string, line, column, character 
 	if path == "" || line <= 0 {
 		return "", fmt.Errorf("symbol or path and line are required")
 	}
-	resolved, err := resolveExistingInRoot(root, path)
+	resolved, err := resolveCodeIntelPath(root, path)
 	if err != nil {
 		return "", err
 	}
@@ -1083,7 +1083,29 @@ func symbolMatchesDefinition(query, name, detail string) bool {
 	return false
 }
 
+// Code intelligence can disclose bytes through inferred identifiers, snippets,
+// and parser errors. Apply the same secret-file boundary as read_file before
+// any of those reads, including when a caller supplies a symlink alias.
+func resolveCodeIntelPath(root, name string) (string, error) {
+	if IsSecretFilePath(name) {
+		return "", fmt.Errorf("%s", secretFileRefusal("code intelligence", name))
+	}
+	resolved, err := resolveExistingInRoot(root, name)
+	if err != nil {
+		return "", err
+	}
+	if IsSecretFilePath(resolved) {
+		return "", fmt.Errorf("%s", secretFileRefusal("code intelligence", name))
+	}
+	return resolved, nil
+}
+
 func isCodeIntelSource(path string) bool {
+	// Directory scans do not call resolveCodeIntelPath for each entry. In
+	// particular, .env.go must not become source just because of its suffix.
+	if IsSecretFilePath(path) {
+		return false
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".java", ".kt", ".cs", ".c", ".h", ".cpp", ".hpp", ".rb", ".php", ".swift":
 		return true

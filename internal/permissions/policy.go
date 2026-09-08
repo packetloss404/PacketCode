@@ -541,6 +541,11 @@ var commandIndirection = map[string]bool{
 	"deno": true, "bun": true, "php": true, "pwsh": true, "powershell": true,
 	"cmd": true, "busybox": true, "su": true, "runuser": true, "chroot": true,
 	"setsid": true, "stdbuf": true, "time": true, "strace": true,
+	// Shell builtins and control-flow words can introduce another command
+	// without a separator that splitSimpleCommands recognises.
+	"call": true, "start": true, "if": true, "then": true, "else": true,
+	"elif": true, "for": true, "while": true, "until": true, "do": true,
+	"case": true,
 }
 
 // quoteChars are the characters a shell uses to build a word out of pieces.
@@ -569,7 +574,21 @@ func unquoteField(field string) string {
 // fieldUnresolvable reports whether a word could still change meaning after
 // the unquoting above: an escape, a variable, or a substitution.
 func fieldUnresolvable(field string) bool {
-	return strings.ContainsAny(field, "\\$`")
+	return strings.ContainsAny(field, "\\$`%^!*?[")
+}
+
+// Deny comparisons cover both supported shells. A policy may be used on a
+// Windows host with a POSIX SSH backend, so runtime.GOOS cannot select the
+// command language. Case and executable suffix aliases only tighten a deny;
+// allow rules continue to require the exact spelling the user configured.
+func denyExecutableName(name string) string {
+	name = strings.ToLower(name)
+	for _, suffix := range []string{".exe", ".com", ".cmd", ".bat"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+	return name
 }
 
 // wordAppearsLater reports whether any of the words, unquoted, equals want,
@@ -577,7 +596,7 @@ func fieldUnresolvable(field string) bool {
 func wordAppearsLater(fields []string, want string) bool {
 	for _, field := range fields {
 		got := unquoteField(field)
-		if got == want || fieldUnresolvable(got) {
+		if strings.EqualFold(got, want) || fieldUnresolvable(got) {
 			return true
 		}
 	}
@@ -595,7 +614,7 @@ func prefixOutcomeForFields(fields, prefix []string) prefixOutcome {
 		return prefixNoMatch
 	}
 	head := unquoteField(fields[0])
-	if head != prefix[0] {
+	if denyExecutableName(head) != denyExecutableName(prefix[0]) {
 		if fieldUnresolvable(head) {
 			// `\git push` or `$GIT push`: the first word is not knowable.
 			return prefixIndeterminate
@@ -608,7 +627,9 @@ func prefixOutcomeForFields(fields, prefix []string) prefixOutcome {
 	skippedOption := false
 	i := 1
 	for _, want := range prefix[1:] {
-		for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+		// A flag can itself be part of the deny prefix (for example rm -rf).
+		// Do not skip the very token the rule is trying to prohibit.
+		for i < len(fields) && strings.HasPrefix(fields[i], "-") && !strings.EqualFold(unquoteField(fields[i]), want) {
 			skippedOption = true
 			i++
 		}
@@ -617,7 +638,7 @@ func prefixOutcomeForFields(fields, prefix []string) prefixOutcome {
 			return prefixNoMatch
 		}
 		got := unquoteField(fields[i])
-		if got != want {
+		if !strings.EqualFold(got, want) {
 			if fieldUnresolvable(got) {
 				return prefixIndeterminate
 			}
@@ -650,7 +671,11 @@ func commandPrefixDenyOutcome(params json.RawMessage, prefix []string) prefixOut
 	if !ok {
 		return prefixNoMatch
 	}
-	indeterminate := false
+	// Expansions can introduce whole commands, not just change the word in
+	// which they occur: cmd.exe reparses '&' supplied by %VARIABLE%. POSIX
+	// globbing can likewise turn `git p*` into `git push`. We cannot resolve
+	// either from the request, including when they occur in an unrelated word.
+	indeterminate := strings.ContainsAny(command, "%^!*?[")
 	for _, segment := range splitSimpleCommands(command) {
 		fields := segment.fields
 		if segment.redirectTarget && len(fields) > 0 {
@@ -668,7 +693,7 @@ func commandPrefixDenyOutcome(params json.RawMessage, prefix []string) prefixOut
 			indeterminate = true
 		}
 		head := unquoteField(strings.TrimPrefix(fields[0], "$"))
-		if commandIndirection[head] || isScriptPath(head) {
+		if commandIndirection[denyExecutableName(head)] || isScriptPath(head) {
 			indeterminate = true
 		}
 	}
@@ -717,7 +742,8 @@ func splitSimpleCommands(command string) []commandSegment {
 // A deny rule cannot see what `./deploy.sh` runs, so invoking a script is the
 // same class of indirection as invoking an interpreter.
 func isScriptPath(field string) bool {
-	return strings.ContainsAny(field, "/\\")
+	lower := strings.ToLower(field)
+	return strings.ContainsAny(field, "/\\") || strings.HasSuffix(lower, ".bat") || strings.HasSuffix(lower, ".cmd")
 }
 
 // stripEnvAssignments drops leading NAME=value words so `FOO=bar git push`
@@ -745,7 +771,7 @@ func commandPrefixMatches(params json.RawMessage, prefix []string) bool {
 	// authorize a larger shell program assembled with control operators,
 	// redirections, substitutions, or newlines. Exact command rules remain
 	// available when a user deliberately approves such a program verbatim.
-	if strings.ContainsAny(command, ";&|<>`$()\n\r") {
+	if strings.ContainsAny(command, ";&|<>`$()\n\r%^!") {
 		return false
 	}
 	fields := strings.Fields(command)
