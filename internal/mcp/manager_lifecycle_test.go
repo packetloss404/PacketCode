@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,11 +20,14 @@ type heldMCPClose struct {
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
+	hold    atomic.Bool
 }
 
 func (w *heldMCPClose) Close() error {
-	w.once.Do(func() { close(w.entered) })
-	<-w.release
+	if w.hold.Load() {
+		w.once.Do(func() { close(w.entered) })
+		<-w.release
+	}
 	return w.WriteCloser.Close()
 }
 
@@ -32,11 +36,18 @@ func lifecycleManager(t *testing.T) (*Manager, *heldMCPClose) {
 	requireStub(t)
 	m := NewManager(Config{Servers: []ServerConfig{{Name: "lifecycle", Command: stubBinaryPath, Enabled: true, TimeoutSec: 5}}, LogDir: t.TempDir()})
 	t.Cleanup(func() { require.NoError(t, m.Shutdown(testwait.Timeout(time.Second))) })
-	reports := m.Start(context.Background())
-	require.Equal(t, "running", reports[0].Status, reports[0].Err)
-	c, _ := m.Client("lifecycle")
-	gate := &heldMCPClose{WriteCloser: c.stdin, entered: make(chan struct{}), release: make(chan struct{})}
-	c.stdin = gate
+	// Install the wrapper before the client starts its reader and reaper. A
+	// live client's pipe fields are immutable and cannot be swapped safely.
+	cmd, stdin, stdout, logFile, err := spawnServerProcess(m.cfg.Servers[0], m.cfg.LogDir)
+	require.NoError(t, err)
+	gate := &heldMCPClose{WriteCloser: stdin, entered: make(chan struct{}), release: make(chan struct{})}
+	c, err := newClientFromIO(context.Background(), "lifecycle", gate, stdout, logFile, cmd, testwait.Timeout(time.Second), m.cfg.ClientInfo)
+	require.NoError(t, err)
+	// Handshake failures must be able to close the pipe before the test has
+	// an opportunity to release the barrier.
+	gate.hold.Store(true)
+	m.clients[c.Name()] = c
+	m.reports = []StartupReport{startupReportFor(m.cfg.Servers[0], "running", c, nil)}
 	return m, gate
 }
 

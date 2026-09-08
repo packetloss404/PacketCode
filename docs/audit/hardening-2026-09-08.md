@@ -41,6 +41,12 @@ passed three consecutive race-enabled runs. The integrated suites ran without
 a competing linter after two load-sensitive test assertions were corrected.
 The published commit and its CI result are recorded in the completion message
 and Git history.
+
+The first hardening push passed 15 of 16 CI jobs. Linux's race-enabled suite
+caught a data race in the new MCP test fixture: it replaced a running client's
+stdin wrapper while the reader could access it. The follow-up constructs the
+gated client before publishing it to the manager; production transport fields
+remain immutable after startup. The final CI run verifies that correction.
 Tests use local fake providers/servers and synthetic secrets, not paid model
 calls or production credentials. Live-provider protocol drift, interactive
 terminal behavior and external PacketADE deployment assumptions remain outside
